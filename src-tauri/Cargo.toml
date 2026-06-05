@@ -1,0 +1,19 @@
+[package]
+name = "life-hotel-automation-hub"
+version = "0.1.0"
+description = "Life Hotel Automation Hub"
+authors = ["Life Hotel"]
+edition = "2021"
+
+[lib]
+name = "life_hotel_automation_hub_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }

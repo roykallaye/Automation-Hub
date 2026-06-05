@@ -1,0 +1,26 @@
+/node_modules/
+/dist/
+/src-tauri/target/
+/src-tauri/gen/
+/.idea/
+/.vscode/
+
+# Local runtime and logs
+*.log
+*.tmp
+
+# Secrets and OAuth tokens
+.env
+.env.*
+!.env.example
+*token*.json
+*secret*.json
+*credential*.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# OS files
+Thumbs.db
+.DS_Store
