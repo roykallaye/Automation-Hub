@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { FileText, History } from "lucide-react";
 
 import type { AppConfigStatus, LatestLog, RunSummary } from "../types";
 import { DeveloperDetails } from "./DeveloperDetails";
@@ -20,9 +20,14 @@ export function DetailsPanel({
   onRefresh: () => void;
 }) {
   return (
-    <aside className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+    <aside className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-slate-950">Last run</h2>
+        <div className="flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+            <History className="h-5 w-5" />
+          </div>
+          <h2 className="text-xl font-semibold text-slate-950">Last run</h2>
+        </div>
         <button
           className="rounded-md border border-white/70 bg-white/60 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
@@ -35,14 +40,16 @@ export function DetailsPanel({
         <div className="space-y-5">
           <div>
             <p className="text-sm font-medium text-teal-800">{summary.automation_name}</p>
-            <StatusPill status={summary.status} label={summary.status} compact />
+            <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
           </div>
 
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <Metric label="Start" value={formatDate(summary.start_time)} />
             <Metric label="End" value={formatDate(summary.end_time)} />
             <Metric label="Duration" value={formatDuration(summary.duration_ms)} />
-            <Metric label="Technical code" value={String(summary.exit_code)} />
+            {showDeveloperDetails && (
+              <Metric label="Technical code" value={String(summary.exit_code)} />
+            )}
           </dl>
 
           <div>
@@ -54,7 +61,9 @@ export function DetailsPanel({
                   className="flex items-center justify-between rounded-md bg-white/55 px-3 py-2 text-sm"
                 >
                   <span className="font-medium text-slate-800">{step.name}</span>
-                  <span className="font-mono text-xs text-slate-600">{step.exit_code}</span>
+                  {showDeveloperDetails && (
+                    <span className="font-mono text-xs text-slate-600">{step.exit_code}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -72,14 +81,16 @@ export function DetailsPanel({
           </details>
         </div>
       ) : (
-        <div className="rounded-md border border-white/70 bg-white/55 p-4 text-sm font-medium text-slate-700">
-          No run yet.
+        <div className="rounded-lg border border-white/70 bg-white/60 p-5 text-sm font-medium leading-6 text-slate-700">
+          No run yet. When an automation finishes, FlowHost will show the result here.
         </div>
       )}
 
-      <div className="mt-5 border-t border-white/60 pt-5">
-        <p className="mb-3 text-sm font-semibold text-slate-800">Support logs</p>
-        <div className="space-y-2">
+      <details className="mt-5 border-t border-white/60 pt-5">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          Support logs
+        </summary>
+        <div className="mt-3 space-y-2">
           {latestLogs.map((log) => (
             <button
               key={log.key}
@@ -92,11 +103,17 @@ export function DetailsPanel({
             </button>
           ))}
         </div>
-      </div>
+      </details>
 
       {showDeveloperDetails && <DeveloperDetails configStatus={configStatus} />}
     </aside>
   );
+}
+
+function resultLabel(status: RunSummary["status"]) {
+  if (status === "success") return "Completed";
+  if (status === "warning") return "Needs attention";
+  return "Needs attention";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

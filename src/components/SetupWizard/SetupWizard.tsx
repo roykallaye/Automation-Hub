@@ -16,10 +16,13 @@ import { useMemo, useState } from "react";
 import type {
   HubConfig,
   PreflightReport,
+  PreflightItem,
   SaveSetupResult,
   SetupPreview,
+  WorkflowPreflight,
   WorkspaceInitResult,
 } from "../../types";
+import { staffMessage } from "../../messages";
 import { buildConfigPreview } from "./configPreview";
 import {
   createRuleId,
@@ -65,7 +68,7 @@ export function SetupWizard({
 }: {
   config?: HubConfig | null;
   onClose: () => void;
-  onSetupSaved: () => void;
+  onSetupSaved: () => void | Promise<void>;
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
@@ -213,6 +216,7 @@ export function SetupWizard({
             : `${created} created, ${alreadyExists} already existed. Existing files were left unchanged.`,
           details: result,
         });
+        await onSetupSaved();
       } else if (action === "save") {
         const result = await invoke<SaveSetupResult>("save_setup_config", {
           draft,
@@ -221,15 +225,16 @@ export function SetupWizard({
         const blocking = result.validation.workflows.filter(
           (workflow) => workflow.commandName && !workflow.canRun,
         ).length;
+        const guidance = validationGuidance(result.validation);
         setSetupResult({
           kind: blocking ? "warning" : "success",
-          title: blocking ? "Saved config, setup not ready yet" : "Setup ready",
+          title: blocking ? "Saved setup, one step remains" : "Setup ready",
           message: blocking
-            ? `Saved config and created ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"}. ${blocking} workflow${blocking === 1 ? "" : "s"} still need attention.`
-            : `Saved config. ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`,
+            ? `${guidance} ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`
+            : `Setup saved. ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`,
           details: result,
         });
-        onSetupSaved();
+        await onSetupSaved();
       } else {
         const result = await invoke<PreflightReport>("validate_setup");
         const blocking = result.workflows.filter(
@@ -237,12 +242,13 @@ export function SetupWizard({
         ).length;
         setSetupResult({
           kind: blocking ? "warning" : "success",
-          title: blocking ? "Setup needs attention" : "Setup check complete",
+          title: blocking ? "Setup needs one more step" : "Setup check passed",
           message: blocking
-            ? `${blocking} workflow${blocking === 1 ? "" : "s"} cannot run yet.`
-            : "FlowHost setup checks completed.",
+            ? validationGuidance(result)
+            : "Setup is ready. Go to Automations when you want to run workflows.",
           details: result,
         });
+        await onSetupSaved();
       }
     } catch (error) {
       setSetupResult({
@@ -316,7 +322,7 @@ export function SetupWizard({
           />
         )}
 
-        <div className="flex items-center justify-between rounded-lg border border-white/60 bg-white/48 p-4 shadow-glass backdrop-blur-xl">
+        <div className="flex items-center justify-between rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
           <button
             className="rounded-md border border-white/70 bg-white/65 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
             disabled={isFirst}
@@ -345,6 +351,54 @@ export function SetupWizard({
   );
 }
 
+function validationGuidance(report: PreflightReport) {
+  const workflow = report.workflows.find(
+    (current) => current.commandName && !current.canRun,
+  );
+  if (!workflow) return "Setup is ready.";
+
+  const item = firstBlockingItem(report, workflow);
+  if (!item) return staffMessage(workflow.message, workflow.status, workflow.key);
+
+  if (item.key === "automationConfigPath") {
+    return "Folders may be ready. Save setup to finish.";
+  }
+  if (item.key === "copyScansioniScript" || item.key === "ocrPreprocessingScript") {
+    return "Setup saved. Some scan/OCR tools are not configured yet.";
+  }
+  if (item.itemType === "script") {
+    return "Setup saved. Some automation tools are not configured yet.";
+  }
+  if (item.key === "scansioniNetworkShare") {
+    return "Setup saved. The shared scan folder is not reachable yet.";
+  }
+  if (item.itemType === "folder") {
+    return "Setup saved. One folder still needs attention.";
+  }
+  if (item.key === "gmailTokenFolder" || item.key === "gmailTokenAlignment") {
+    return "Setup saved. Gmail sign-in setup still needs attention.";
+  }
+  if (item.key === "pythonExecutable") {
+    return "Setup saved. Python is not available yet.";
+  }
+  return staffMessage(item.message, item.status, item.key);
+}
+
+function firstBlockingItem(report: PreflightReport, workflow: WorkflowPreflight) {
+  return (
+    workflow.checkKeys
+      .map((key) => report.items.find((item) => item.key === key))
+      .find(isBlockingPreflightItem) ?? null
+  );
+}
+
+function isBlockingPreflightItem(item: PreflightItem | undefined): item is PreflightItem {
+  if (!item) return false;
+  return ["missingConfiguration", "missingScript", "missingFolder", "permissionProblem"].includes(
+    item.status,
+  );
+}
+
 function normalizeDialogSelection(selected: string | string[] | null) {
   if (Array.isArray(selected)) return selected[0] ?? null;
   return selected;
@@ -362,12 +416,12 @@ function WelcomeStep() {
     <SetupStep
       icon={<Sparkles className="h-6 w-6" />}
       title="Set up FlowHost"
-      helper="FlowHost helps hotel staff prepare office automations in a safer, clearer workspace."
+      helper="A few guided steps prepare FlowHost for this hotel."
     >
       <div className="grid gap-3 md:grid-cols-3">
-        <InfoCard title="Drafts only" text="FlowHost creates Gmail drafts only. It never sends emails automatically." />
-        <InfoCard title="Safe by design" text="High-impact actions ask for confirmation before they run." />
-        <InfoCard title="Setup first" text="This guide collects details only. It will not create folders or save files yet." />
+        <InfoCard title="Drafts only" text="No emails are sent automatically." />
+        <InfoCard title="Confirm first" text="Important actions ask before they run." />
+        <InfoCard title="Guided setup" text="Preview, create folders, then save when ready." />
       </div>
     </SetupStep>
   );
@@ -421,7 +475,7 @@ function WorkspaceStep({
     <SetupStep
       icon={<FolderTree className="h-6 w-6" />}
       title="Workspace"
-      helper="Choose where FlowHost should later keep working folders. This is text only for now."
+      helper="Choose where FlowHost keeps its working folders."
     >
       <PathField
         label="Workspace folder"
@@ -443,17 +497,20 @@ function FolderPreviewStep({ draft }: { draft: SetupDraft }) {
     <SetupStep
       icon={<FolderTree className="h-6 w-6" />}
       title="Folder preview"
-      helper="These folders will be created in a later phase. Nothing is created now."
+      helper="These folders keep daily work organized."
     >
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="rounded-lg bg-white/60 p-4">
+        <p className="mb-3 text-sm font-semibold text-slate-900">{draft.workspaceBase}</p>
+        <div className="grid gap-2 md:grid-cols-2">
         {workspaceFolders(draft).map((folder) => (
-          <div key={folder.relativePath} className="rounded-md bg-white/60 p-3">
-            <p className="text-sm font-semibold text-slate-900">{folder.relativePath}</p>
-            <p className="mt-1 break-words font-mono text-xs leading-5 text-slate-600">
+          <div key={folder.relativePath} className="rounded-md border border-white/70 bg-white/70 p-3">
+            <p className="text-sm font-semibold text-slate-900">/{folder.relativePath}</p>
+            <p className="mt-1 break-words text-xs font-medium leading-5 text-slate-600">
               {folder.fullPath}
             </p>
           </div>
         ))}
+        </div>
       </div>
     </SetupStep>
   );
@@ -474,7 +531,7 @@ function GmailStep({
     <SetupStep
       icon={<Mail className="h-6 w-6" />}
       title="Gmail drafts"
-      helper="FlowHost creates Gmail drafts only. No emails are sent automatically."
+      helper="FlowHost prepares drafts for review. No emails are sent automatically."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <FieldLabel label="Draft subject">
@@ -520,7 +577,7 @@ function GmailStep({
         </div>
       </details>
       <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
-        Google sign-in may be required later when the real workflow runs.
+        Google sign-in may be needed later.
       </p>
     </SetupStep>
   );
@@ -543,7 +600,7 @@ function InvoiceRulesStep({
     <SetupStep
       icon={<ReceiptText className="h-6 w-6" />}
       title="Invoice rules"
-      helper="Tell FlowHost which invoice files to look for and how draft recipients should be matched."
+      helper="Match invoice text to the right draft recipient."
     >
       <FieldLabel label="Invoice input pattern">
         <input
@@ -613,7 +670,7 @@ function ContractsStep({
     <SetupStep
       icon={<ScanText className="h-6 w-6" />}
       title="Contracts and scans"
-      helper="Collect the scan and signed-contract details FlowHost will use later."
+      helper="Choose where scanned files and signed contracts belong."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <FieldLabel label="Contract year">
@@ -679,7 +736,7 @@ function SafetyStep({
     <SetupStep
       icon={<ShieldCheck className="h-6 w-6" />}
       title="Safety"
-      helper="Choose safe defaults before any real workflow is connected."
+      helper="Keep first runs cautious and support output private."
     >
       <div className="grid gap-3">
         <ToggleCard
@@ -725,12 +782,12 @@ function ReviewStep({
     <SetupStep
       icon={<FileCheck2 className="h-6 w-6" />}
       title="Review"
-      helper="Check the setup draft. Nothing will be saved yet."
+      helper="Check the setup before creating folders or saving."
     >
       <div className="grid gap-3 md:grid-cols-2">
         <SummaryCard title="Hotel" value={draft.hotelDisplayName || "Not set"} />
         <SummaryCard title="Workspace" value={draft.workspaceBase || "Not set"} />
-        <SummaryCard title="Gmail drafts" value={draft.gmailSubject || "Not set"} />
+        <SummaryCard title="Gmail drafts" value="Drafts only. No automatic sending." />
         <SummaryCard title="Invoice rules" value={`${filledRules.length} rule${filledRules.length === 1 ? "" : "s"}`} />
         <SummaryCard title="Contract year" value={draft.contractYear || "Not set"} />
         <SummaryCard
@@ -745,7 +802,7 @@ function ReviewStep({
 
       <details className="mt-5 rounded-md bg-slate-950/95 p-4">
         <summary className="cursor-pointer text-sm font-semibold text-teal-200">
-          Show technical preview
+          Show advanced preview
         </summary>
         <pre className="mt-4 max-h-96 overflow-auto rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
           {JSON.stringify(preview, null, 2)}
@@ -774,11 +831,10 @@ function FinishStep({
     <SetupStep
       icon={<CheckCircle2 className="h-6 w-6" />}
       title="Setup draft is ready"
-      helper="Create folders, save setup files, then run a setup check. Workflows still run separately from Automations."
+      helper="Create folders, save setup, then run a setup check."
     >
       <div className="rounded-md bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-900">
-        Setup actions only create folders and save configuration. FlowHost will not run workflows or
-        create Gmail drafts from this page.
+        Setup actions only create folders and save settings. Workflows stay on the Automations page.
       </div>
       <SetupActionPanel
         busyAction={busyAction}
@@ -799,7 +855,7 @@ function SetupActionPanel({
   onSetupAction: (action: "preview" | "initialize" | "save" | "validate") => void;
 }) {
   return (
-    <div className="mt-5 rounded-md bg-white/55 p-4">
+    <div className="mt-5 rounded-lg bg-white/60 p-4">
       <div className="grid gap-3 md:grid-cols-4">
         <SetupActionButton
           label="Preview setup"
@@ -841,7 +897,7 @@ function SetupActionPanel({
           <p className="mt-1 font-medium">{setupResult.message}</p>
           {setupResult.details !== undefined && (
             <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-bold">Show setup result details</summary>
+              <summary className="cursor-pointer text-xs font-bold">Show advanced details</summary>
               <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
                 {JSON.stringify(setupResult.details, null, 2)}
               </pre>
@@ -866,7 +922,7 @@ function SetupActionButton({
 }) {
   return (
     <button
-      className="rounded-md border border-white/70 bg-white/75 px-3 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      className="rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onClick}
     >
@@ -903,7 +959,7 @@ function PathField({
           placeholder={placeholder}
         />
         <button
-          className="rounded-md border border-white/70 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-white"
+          className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
           onClick={onChoose}
           type="button"
         >
@@ -951,7 +1007,7 @@ function pathStatus(value: string) {
 
 function InfoCard({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-md bg-white/60 p-4">
+    <div className="rounded-lg border border-white/65 bg-white/65 p-4">
       <p className="text-sm font-semibold text-slate-950">{title}</p>
       <p className="mt-2 text-sm font-medium leading-6 text-slate-600">{text}</p>
     </div>
@@ -970,7 +1026,7 @@ function ToggleCard({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-md bg-white/60 p-4">
+    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-white/65 bg-white/65 p-4">
       <span>
         <span className="block text-sm font-semibold text-slate-950">{title}</span>
         <span className="mt-1 block text-sm font-medium leading-6 text-slate-600">{text}</span>
@@ -987,7 +1043,7 @@ function ToggleCard({
 
 function SummaryCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-md bg-white/60 p-4">
+    <div className="rounded-lg border border-white/65 bg-white/65 p-4">
       <p className="text-xs font-semibold uppercase text-slate-500">{title}</p>
       <p className="mt-2 break-words text-sm font-semibold leading-6 text-slate-900">{value}</p>
     </div>

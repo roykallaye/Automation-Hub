@@ -5,15 +5,15 @@ export function readinessLabel(status: ReadinessStatus) {
     case "ready":
       return "Ready";
     case "warning":
-      return "Needs review";
+      return "Needs attention";
     case "missingConfiguration":
       return "Setup needs attention";
     case "missingScript":
-      return "Automation setup is missing";
+      return "Cannot run yet";
     case "missingFolder":
-      return "Missing folder";
+      return "Cannot run yet";
     case "permissionProblem":
-      return "Permission problem";
+      return "Cannot run yet";
     case "notChecked":
       return "Not checked";
   }

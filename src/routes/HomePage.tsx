@@ -1,7 +1,6 @@
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Sparkles } from "lucide-react";
 
 import { contractAction, gmailReconnectAction, invoiceAction } from "../actions";
-import { PageHeader } from "../components/PageHeader";
 import { StatusPill } from "../components/StatusBadges";
 import { AutomationCard, GmailAccessPanel } from "../components/WorkflowCard";
 import { staffMessage } from "../messages";
@@ -32,19 +31,45 @@ export function HomePage({
   onOpenPath: (path?: string | null) => void;
 }) {
   const folders = configStatus?.config.folders;
+  const hasSetupIssue =
+    loading ||
+    !configStatus ||
+    configStatus.preflight.items.some((item) => item.status === "warning") ||
+    configStatus.preflight.workflows.some((workflow) => workflow.commandName && !workflow.canRun);
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Today at a glance" eyebrow="Daily overview" />
-
-      <AttentionBanner configStatus={configStatus} loading={loading} />
+      <section className="rounded-xl border border-white/65 bg-white/55 p-6 shadow-glass backdrop-blur-xl">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-teal-800">Daily overview</p>
+              <h2 className="mt-1 text-3xl font-semibold text-slate-950">
+                {hasSetupIssue ? "Setup needs attention" : "Ready for today&apos;s office work"}
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+                Prepare drafts, organize signed contracts, and keep scan folders tidy.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm">
+            Gmail drafts only
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
         <section className="space-y-5">
+          <AttentionBanner configStatus={configStatus} loading={loading} />
           <div className="grid gap-5 xl:grid-cols-2">
             <AutomationCard
               title="Invoices"
               action={invoiceAction}
+              description="Prepare PDFs and Gmail drafts for review."
+              buttonLabel="Prepare invoice drafts"
               workflow={workflowFor(invoiceAction)}
               runningCommand={runningCommand}
               disabledReason={actionDisabledReason(invoiceAction)}
@@ -66,6 +91,8 @@ export function HomePage({
             <AutomationCard
               title="Signed contracts"
               action={contractAction}
+              description="Organize signed contract documents."
+              buttonLabel="Process signed contracts"
               workflow={workflowFor(contractAction)}
               runningCommand={runningCommand}
               disabledReason={actionDisabledReason(contractAction)}
@@ -92,6 +119,7 @@ export function HomePage({
             disabledReason={actionDisabledReason(gmailReconnectAction)}
             disabled={Boolean(runningCommand)}
             isRunning={runningCommand === gmailReconnectAction.commandName}
+            buttonLabel="Check Gmail sign-in"
             onRun={() => onRun(gmailReconnectAction)}
           />
         </section>
@@ -111,15 +139,15 @@ function AttentionBanner({
 }) {
   if (loading) {
     return (
-      <section className="rounded-lg border border-white/60 bg-white/55 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-slate-800">Checking FlowHost setup...</p>
+      <section className="rounded-xl border border-white/60 bg-white/55 p-4 shadow-glass">
+        <p className="text-sm font-semibold text-slate-800">Checking setup...</p>
       </section>
     );
   }
 
   if (!configStatus) {
     return (
-      <section className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-glass">
+      <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-glass">
         <p className="text-sm font-semibold text-rose-900">
           FlowHost setup could not be loaded.
         </p>
@@ -134,17 +162,15 @@ function AttentionBanner({
 
   if (!warning && !blockedWorkflow) {
     return (
-      <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-emerald-900">
-          FlowHost is ready for today&apos;s work.
-        </p>
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-glass">
+        <p className="text-sm font-semibold text-emerald-900">Everything is ready.</p>
       </section>
     );
   }
 
   const source = warning ?? blockedWorkflow;
   return (
-    <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-glass">
+    <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
       <p className="text-sm font-semibold text-amber-950">Setup needs attention</p>
       <p className="mt-1 text-sm font-medium text-amber-800">
         {source
@@ -157,12 +183,12 @@ function AttentionBanner({
 
 function LastRunCard({ summary }: { summary: RunSummary | null }) {
   return (
-    <aside className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+    <aside className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <h2 className="text-xl font-semibold text-slate-950">Last result</h2>
       {summary ? (
         <div className="mt-4 space-y-4">
           <div>
-            <p className="text-sm font-medium text-teal-800">{summary.automation_name}</p>
+            <p className="text-sm font-semibold text-teal-800">{summary.automation_name}</p>
             <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -170,12 +196,12 @@ function LastRunCard({ summary }: { summary: RunSummary | null }) {
             <Metric label="Duration" value={formatDuration(summary.duration_ms)} />
           </div>
           <p className="text-sm font-medium leading-6 text-slate-600">
-            Open Activity to review progress and support details.
+            Open Activity for details if anything needs review.
           </p>
         </div>
       ) : (
-        <div className="mt-4 rounded-md bg-white/55 p-4 text-sm font-medium text-slate-700">
-          No automation has run yet.
+        <div className="mt-4 rounded-lg bg-white/60 p-4 text-sm font-medium leading-6 text-slate-700">
+          No run yet. Start with invoice drafts or signed contracts when setup is ready.
         </div>
       )}
     </aside>

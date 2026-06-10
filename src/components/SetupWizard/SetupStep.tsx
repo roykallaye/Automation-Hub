@@ -12,9 +12,9 @@ export function SetupStep({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-white/60 bg-white/58 p-6 shadow-glass backdrop-blur-xl">
+    <section className="rounded-xl border border-white/65 bg-white/60 p-5 shadow-glass backdrop-blur-xl sm:p-6">
       <div className="mb-6 flex items-start gap-4">
-        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
           {icon}
         </div>
         <div>
@@ -43,7 +43,7 @@ export function FieldLabel({
 }
 
 export const inputClassName =
-  "w-full rounded-md border border-white/70 bg-white/75 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
+  "w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
 
 export const textareaClassName =
-  "min-h-28 w-full rounded-md border border-white/70 bg-white/75 px-3 py-3 text-sm font-semibold leading-6 text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
+  "min-h-28 w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
