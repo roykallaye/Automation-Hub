@@ -1,0 +1,1366 @@
+use crate::config::HubConfig;
+use chrono::Local;
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    io::Write,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppConfigStatus {
+    config_path: String,
+    config: HubConfig,
+    preflight: PreflightReport,
+}
+
+impl AppConfigStatus {
+    pub(crate) fn new(config_path: String, config: HubConfig) -> Self {
+        Self {
+            preflight: build_preflight_report(&config),
+            config_path,
+            config,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreflightReport {
+    checked_at: String,
+    items: Vec<PreflightItem>,
+    workflows: Vec<WorkflowPreflight>,
+    dependencies: Vec<PreflightItem>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ReadinessStatus {
+    Ready,
+    Warning,
+    MissingConfiguration,
+    MissingScript,
+    MissingFolder,
+    PermissionProblem,
+    NotChecked,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreflightItem {
+    key: String,
+    label: String,
+    path: Option<String>,
+    item_type: String,
+    status: ReadinessStatus,
+    message: String,
+    readable: Option<bool>,
+    writable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowPreflight {
+    key: String,
+    label: String,
+    command_name: Option<String>,
+    status: ReadinessStatus,
+    can_run: bool,
+    message: String,
+    check_keys: Vec<String>,
+}
+
+pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
+    let mut items = vec![
+        automation_config_check(&config.automation.automation_config_path),
+        python_check(&config.automation.python_executable),
+        script_check(
+            "invoiceWorkflowScript",
+            "Invoice workflow script",
+            &config.scripts.invoice_workflow_script,
+        ),
+        script_check(
+            "gmailDraftScript",
+            "Gmail draft script",
+            &config.scripts.gmail_draft_script,
+        ),
+        script_check(
+            "copyScansioniScript",
+            "Copy scansioni script",
+            &config.scripts.copy_scansioni_script,
+        ),
+        script_check(
+            "ocrPreprocessingScript",
+            "OCR preprocessing script",
+            &config.scripts.ocr_preprocessing_script,
+        ),
+        script_check(
+            "contractProcessingScript",
+            "Contract processing script",
+            &config.scripts.contract_processing_script,
+        ),
+        folder_check(
+            "invoiceInputFolder",
+            "Invoice input folder",
+            &config.folders.invoice_input_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "invoiceOutputFolder",
+            "Invoice output folder",
+            &config.folders.invoice_output_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "invoiceArchiveFolder",
+            "Invoice archive folder",
+            &config.folders.invoice_archive_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "invoiceLogFolder",
+            "Invoice log folder",
+            &config.folders.invoice_log_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "scansioniNetworkShare",
+            "Scansioni network share",
+            &config.folders.scansioni_network_share,
+            true,
+            false,
+        ),
+        folder_check(
+            "scansioniLocalCacheFolder",
+            "Scansioni local cache folder",
+            &config.folders.scansioni_local_cache_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "ocrTextOutputFolder",
+            "OCR text output folder",
+            &config.folders.ocr_text_output_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "contractsOutputFolder",
+            "Contracts output folder",
+            &config.folders.contracts_output_folder,
+            true,
+            true,
+        ),
+        folder_check(
+            "contractLogFolder",
+            "Contract log folder",
+            &config.folders.contract_log_folder,
+            true,
+            true,
+        ),
+        token_check("gmailTokenPath", "Gmail token", &config.gmail.token_path),
+        token_parent_folder_check(&config.gmail.token_path),
+        profile_check(&config.client.display_name),
+    ];
+    items.extend(automation_alignment_checks(config));
+
+    let mut dependencies = vec![
+        dependency_unknown("cmdExe", "cmd.exe"),
+        dependency_unknown("powershellExe", "powershell.exe"),
+        dependency_unknown("explorerExe", "explorer.exe"),
+        dependency_unknown(
+            "externalScriptDependencies",
+            "PDF/OCR/Gmail dependencies used by external scripts",
+        ),
+    ];
+
+    let workflows = workflow_preflight(config, &items, &dependencies);
+    items.sort_by(|left, right| left.key.cmp(&right.key));
+    dependencies.sort_by(|left, right| left.key.cmp(&right.key));
+
+    PreflightReport {
+        checked_at: Local::now().to_rfc3339(),
+        items,
+        workflows,
+        dependencies,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationFileConfig {
+    paths: Option<AutomationFilePaths>,
+    safety: Option<AutomationFileSafety>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationFilePaths {
+    invoice_input_dir: Option<String>,
+    invoice_output_dir: Option<String>,
+    invoice_archive_dir: Option<String>,
+    invoice_log_dir: Option<String>,
+    gmail_token_file: Option<String>,
+    contract_destination_dir: Option<String>,
+    contract_ocr_text_dir: Option<String>,
+    contract_log_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationFileSafety {
+    dry_run_default: Option<bool>,
+}
+
+#[derive(Debug)]
+struct AlignmentMismatch {
+    app_field: &'static str,
+    automation_field: &'static str,
+    blocking: bool,
+}
+
+fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
+    let path = config.automation.automation_config_path.trim();
+    if path.is_empty() || !Path::new(path).is_file() {
+        return Vec::new();
+    }
+
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            return vec![automation_alignment_error(
+                Some(path),
+                &format!(
+                    "Automation setup file could not be read. Ask setup support to update the configuration. Error: {error}"
+                ),
+            )]
+        }
+    };
+
+    let automation_config: AutomationFileConfig = match serde_json::from_str(&contents) {
+        Ok(config) => config,
+        Err(error) => {
+            return vec![automation_alignment_error(
+                Some(path),
+                &format!(
+                    "Automation setup file is not valid JSON. Ask setup support to update the configuration. Error: {error}"
+                ),
+            )]
+        }
+    };
+
+    let mut mismatches = Vec::new();
+    if let Some(paths) = automation_config.paths.as_ref() {
+        compare_path(
+            &mut mismatches,
+            "gmail.tokenPath",
+            &config.gmail.token_path,
+            "paths.gmailTokenFile",
+            paths.gmail_token_file.as_deref(),
+            true,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.invoiceInputFolder",
+            &config.folders.invoice_input_folder,
+            "paths.invoiceInputDir",
+            paths.invoice_input_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.invoiceOutputFolder",
+            &config.folders.invoice_output_folder,
+            "paths.invoiceOutputDir",
+            paths.invoice_output_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.invoiceArchiveFolder",
+            &config.folders.invoice_archive_folder,
+            "paths.invoiceArchiveDir",
+            paths.invoice_archive_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.invoiceLogFolder",
+            &config.folders.invoice_log_folder,
+            "paths.invoiceLogDir",
+            paths.invoice_log_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.ocrTextOutputFolder",
+            &config.folders.ocr_text_output_folder,
+            "paths.contractOcrTextDir",
+            paths.contract_ocr_text_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.contractsOutputFolder",
+            &config.folders.contracts_output_folder,
+            "paths.contractDestinationDir",
+            paths.contract_destination_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.contractLogFolder",
+            &config.folders.contract_log_folder,
+            "paths.contractLogDir",
+            paths.contract_log_dir.as_deref(),
+            false,
+        );
+    }
+
+    if let Some(safety) = automation_config.safety.as_ref() {
+        if let Some(dry_run_default) = safety.dry_run_default {
+            if dry_run_default != config.safety.dry_run_default {
+                mismatches.push(AlignmentMismatch {
+                    app_field: "safety.dryRunDefault",
+                    automation_field: "safety.dryRunDefault",
+                    blocking: false,
+                });
+            }
+        }
+    }
+
+    if mismatches.is_empty() {
+        return vec![PreflightItem {
+            key: "configAlignment".to_string(),
+            label: "Config alignment".to_string(),
+            path: None,
+            item_type: "alignment".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "FlowHost setup and automation setup match.".to_string(),
+            readable: None,
+            writable: None,
+        }];
+    }
+
+    let field_list = mismatch_field_list(&mismatches);
+    let mut items = vec![PreflightItem {
+        key: "configAlignment".to_string(),
+        label: "Config alignment".to_string(),
+        path: None,
+        item_type: "alignment".to_string(),
+        status: ReadinessStatus::Warning,
+        message: format!(
+            "FlowHost setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {field_list}."
+        ),
+        readable: None,
+        writable: None,
+    }];
+
+    let gmail_mismatch = mismatches
+        .iter()
+        .filter(|mismatch| mismatch.blocking)
+        .map(|mismatch| format!("{} / {}", mismatch.app_field, mismatch.automation_field))
+        .collect::<Vec<_>>();
+    if !gmail_mismatch.is_empty() {
+        items.push(PreflightItem {
+            key: "gmailTokenAlignment".to_string(),
+            label: "Gmail token alignment".to_string(),
+            path: None,
+            item_type: "alignment".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message: format!(
+                "FlowHost setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {}.",
+                gmail_mismatch.join(", ")
+            ),
+            readable: None,
+            writable: None,
+        });
+    }
+
+    items
+}
+
+fn automation_alignment_error(path: Option<&str>, message: &str) -> PreflightItem {
+    PreflightItem {
+        key: "automationConfigAlignment".to_string(),
+        label: "Automation setup validation".to_string(),
+        path: path.map(str::to_string),
+        item_type: "alignment".to_string(),
+        status: ReadinessStatus::MissingConfiguration,
+        message: message.to_string(),
+        readable: None,
+        writable: None,
+    }
+}
+
+fn compare_path(
+    mismatches: &mut Vec<AlignmentMismatch>,
+    app_field: &'static str,
+    app_value: &str,
+    automation_field: &'static str,
+    automation_value: Option<&str>,
+    blocking: bool,
+) {
+    let Some(automation_value) = automation_value else {
+        return;
+    };
+    if app_value.trim().is_empty() || automation_value.trim().is_empty() {
+        return;
+    }
+    if normalize_for_compare(app_value) != normalize_for_compare(automation_value) {
+        mismatches.push(AlignmentMismatch {
+            app_field,
+            automation_field,
+            blocking,
+        });
+    }
+}
+
+fn normalize_for_compare(path: &str) -> String {
+    path.trim()
+        .trim_end_matches(['\\', '/'])
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
+fn mismatch_field_list(mismatches: &[AlignmentMismatch]) -> String {
+    mismatches
+        .iter()
+        .map(|mismatch| format!("{} / {}", mismatch.app_field, mismatch.automation_field))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn automation_config_check(path: &str) -> PreflightItem {
+    if path.trim().is_empty() {
+        return PreflightItem {
+            key: "automationConfigPath".to_string(),
+            label: "Automation setup file".to_string(),
+            path: None,
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Automation setup file is missing. Ask setup support to select or create it."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let config_path = Path::new(path);
+    if !config_path.exists() {
+        return PreflightItem {
+            key: "automationConfigPath".to_string(),
+            label: "Automation setup file".to_string(),
+            path: Some(path.to_string()),
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Automation setup file is missing. Ask setup support to select or create it."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    if !config_path.is_file() {
+        return PreflightItem {
+            key: "automationConfigPath".to_string(),
+            label: "Automation setup file".to_string(),
+            path: Some(path.to_string()),
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Automation setup path is not a file. Ask setup support to update FlowHost configuration."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: "automationConfigPath".to_string(),
+        label: "Automation setup file".to_string(),
+        path: Some(path.to_string()),
+        item_type: "config".to_string(),
+        status: ReadinessStatus::Ready,
+        message: "Automation setup file found.".to_string(),
+        readable: Some(true),
+        writable: None,
+    }
+}
+
+fn profile_check(display_name: &str) -> PreflightItem {
+    if display_name.trim().is_empty() {
+        PreflightItem {
+            key: "clientProfile".to_string(),
+            label: "Hotel profile".to_string(),
+            path: None,
+            item_type: "profile".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Hotel display name is missing from config.".to_string(),
+            readable: None,
+            writable: None,
+        }
+    } else {
+        PreflightItem {
+            key: "clientProfile".to_string(),
+            label: "Hotel profile".to_string(),
+            path: None,
+            item_type: "profile".to_string(),
+            status: ReadinessStatus::Ready,
+            message: format!("Configured for {display_name}."),
+            readable: None,
+            writable: None,
+        }
+    }
+}
+
+fn python_check(python_executable: &str) -> PreflightItem {
+    if python_executable.trim().is_empty() {
+        return PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Python".to_string(),
+            path: None,
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message:
+                "Python is not configured. Ask setup support to update FlowHost configuration."
+                    .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let status = std::process::Command::new(python_executable)
+        .arg("--version")
+        .output();
+
+    match status {
+        Ok(output) if output.status.success() => PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Python".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "Python is available.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        _ => PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Python".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Python is missing or not available on PATH. Ask setup support to install or configure Python."
+                .to_string(),
+            readable: None,
+            writable: None,
+        },
+    }
+}
+
+fn script_check(key: &str, label: &str, path: &str) -> PreflightItem {
+    if path.trim().is_empty() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: None,
+            item_type: "script".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Script path is not configured.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let script_path = Path::new(path);
+    if !script_path.exists() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "script".to_string(),
+            status: ReadinessStatus::MissingScript,
+            message: script_missing_message(key),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    if !script_path.is_file() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "script".to_string(),
+            status: ReadinessStatus::MissingScript,
+            message: "Setup needs attention. The configured automation script path is not a script file. Ask setup support to update FlowHost configuration.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        path: Some(path.to_string()),
+        item_type: "script".to_string(),
+        status: ReadinessStatus::Ready,
+        message: "Script file found.".to_string(),
+        readable: Some(true),
+        writable: None,
+    }
+}
+
+fn folder_check(
+    key: &str,
+    label: &str,
+    path: &str,
+    require_read: bool,
+    require_write: bool,
+) -> PreflightItem {
+    if path.trim().is_empty() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: None,
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Folder path is not configured.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let folder_path = Path::new(path);
+    if !folder_path.exists() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingFolder,
+            message: folder_missing_message(key),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    if !folder_path.is_dir() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingFolder,
+            message: "Setup needs attention. The configured path is not a folder. Ask setup support to update FlowHost configuration.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let readable = require_read.then(|| fs::read_dir(folder_path).is_ok());
+    let writable = require_write.then(|| can_write_to_folder(folder_path));
+    let has_read_problem = readable == Some(false);
+    let has_write_problem = writable == Some(false);
+
+    if has_read_problem || has_write_problem {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message: folder_permission_message(key),
+            readable,
+            writable,
+        };
+    }
+
+    PreflightItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        path: Some(path.to_string()),
+        item_type: "folder".to_string(),
+        status: ReadinessStatus::Ready,
+        message: "Folder found and permissions look usable.".to_string(),
+        readable,
+        writable,
+    }
+}
+
+fn script_missing_message(key: &str) -> String {
+    let script_name = match key {
+        "invoiceWorkflowScript" => "invoice automation script",
+        "gmailDraftScript" => "Gmail draft script",
+        "copyScansioniScript" => "scanned-document copy script",
+        "ocrPreprocessingScript" => "OCR preprocessing script",
+        "contractProcessingScript" => "contract processing script",
+        _ => "automation script",
+    };
+    format!(
+        "Setup needs attention. The {script_name} is missing. Ask setup support to update FlowHost configuration."
+    )
+}
+
+fn folder_missing_message(key: &str) -> String {
+    let folder_name = match key {
+        "invoiceInputFolder" => "folder used for incoming invoice PDFs",
+        "invoiceOutputFolder" => "folder used for ready invoice files",
+        "invoiceArchiveFolder" => "invoice archive folder",
+        "invoiceLogFolder" => "invoice log folder",
+        "scansioniNetworkShare" => "folder used for scanned documents",
+        "scansioniLocalCacheFolder" => "local scanned-document cache folder",
+        "ocrTextOutputFolder" => "OCR text output folder",
+        "contractsOutputFolder" => "signed contracts output folder",
+        "contractLogFolder" => "contract log folder",
+        _ => "configured folder",
+    };
+    format!(
+        "Setup needs attention. The {folder_name} is missing or not reachable. Ask setup support to update FlowHost configuration."
+    )
+}
+
+fn folder_permission_message(key: &str) -> String {
+    let folder_name = match key {
+        "scansioniNetworkShare" => "folder used for scanned documents",
+        "invoiceInputFolder" => "folder used for incoming invoice PDFs",
+        "invoiceOutputFolder" => "folder used for ready invoice files",
+        "invoiceArchiveFolder" => "invoice archive folder",
+        "invoiceLogFolder" => "invoice log folder",
+        "scansioniLocalCacheFolder" => "local scanned-document cache folder",
+        "ocrTextOutputFolder" => "OCR text output folder",
+        "contractsOutputFolder" => "signed contracts output folder",
+        "contractLogFolder" => "contract log folder",
+        _ => "configured folder",
+    };
+    format!(
+        "Setup needs attention. FlowHost cannot read or write the {folder_name}. Ask setup support to check folder permissions."
+    )
+}
+
+fn token_check(key: &str, label: &str, path: &str) -> PreflightItem {
+    if path.trim().is_empty() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: None,
+            item_type: "token".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Gmail token path is not configured.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let token_path = Path::new(path);
+    if token_path.exists() {
+        PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "token".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "Gmail token file exists.".to_string(),
+            readable: Some(true),
+            writable: None,
+        }
+    } else {
+        PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: Some(path.to_string()),
+            item_type: "token".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Gmail token file is missing. Reconnect Gmail may create it later."
+                .to_string(),
+            readable: None,
+            writable: None,
+        }
+    }
+}
+
+fn token_parent_folder_check(token_path: &str) -> PreflightItem {
+    if token_path.trim().is_empty() {
+        return PreflightItem {
+            key: "gmailTokenFolder".to_string(),
+            label: "Gmail token folder".to_string(),
+            path: None,
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Setup needs attention. The Gmail sign-in folder is not configured."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let Some(parent) = Path::new(token_path).parent() else {
+        return PreflightItem {
+            key: "gmailTokenFolder".to_string(),
+            label: "Gmail token folder".to_string(),
+            path: None,
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Setup needs attention. The Gmail sign-in folder is not configured."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    };
+
+    if parent.as_os_str().is_empty() {
+        return PreflightItem {
+            key: "gmailTokenFolder".to_string(),
+            label: "Gmail token folder".to_string(),
+            path: None,
+            item_type: "folder".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Setup needs attention. The Gmail sign-in folder is not configured."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let parent_path = parent.to_string_lossy().to_string();
+    let mut item = folder_check(
+        "gmailTokenFolder",
+        "Gmail token folder",
+        &parent_path,
+        true,
+        true,
+    );
+
+    if item.status != ReadinessStatus::Ready {
+        item.message = "Setup needs attention. The Gmail sign-in folder is missing or cannot be used. Ask setup support to update FlowHost configuration.".to_string();
+    } else {
+        item.message = "Gmail sign-in folder is available.".to_string();
+    }
+
+    item
+}
+
+fn dependency_unknown(key: &str, label: &str) -> PreflightItem {
+    PreflightItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        path: None,
+        item_type: "dependency".to_string(),
+        status: ReadinessStatus::NotChecked,
+        message: "Dependency is required by the shell or external scripts but is not verified by this app-side preflight yet.".to_string(),
+        readable: None,
+        writable: None,
+    }
+}
+
+fn workflow_preflight(
+    config: &HubConfig,
+    items: &[PreflightItem],
+    _dependencies: &[PreflightItem],
+) -> Vec<WorkflowPreflight> {
+    let invoice_needs_python = is_python_script(&config.scripts.invoice_workflow_script)
+        || is_python_script(&config.scripts.gmail_draft_script);
+    let gmail_needs_python = is_python_script(&config.scripts.gmail_draft_script);
+    let contracts_needs_python = is_python_script(&config.scripts.contract_processing_script);
+    let invoice_checks = with_python_config(
+        &[
+            "invoiceWorkflowScript",
+            "gmailDraftScript",
+            "invoiceInputFolder",
+            "invoiceOutputFolder",
+            "invoiceLogFolder",
+            "gmailTokenFolder",
+            "gmailTokenAlignment",
+        ],
+        invoice_needs_python,
+    );
+    let gmail_checks = with_python_config(
+        &[
+            "gmailDraftScript",
+            "invoiceOutputFolder",
+            "invoiceLogFolder",
+            "gmailTokenPath",
+            "gmailTokenFolder",
+            "gmailTokenAlignment",
+        ],
+        gmail_needs_python,
+    );
+    let contracts_checks = with_python_config(
+        &[
+            "copyScansioniScript",
+            "ocrPreprocessingScript",
+            "contractProcessingScript",
+            "scansioniNetworkShare",
+            "scansioniLocalCacheFolder",
+            "ocrTextOutputFolder",
+            "contractsOutputFolder",
+        ],
+        contracts_needs_python,
+    );
+
+    vec![
+        workflow(
+            "clientProfile",
+            "Hotel profile",
+            None,
+            &["clientProfile"],
+            items,
+            false,
+        ),
+        workflow(
+            "invoiceWorkflow",
+            "Invoice workflow",
+            Some("process_invoices_and_drafts"),
+            &invoice_checks,
+            items,
+            true,
+        ),
+        workflow(
+            "gmailDraftsWorkflow",
+            "Gmail drafts workflow",
+            Some("reconnect_gmail"),
+            &gmail_checks,
+            items,
+            true,
+        ),
+        workflow(
+            "scansioniNetwork",
+            "Scansioni/network folder",
+            Some("copy_scansioni"),
+            &[
+                "copyScansioniScript",
+                "scansioniNetworkShare",
+                "scansioniLocalCacheFolder",
+            ],
+            items,
+            true,
+        ),
+        workflow(
+            "ocrWorkflow",
+            "OCR workflow",
+            Some("ocr_preprocessing"),
+            &[
+                "ocrPreprocessingScript",
+                "scansioniLocalCacheFolder",
+                "ocrTextOutputFolder",
+            ],
+            items,
+            true,
+        ),
+        workflow(
+            "contractsWorkflow",
+            "Contracts workflow",
+            Some("process_signed_contracts"),
+            &contracts_checks,
+            items,
+            true,
+        ),
+    ]
+}
+
+fn with_python_config(checks: &[&'static str], include_python: bool) -> Vec<&'static str> {
+    let mut result = checks.to_vec();
+    if include_python {
+        result.insert(0, "automationConfigAlignment");
+        result.insert(0, "pythonExecutable");
+        result.insert(0, "automationConfigPath");
+    }
+    result
+}
+
+fn is_python_script(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("py"))
+}
+
+fn workflow(
+    key: &str,
+    label: &str,
+    command_name: Option<&str>,
+    check_keys: &[&str],
+    items: &[PreflightItem],
+    runnable: bool,
+) -> WorkflowPreflight {
+    let checks = check_keys
+        .iter()
+        .filter_map(|key| items.iter().find(|item| item.key == *key))
+        .collect::<Vec<_>>();
+    let blocking = checks
+        .iter()
+        .find(|item| is_blocking_status(&item.status, item.item_type.as_str()));
+    let status = blocking
+        .map(|item| item.status.clone())
+        .unwrap_or(ReadinessStatus::Ready);
+    let can_run = runnable && status == ReadinessStatus::Ready;
+    let message = blocking
+        .map(|item| format!("{}: {}", item.label, item.message))
+        .unwrap_or_else(|| "Ready.".to_string());
+
+    WorkflowPreflight {
+        key: key.to_string(),
+        label: label.to_string(),
+        command_name: command_name.map(str::to_string),
+        status,
+        can_run,
+        message,
+        check_keys: check_keys.iter().map(|key| key.to_string()).collect(),
+    }
+}
+
+fn is_blocking_status(status: &ReadinessStatus, item_type: &str) -> bool {
+    match status {
+        ReadinessStatus::Ready => false,
+        ReadinessStatus::Warning => false,
+        ReadinessStatus::NotChecked if item_type == "token" => false,
+        ReadinessStatus::NotChecked => false,
+        ReadinessStatus::MissingConfiguration
+        | ReadinessStatus::MissingScript
+        | ReadinessStatus::MissingFolder
+        | ReadinessStatus::PermissionProblem => true,
+    }
+}
+
+pub(crate) fn ensure_workflow_can_run(
+    command_name: &str,
+    config: &HubConfig,
+) -> Result<(), String> {
+    let report = build_preflight_report(config);
+    let workflow = report
+        .workflows
+        .iter()
+        .find(|workflow| workflow.command_name.as_deref() == Some(command_name))
+        .ok_or_else(|| "Unknown automation command.".to_string())?;
+
+    if workflow.can_run {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} is not ready. {}",
+            workflow.label, workflow.message
+        ))
+    }
+}
+
+fn can_write_to_folder(path: &Path) -> bool {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let probe_path = path.join(format!(".flowhost_write_probe_{stamp}.tmp"));
+    let result =
+        fs::File::create(&probe_path).and_then(|mut file| file.write_all(b"flowhost preflight"));
+    let _ = fs::remove_file(&probe_path);
+    result.is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig, ScriptPaths,
+    };
+
+    #[test]
+    fn missing_script_is_detected() {
+        let item = script_check(
+            "invoiceWorkflowScript",
+            "Invoice workflow script",
+            "C:\\definitely\\missing\\script.cmd",
+        );
+
+        assert_eq!(item.status, ReadinessStatus::MissingScript);
+    }
+
+    #[test]
+    fn workflow_is_not_ready_when_required_script_is_missing() {
+        let mut config = config_with_temp_paths();
+        config.scripts.invoice_workflow_script = "C:\\definitely\\missing\\script.cmd".to_string();
+
+        let report = build_preflight_report(&config);
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert!(!invoice.can_run);
+        assert_eq!(invoice.status, ReadinessStatus::MissingScript);
+    }
+
+    #[test]
+    fn missing_gmail_token_file_does_not_block_reconnect_when_parent_folder_exists() {
+        let config = config_with_temp_paths();
+
+        let report = build_preflight_report(&config);
+        let token = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailTokenPath")
+            .unwrap();
+        let reconnect = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "gmailDraftsWorkflow")
+            .unwrap();
+
+        assert_eq!(token.status, ReadinessStatus::NotChecked);
+        assert!(reconnect.can_run);
+    }
+
+    #[test]
+    fn missing_gmail_token_parent_folder_is_reported_and_blocks_reconnect() {
+        let mut config = config_with_temp_paths();
+        let missing_parent = std::env::temp_dir().join(format!(
+            "flowhost_missing_token_parent_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        config.gmail.token_path = missing_parent
+            .join("gmail_token.json")
+            .to_string_lossy()
+            .to_string();
+
+        let report = build_preflight_report(&config);
+        let token_folder = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailTokenFolder")
+            .unwrap();
+        let reconnect = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "gmailDraftsWorkflow")
+            .unwrap();
+
+        assert_eq!(token_folder.status, ReadinessStatus::MissingFolder);
+        assert!(!reconnect.can_run);
+    }
+
+    #[test]
+    fn workflow_readiness_is_ready_for_existing_fake_scripts_and_folders() {
+        let config = config_with_temp_paths();
+        let report = build_preflight_report(&config);
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert!(invoice.can_run);
+        assert_eq!(invoice.status, ReadinessStatus::Ready);
+    }
+
+    #[test]
+    fn matching_app_and_automation_config_gives_no_alignment_warning() {
+        let config = config_with_temp_paths();
+        let report = build_preflight_report(&config);
+        let alignment = report
+            .items
+            .iter()
+            .find(|item| item.key == "configAlignment")
+            .unwrap();
+
+        assert_eq!(alignment.status, ReadinessStatus::Ready);
+        assert!(!report
+            .items
+            .iter()
+            .any(|item| item.status == ReadinessStatus::Warning));
+    }
+
+    #[test]
+    fn mismatched_gmail_token_path_blocks_gmail_workflows() {
+        let config = config_with_temp_paths();
+        let mismatched_token = Path::new(&config.gmail.token_path)
+            .with_file_name("different_gmail_token.json")
+            .to_string_lossy()
+            .to_string();
+        write_automation_config(&config, Some(&mismatched_token), None);
+
+        let report = build_preflight_report(&config);
+        let token_alignment = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailTokenAlignment")
+            .unwrap();
+        let gmail = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "gmailDraftsWorkflow")
+            .unwrap();
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert_eq!(token_alignment.status, ReadinessStatus::PermissionProblem);
+        assert!(!gmail.can_run);
+        assert!(!invoice.can_run);
+    }
+
+    #[test]
+    fn missing_automation_config_reports_existing_missing_setup_message() {
+        let mut config = config_with_temp_paths();
+        config.automation.automation_config_path =
+            Path::new(&config.automation.automation_config_path)
+                .with_file_name("missing_config.local.json")
+                .to_string_lossy()
+                .to_string();
+
+        let report = build_preflight_report(&config);
+        let item = report
+            .items
+            .iter()
+            .find(|item| item.key == "automationConfigPath")
+            .unwrap();
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+        assert_eq!(
+            item.message,
+            "Automation setup file is missing. Ask setup support to select or create it."
+        );
+    }
+
+    #[test]
+    fn invalid_automation_config_reports_setup_warning() {
+        let config = config_with_temp_paths();
+        fs::write(
+            &config.automation.automation_config_path,
+            b"{not valid json",
+        )
+        .unwrap();
+
+        let report = build_preflight_report(&config);
+        let item = report
+            .items
+            .iter()
+            .find(|item| item.key == "automationConfigAlignment")
+            .unwrap();
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+        assert!(item.message.contains("not valid JSON"));
+    }
+
+    fn config_with_temp_paths() -> HubConfig {
+        let root = std::env::temp_dir().join(format!(
+            "flowhost_preflight_test_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let scripts = root.join("scripts");
+        let input = root.join("invoice-input");
+        let output = root.join("invoice-output");
+        let archive = root.join("archive");
+        let logs = root.join("logs");
+        let network = root.join("network-scans");
+        let cache = root.join("cache");
+        let text = root.join("text");
+        let contracts = root.join("contracts");
+
+        for dir in [
+            &scripts, &input, &output, &archive, &logs, &network, &cache, &text, &contracts,
+        ] {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        let invoice_script = scripts.join("invoice.cmd");
+        let gmail_script = scripts.join("gmail.cmd");
+        let copy_script = scripts.join("copy.cmd");
+        let ocr_script = scripts.join("ocr.ps1");
+        let contract_script = scripts.join("contracts.cmd");
+
+        for file in [
+            &invoice_script,
+            &gmail_script,
+            &copy_script,
+            &ocr_script,
+            &contract_script,
+        ] {
+            fs::write(file, b"echo fake").unwrap();
+        }
+
+        let config = HubConfig {
+            schema_version: 2,
+            client: ClientConfig {
+                display_name: "Test Hotel".to_string(),
+            },
+            automation: crate::config::AutomationConfig {
+                automation_config_path: scripts
+                    .join("config.local.json")
+                    .to_string_lossy()
+                    .to_string(),
+                python_executable: "python".to_string(),
+            },
+            scripts: ScriptPaths {
+                invoice_workflow_script: invoice_script.to_string_lossy().to_string(),
+                gmail_draft_script: gmail_script.to_string_lossy().to_string(),
+                copy_scansioni_script: copy_script.to_string_lossy().to_string(),
+                ocr_preprocessing_script: ocr_script.to_string_lossy().to_string(),
+                contract_processing_script: contract_script.to_string_lossy().to_string(),
+            },
+            folders: FolderPaths {
+                invoice_input_folder: input.to_string_lossy().to_string(),
+                invoice_output_folder: output.to_string_lossy().to_string(),
+                invoice_archive_folder: archive.to_string_lossy().to_string(),
+                invoice_log_folder: logs.to_string_lossy().to_string(),
+                scansioni_network_share: network.to_string_lossy().to_string(),
+                scansioni_local_cache_folder: cache.to_string_lossy().to_string(),
+                ocr_text_output_folder: text.to_string_lossy().to_string(),
+                contracts_output_folder: contracts.to_string_lossy().to_string(),
+                contract_log_folder: logs.to_string_lossy().to_string(),
+            },
+            gmail: GmailConfig {
+                token_path: scripts
+                    .join("gmail_token.json")
+                    .to_string_lossy()
+                    .to_string(),
+            },
+            safety: SafetyConfig {
+                dry_run_default: false,
+                require_confirmation_for_file_moves: true,
+                redact_logs: true,
+            },
+        };
+        write_automation_config(&config, None, None);
+        config
+    }
+
+    fn write_automation_config(
+        config: &HubConfig,
+        gmail_token_override: Option<&str>,
+        dry_run_override: Option<bool>,
+    ) {
+        let automation_config = serde_json::json!({
+            "paths": {
+                "invoiceInputDir": config.folders.invoice_input_folder,
+                "invoiceOutputDir": config.folders.invoice_output_folder,
+                "invoiceArchiveDir": config.folders.invoice_archive_folder,
+                "invoiceLogDir": config.folders.invoice_log_folder,
+                "gmailTokenFile": gmail_token_override.unwrap_or(&config.gmail.token_path),
+                "contractDestinationDir": config.folders.contracts_output_folder,
+                "contractOcrTextDir": config.folders.ocr_text_output_folder,
+                "contractLogDir": config.folders.contract_log_folder
+            },
+            "safety": {
+                "dryRunDefault": dry_run_override.unwrap_or(config.safety.dry_run_default)
+            }
+        });
+        fs::write(
+            &config.automation.automation_config_path,
+            serde_json::to_vec_pretty(&automation_config).unwrap(),
+        )
+        .unwrap();
+    }
+}

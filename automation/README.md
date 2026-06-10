@@ -1,0 +1,121 @@
+# FlowHost Automation Scripts
+
+These are the versionable FlowHost automation workers. The legacy `Script/` folder is a local import mirror from the manager PC and is ignored by git; do not treat it as the canonical source.
+
+## Structure
+
+- `invoices/process_fatture.py` crops and prepares invoice PDFs for Gmail draft creation.
+- `gmail_drafts/create_gmail_draft.py` creates Gmail drafts from prepared invoice folders. It uses the Gmail compose scope and does not send emails.
+- `contracts/process_contratti.py` reads OCR text for scanned PDFs, identifies signed contract documents, and can rename/move them into the contracts folder.
+- `shared/config.py` loads the shared JSON config.
+- `config.example.json` documents the local configuration shape.
+- `requirements.txt` lists the Python packages currently needed by the available scripts.
+
+Still missing from the manager-PC script collection:
+
+- `copy_scansioni.cmd`
+- `preprocess_scansioni_to_text.ps1`
+
+## Install Dependencies
+
+Create and activate a Python virtual environment, then install:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r automation\requirements.txt
+```
+
+The `.cmd` wrappers under `automation/` use `python` from `PATH`. If a hotel PC uses a virtual environment, activate it before running the wrappers or call the scripts with that environment's Python executable.
+
+## Local Config
+
+Copy the example config to a local, uncommitted file:
+
+```powershell
+Copy-Item automation\config.example.json automation\config.local.json
+```
+
+Edit `automation\config.local.json` for the PC where FlowHost is installed. Do not put real Gmail tokens or credentials into the example file. Local config files can contain real paths, but they must not contain guest PDFs, contracts, logs, or OAuth token contents.
+
+Important config sections:
+
+- `client`: hotel display/signature names.
+- `paths`: invoice folders, Gmail credential/token file locations, contract scan/OCR/log folders.
+- `gmail`: subject and CC address for draft creation.
+- `invoice`: input glob and recipient routing rules.
+- `contracts`: scanner filename prefix, contract marker text, and year metadata.
+- `safety`: dry-run default, original archiving, and log redaction flags.
+
+## FlowHost Integration
+
+FlowHost has its own app config file in the Tauri app data directory. That app config should point `automation.automationConfigPath` at the local automation config file, usually:
+
+```text
+automation\config.local.json
+```
+
+Keep overlapping FlowHost app config values and `automation\config.local.json` aligned. The most important one is Gmail:
+
+- FlowHost app config: `gmail.tokenPath`
+- automation config: `paths.gmailTokenFile`
+
+These must point to the same token file. If they differ, FlowHost blocks Gmail draft/reconnect workflows because the app may check or reset one token file while the Gmail worker uses another. FlowHost also warns when invoice folders, contract folders, or `safety.dryRunDefault` differ between the two config files.
+
+When FlowHost runs canonical Python workers, it passes the config path:
+
+```text
+python automation\invoices\process_fatture.py --config <automationConfigPath>
+python automation\gmail_drafts\create_gmail_draft.py --config <automationConfigPath>
+python automation\contracts\process_contratti.py --config <automationConfigPath>
+```
+
+If FlowHost app config has `safety.dryRunDefault` enabled, it also passes `--dry-run` to the invoice and Gmail draft workers. The contract worker is dry-run by default unless `--execute` is explicitly passed.
+
+## Safe Dry Runs
+
+Invoice processing:
+
+```powershell
+python automation\invoices\process_fatture.py --config automation\config.local.json --dry-run
+```
+
+In dry-run mode the invoice script reads matching input PDFs and uses a temporary file for PDF parsing, but it does not write final PDFs into the real output folder, does not create recipient folders, does not copy failed originals, and does not delete originals.
+
+Gmail draft creation:
+
+```powershell
+python automation\gmail_drafts\create_gmail_draft.py --config automation\config.local.json --dry-run
+```
+
+In dry-run mode the Gmail script does not authenticate, does not call Gmail, does not create drafts, does not move PDFs to archive, does not delete `email_body.txt`, and reports the drafts it would create.
+
+Contract processing:
+
+```powershell
+python automation\contracts\process_contratti.py --config automation\config.local.json
+```
+
+The contract script defaults to dry-run. It only moves and renames files when run with `--execute`.
+
+Do not run these commands against real hotel folders unless you intentionally want to inspect those local folders. For tests, use fake fixture folders and synthetic PDFs/text files.
+
+## Files That Must Never Be Committed
+
+Never commit:
+
+- `gmail_token.json`
+- `gmail_credentials.json`
+- `client_secret*.json`
+- local config files containing real machine paths or operational settings
+- real guest PDFs
+- real invoices
+- real contracts
+- OCR text containing guest or employee personal data
+- logs or reports containing names, emails, booking data, employee data, or full local paths
+- `__pycache__` and `*.pyc`
+- local input, output, archive, log, scan, or cache folders
+
+## Remaining Fallbacks
+
+The Python scripts still keep legacy manager-PC defaults for compatibility when no `--config` is supplied. New installs should pass `--config` and should not rely on those fallback paths.

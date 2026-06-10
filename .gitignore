@@ -8,6 +8,39 @@
 # Local runtime and logs
 *.log
 *.tmp
+report_*.json
+**/__pycache__/
+*.pyc
+
+# Local automation data. Keep real hotel documents and runtime outputs out of git.
+/Script/
+automation/config.local.json
+automation/*.local.json
+Script/gmail_token.json
+Script/gmail_credentials.json
+automation/**/gmail_token.json
+automation/**/gmail_credentials.json
+client_secret*.json
+**/Input/
+**/Output/
+**/Output_ProntoInvio/
+**/Archivio/
+**/Archive/
+**/Log/
+**/Logs/
+**/Scansioni/
+**/ScansioniText/
+**/CodexInput/
+**/CONTRATTI FIRMATI/
+**/*.pdf
+**/*.PDF
+**/*.doc
+**/*.docx
+**/*.tif
+**/*.tiff
+**/*.jpg
+**/*.jpeg
+**/*.png
 
 # Secrets and OAuth tokens
 .env
@@ -16,6 +49,7 @@
 *token*.json
 *secret*.json
 *credential*.json
+client_secret*.json
 *.pem
 *.key
 *.pfx

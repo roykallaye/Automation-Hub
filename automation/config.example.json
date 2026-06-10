@@ -1,0 +1,42 @@
+{
+  "client": {
+    "displayName": "Example Hotel",
+    "emailSignatureName": "Example Hotel Team"
+  },
+  "paths": {
+    "invoiceInputDir": "C:\\FlowHost\\Invoices\\Input",
+    "invoiceOutputDir": "C:\\FlowHost\\Invoices\\Output_ProntoInvio",
+    "invoiceArchiveDir": "C:\\FlowHost\\Invoices\\Archivio",
+    "invoiceLogDir": "C:\\FlowHost\\Invoices\\Log",
+    "gmailCredentialsFile": "C:\\FlowHost\\Secrets\\gmail_credentials.json",
+    "gmailTokenFile": "C:\\FlowHost\\Secrets\\gmail_token.json",
+    "contractInputShortcut": "C:\\FlowHost\\Scansioni.lnk",
+    "contractInputDir": "C:\\FlowHost\\Scansioni",
+    "contractDestinationDir": "C:\\FlowHost\\Contracts\\2026\\CONTRATTI FIRMATI",
+    "contractOcrTextDir": "C:\\FlowHost\\OCR\\ScansioniText",
+    "contractLogDir": "C:\\FlowHost\\Invoices\\Log"
+  },
+  "gmail": {
+    "subject": "Invoices - Example Hotel",
+    "ccEmail": "backoffice@example.invalid"
+  },
+  "invoice": {
+    "inputGlob": "Funzione Pubblica amministrazione*.pdf",
+    "recipientRules": [
+      {
+        "match": "example partner",
+        "email": "invoices@example.invalid"
+      }
+    ]
+  },
+  "contracts": {
+    "scannerFilePrefix": "Sharp MFP",
+    "contractMarker": "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+    "year": "2026"
+  },
+  "safety": {
+    "dryRunDefault": true,
+    "archiveSuccessfulOriginals": true,
+    "redactLogs": true
+  }
+}

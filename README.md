@@ -1,16 +1,8 @@
-# Life Hotel Automation Hub
+# FlowHost Automation Hub
 
-Premium Windows desktop control panel for running and monitoring existing Life Hotel office automations.
+Windows desktop control panel for hotel office automations.
 
-The app is an operator dashboard. It does not rewrite or modify the existing automation scripts; it calls the approved scripts through a Rust backend allowlist.
-
-## What It Does
-
-- Processes invoice PDFs and creates Gmail drafts.
-- Processes signed employee contracts after an explicit confirmation.
-- Runs maintenance actions such as copying scansioni and OCR preprocessing.
-- Shows live command output, status, timing, step exit codes, and recent log files.
-- Provides a Gmail reconnect action when Google access expires or is revoked.
+FlowHost is a Tauri + React operator dashboard. The versionable automation workers now live under `automation/`. The legacy `Script/` folder is treated as a local-only manager-PC import mirror and is ignored by git. FlowHost calls configured script paths through a Rust backend allowlist and performs app-side preflight checks before enabling workflow buttons.
 
 ## Tech Stack
 
@@ -22,156 +14,283 @@ The app is an operator dashboard. It does not rewrite or modify the existing aut
 - Vite
 - Windows WebView2
 
-## Prerequisites
+## Development
 
-- Windows 10 or newer
-- Node.js LTS or newer with npm
-- Rust stable toolchain with Cargo
-- Microsoft Visual Studio Build Tools with the Desktop development with C++ workload
-- WebView2 Runtime
-- Existing Life Hotel automation scripts at the configured absolute paths
+Required local toolchain for Windows development:
 
-## Install
+- Rust stable with the `x86_64-pc-windows-msvc` target
+- Microsoft Visual Studio Build Tools
+- Visual Studio workload: Desktop development with C++
+- Windows 10/11 SDK
+- Windows WebView2 Runtime
 
-Open PowerShell in the project folder:
+Install dependencies:
 
 ```powershell
-cd C:\Users\back-office-life\Desktop\LifeHotelAutomationHub
 npm install
 ```
 
-## Run In Development
+Run the desktop app in development:
 
 ```powershell
 npm run dev
 ```
 
-Tauri starts the Vite frontend and opens the desktop app window.
+Run Rust tests for config/preflight behavior:
 
-## Build Windows Installer
+```powershell
+npm run test:rust
+```
+
+Print local Windows toolchain diagnostics:
+
+```powershell
+npm run doctor:windows
+```
+
+The doctor command is read-only. It prints Rust versions, installed Rust targets, and uses PowerShell `Get-Command` to report whether Windows build tools such as `link.exe` and `cl.exe` are visible in the current shell.
+
+Build the Windows installer:
 
 ```powershell
 npm run tauri build
 ```
 
-The installer is created under:
+The NSIS installer is created under:
 
 ```text
 src-tauri\target\release\bundle\nsis
 ```
 
-## Main Actions
+### Windows MSVC Linker Setup
 
-### Invoices
-
-Runs:
+Rust tests and Tauri builds on Windows use the MSVC linker. If `npm run test:rust` fails with:
 
 ```text
-C:\Users\back-office-life\Desktop\Fatture\Script\run_process_fatture_scheduled.cmd
-C:\Users\back-office-life\Desktop\Fatture\Script\run_create_gmail_draft.cmd
+LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'
 ```
 
-Uses:
+that usually means the local Visual Studio C++ toolchain or Windows SDK is missing, incomplete, or not visible to the shell. This is an environment issue, not a FlowHost workflow issue.
+
+Check diagnostics:
+
+```powershell
+npm run doctor:windows
+```
+
+Expected signs of a healthy setup:
+
+- `rustc` and `cargo` are available
+- `rustup show` uses a stable toolchain
+- `rustup target list --installed` includes `x86_64-pc-windows-msvc`
+- `doctor:windows` reports `link: ...\link.exe` for the Visual Studio MSVC linker
+- `doctor:windows` reports `cl: ...\cl.exe` for the Visual Studio C++ compiler
+
+Manual fix if tools or SDK libraries are missing:
+
+1. Install or open Visual Studio Installer.
+2. Install Microsoft Visual Studio Build Tools or Visual Studio Community.
+3. Select the Desktop development with C++ workload.
+4. Ensure an installed Windows 10/11 SDK is selected in the workload details.
+5. Restart the terminal after installation.
+6. Run `npm run doctor:windows`, then `npm run test:rust` again.
+
+Do not downgrade FlowHost dependencies to hide this linker error.
+
+## Configuration
+
+On first launch, FlowHost creates:
 
 ```text
-C:\Users\back-office-life\Desktop\Fatture\Input
-C:\Users\back-office-life\Desktop\Fatture\Output_ProntoInvio
-C:\Users\back-office-life\Desktop\Fatture\Log
+config.json
 ```
 
-### Gmail Reconnect
+inside the Tauri app data directory for the installed app. The app shows the exact config file path in developer details for setup support.
 
-If Google reports that the Gmail token is expired or revoked, the app can run `Reconnect Gmail`.
+The config contains:
 
-That action deletes:
+- `client.displayName`
+- `automation.automationConfigPath`
+- `automation.pythonExecutable`
+- `scripts.invoiceWorkflowScript`
+- `scripts.gmailDraftScript`
+- `scripts.copyScansioniScript`
+- `scripts.ocrPreprocessingScript`
+- `scripts.contractProcessingScript`
+- `folders.invoiceInputFolder`
+- `folders.invoiceOutputFolder`
+- `folders.invoiceArchiveFolder`
+- `folders.invoiceLogFolder`
+- `folders.scansioniNetworkShare`
+- `folders.scansioniLocalCacheFolder`
+- `folders.ocrTextOutputFolder`
+- `folders.contractsOutputFolder`
+- `folders.contractLogFolder`
+- `gmail.tokenPath`
+- `safety.dryRunDefault`
+- `safety.requireConfirmationForFileMoves`
+- `safety.redactLogs`
+
+Fresh default config prefers the canonical Python scripts under `automation/`, for example:
 
 ```text
-C:\Users\back-office-life\Desktop\Fatture\Script\gmail_token.json
+automation\invoices\process_fatture.py
 ```
 
-Then it reruns the Gmail draft script so Google can open a browser sign-in and create a fresh token.
+Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. On a new PC, create a local automation config from `automation\config.example.json`, then set `automation.automationConfigPath` in FlowHost's app config to that local file.
 
-### Signed Contracts
+Recommended local setup:
 
-Runs only after user confirmation:
+```powershell
+Copy-Item automation\config.example.json automation\config.local.json
+```
+
+Then edit:
+
+- `automation\config.local.json` for script-level folders, Gmail credential/token paths, email subject/CC, invoice routing rules, and contract routing settings.
+- FlowHost app `config.json` for app-side script paths, `automation.automationConfigPath`, `automation.pythonExecutable`, visible hotel name, and folder preflight/open-folder settings.
+
+The two config files must agree where they describe the same operational path. In particular, FlowHost app `gmail.tokenPath` and automation config `paths.gmailTokenFile` must point to the same token file. If they differ, FlowHost blocks Gmail draft/reconnect workflows so setup support can fix the mismatch before token reset or OAuth behavior touches the wrong file.
+
+FlowHost also warns when these overlapping values differ:
+
+- invoice input, output, archive, and log folders
+- contract output, OCR text, and log folders
+- `safety.dryRunDefault`
+
+When FlowHost runs a canonical Python automation script, it invokes it like:
 
 ```text
-C:\Users\back-office-life\Documents\copy_scansioni.cmd
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\back-office-life\Documents\CodexScripts\preprocess_scansioni_to_text.ps1"
-C:\Users\back-office-life\Desktop\Fatture\Script\run_process_contratti.cmd --execute
+python automation\invoices\process_fatture.py --config <automationConfigPath>
+python automation\gmail_drafts\create_gmail_draft.py --config <automationConfigPath>
+python automation\contracts\process_contratti.py --config <automationConfigPath>
 ```
 
-Uses:
+If `safety.dryRunDefault` is enabled in the FlowHost app config, FlowHost also passes `--dry-run` to the invoice and Gmail draft Python scripts. The contract script is dry-run by default unless `--execute` is explicitly passed; FlowHost does not pass `--execute` to the canonical Python contract script.
 
-```text
-\\172.16.47.20\shared\Scansioni
-C:\Users\back-office-life\Documents\CodexInput\Scansioni
-C:\Users\back-office-life\Documents\CodexInput\ScansioniText
-C:\Users\back-office-life\Desktop\Life Hotel\Staff\2026\CONTRATTI FIRMATI
-```
+If an older generated config only contains a `paths` object, FlowHost migrates it to the new schema on startup.
 
-## Safety
+## Resetting Config
 
-- The frontend cannot run arbitrary commands.
-- The Rust backend uses a fixed allowlist of known commands.
-- Only one automation can run at a time.
-- Buttons are disabled during a run.
-- Destructive or file-moving contract processing requires confirmation.
-- OAuth tokens, credentials, logs, build output, generated schemas, and dependencies are ignored by git.
+To reset configuration, close FlowHost, delete the generated `config.json`, and start the app again. FlowHost will recreate defaults.
 
-## Generated Config
-
-On first launch, the app creates a default config file in the Tauri app data directory. It contains the current absolute paths used by the MVP.
-
-If path fields change in source and the app fails with a missing config field, delete the generated config and restart the app:
+PowerShell helper to locate likely FlowHost configs:
 
 ```powershell
 Get-ChildItem $env:APPDATA,$env:LOCALAPPDATA -Recurse -Filter config.json -ErrorAction SilentlyContinue |
-  Where-Object { Select-String -LiteralPath $_.FullName -SimpleMatch "run_create_gmail_draft.cmd" -Quiet } |
-  Remove-Item -Force
+  Where-Object { Select-String -LiteralPath $_.FullName -SimpleMatch "invoiceWorkflowScript" -Quiet }
 ```
 
-## Safe Testing Order
+Review the paths before deleting any file.
 
-1. Start the app in development mode.
-2. Open folders first to confirm paths are correct.
-3. Test `Copy Scansioni`.
-4. Test `Run OCR Preprocessing`.
-5. Test `Reconnect Gmail` only if Gmail access is expired or revoked.
-6. Test `Process Signed Contracts` only after confirming the move action.
-7. Test `Process Invoices & Create Gmail Drafts` only with test invoice files in the input folder.
+## Preflight Checks
 
-## Git Notes
+FlowHost validates the configured app-side dependencies before enabling workflow buttons:
 
-Commit these:
+- automation setup file path exists when canonical Python scripts are used
+- automation setup file agrees with overlapping FlowHost app config values
+- Python executable is available when canonical Python scripts are used
+- configured script path exists and is a file
+- configured folder path exists and is a folder
+- readable folders can be listed
+- writable folders can accept a small temporary probe file
+- network share path appears reachable
+- Gmail token path is configured, and whether the token file currently exists
+- external script dependencies are reported as unknown until the real scripts are collected and audited
 
-```text
-package.json
-package-lock.json
-README.md
-src
-src-tauri/Cargo.toml
-src-tauri/Cargo.lock
-src-tauri/build.rs
-src-tauri/capabilities
-src-tauri/icons
-src-tauri/src
-src-tauri/tauri.conf.json
-tailwind.config.js
-postcss.config.js
-tsconfig*.json
-vite.config.ts
-index.html
-```
+Workflow buttons are disabled when required scripts or folders are missing or permissions look wrong. The backend also refuses to run a workflow that is not ready, even if the frontend is bypassed.
 
-Do not commit:
+## Current Workflows
 
-```text
-node_modules
-dist
-src-tauri/target
-src-tauri/gen
-logs
-OAuth token JSON files
-credential or secret files
-```
+### Invoice Workflow
+
+Runs the configured invoice processing script, then the configured Gmail draft script. Canonical Python scripts are run with `--config <automationConfigPath>`.
+
+Expected configured paths:
+
+- invoice workflow script
+- Gmail draft script
+- invoice input folder
+- invoice output folder
+- invoice log folder
+
+### Gmail Reconnect
+
+Deletes the configured Gmail token file if it exists, then reruns the configured Gmail draft script so the external script can trigger OAuth again.
+
+FlowHost itself does not create Gmail drafts and does not send emails. That behavior belongs to the external script.
+
+### Scansioni Copy
+
+Runs the configured copy scansioni script.
+
+Expected configured paths:
+
+- copy scansioni script
+- scansioni network share
+- scansioni local cache folder
+
+### OCR Preprocessing
+
+Runs the configured OCR preprocessing PowerShell script.
+
+Expected configured paths:
+
+- OCR preprocessing script
+- scansioni local cache folder
+- OCR text output folder
+
+### Signed Contracts
+
+Runs copy scansioni, OCR preprocessing, then the configured contract processing script. For legacy `.cmd` wrappers, FlowHost preserves the previous behavior and passes `--execute`. For the canonical Python contract script under `automation/`, FlowHost does not pass `--execute`, so the script remains dry-run by default.
+
+By default, FlowHost requires confirmation before this file-moving workflow runs. Keep `safety.requireConfirmationForFileMoves` enabled for production.
+
+## Automation Scripts
+
+The canonical versionable scripts are under:
+
+- `automation\invoices\process_fatture.py`
+- `automation\gmail_drafts\create_gmail_draft.py`
+- `automation\contracts\process_contratti.py`
+
+Still missing from the manager-PC collection:
+
+- `copy_scansioni.cmd`
+- `preprocess_scansioni_to_text.ps1`
+
+The ignored `Script/` folder may exist locally as a copied manager-PC mirror. Do not commit it.
+
+## Fake-Script Test Mode Design
+
+For app-side testing, point a copy of `config.json` at fake scripts in a temporary folder. Fake scripts should only print output and write harmless marker files under test folders.
+
+Example fake script behavior:
+
+- invoice fake script: print the input/output folders and exit `0`
+- Gmail fake script: create a local `draft-created.txt` marker instead of calling Gmail
+- copy scansioni fake script: copy a fixture text file between temp folders
+- OCR fake script: write a fixture `.txt` file
+- contract fake script: print the target contracts folder and exit `0`
+
+Use temporary folders for every configured folder path. Never point test config at real guest PDFs, real contracts, or the real Gmail token.
+
+Future improvement: add canonical, config-driven scan-copy and OCR-preprocessing workers, then have FlowHost run them with the same `--config` convention.
+
+## Data That Must Never Be Committed
+
+Never commit:
+
+- `gmail_token.json`
+- Google OAuth client secrets or credential JSON files
+- `.env` files
+- real guest PDFs
+- real invoice outputs
+- real employee contracts
+- OCR text extracted from real documents
+- logs containing guest, employee, booking, email, or contract data
+- generated `dist`, `src-tauri/target`, and dependency folders
+- local `Script/` manager-PC import mirror
+- local `automation/config.local.json`
+
+The repository `.gitignore` excludes common token, credential, log, build, and dependency files, but operators still need to avoid copying real client data into the repo.
