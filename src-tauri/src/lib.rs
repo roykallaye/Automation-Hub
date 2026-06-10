@@ -16,6 +16,7 @@ struct AppState {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             is_running: Mutex::new(false),
             last_run: Mutex::new(None),

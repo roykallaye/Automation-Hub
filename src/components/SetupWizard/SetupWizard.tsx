@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Building2,
   CheckCircle2,
@@ -23,6 +24,7 @@ import { buildConfigPreview } from "./configPreview";
 import {
   createRuleId,
   createSetupDraft,
+  defaultPathsForWorkspace,
   type RecipientRuleDraft,
   type SetupDraft,
   workspaceFolders,
@@ -48,6 +50,14 @@ const steps: WizardStepMeta[] = [
   { key: "finish", title: "Finish" },
 ];
 
+type PathFieldKey =
+  | "workspaceBase"
+  | "gmailCredentialsFile"
+  | "gmailTokenFile"
+  | "sharedScanFolder"
+  | "ocrTextOutputFolder"
+  | "signedContractsOutputFolder";
+
 export function SetupWizard({
   config,
   onClose,
@@ -68,6 +78,69 @@ export function SetupWizard({
 
   function update<K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateWorkspaceBase(nextWorkspace: string) {
+    setDraft((current) => {
+      const oldDefaults = defaultPathsForWorkspace(current.workspaceBase, current.contractYear);
+      const nextDefaults = defaultPathsForWorkspace(nextWorkspace, current.contractYear);
+      const defaultManagedFields: (keyof ReturnType<typeof defaultPathsForWorkspace>)[] = [
+        "gmailCredentialsFile",
+        "gmailTokenFile",
+        "ocrTextOutputFolder",
+        "signedContractsOutputFolder",
+      ];
+      const hasCustomValues = defaultManagedFields.some(
+        (field) => current[field] && current[field] !== oldDefaults[field],
+      );
+      const shouldRefreshDefaults =
+        !hasCustomValues ||
+        window.confirm(
+          "Update FlowHost's suggested Gmail, scan, and contract paths to match the new workspace folder?",
+        );
+
+      return {
+        ...current,
+        workspaceBase: nextWorkspace,
+        ...(shouldRefreshDefaults ? nextDefaults : {}),
+      };
+    });
+  }
+
+  async function chooseDirectory(field: PathFieldKey) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: draft[field] || draft.workspaceBase,
+    });
+    const selectedPath = normalizeDialogSelection(selected);
+    if (!selectedPath) return;
+    if (field === "workspaceBase") {
+      updateWorkspaceBase(selectedPath);
+    } else {
+      update(field, selectedPath);
+    }
+  }
+
+  async function chooseFile(field: PathFieldKey) {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      defaultPath: draft[field] || draft.workspaceBase,
+      filters: [{ name: "JSON files", extensions: ["json"] }],
+    });
+    const selectedPath = normalizeDialogSelection(selected);
+    if (selectedPath) update(field, selectedPath);
+  }
+
+  async function chooseTokenFolder() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: draft.gmailTokenFile || draft.workspaceBase,
+    });
+    const selectedPath = normalizeDialogSelection(selected);
+    if (selectedPath) update("gmailTokenFile", `${selectedPath.replace(/[\\/]+$/g, "")}\\gmail_token.json`);
   }
 
   function updateRule(id: string, patch: Partial<RecipientRuleDraft>) {
@@ -128,10 +201,16 @@ export function SetupWizard({
           confirmed: true,
         });
         const created = result.folders.filter((folder) => folder.action === "created").length;
+        const alreadyExists = result.folders.filter(
+          (folder) => folder.action === "alreadyExists",
+        ).length;
+        const failed = result.folders.filter((folder) => folder.action === "failed").length;
         setSetupResult({
-          kind: "success",
-          title: "Workspace folders checked",
-          message: `${created} folder${created === 1 ? "" : "s"} created. Existing folders were left unchanged.`,
+          kind: failed ? "warning" : "success",
+          title: failed ? "Needs attention" : "Created folders",
+          message: failed
+            ? `${failed} folder${failed === 1 ? "" : "s"} need attention. ${created} created, ${alreadyExists} already existed.`
+            : `${created} created, ${alreadyExists} already existed. Existing files were left unchanged.`,
           details: result,
         });
       } else if (action === "save") {
@@ -139,10 +218,15 @@ export function SetupWizard({
           draft,
           confirmed: true,
         });
+        const blocking = result.validation.workflows.filter(
+          (workflow) => workflow.commandName && !workflow.canRun,
+        ).length;
         setSetupResult({
-          kind: "success",
-          title: "Setup saved",
-          message: `FlowHost setup files were saved. ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`,
+          kind: blocking ? "warning" : "success",
+          title: blocking ? "Saved config, setup not ready yet" : "Setup ready",
+          message: blocking
+            ? `Saved config and created ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"}. ${blocking} workflow${blocking === 1 ? "" : "s"} still need attention.`
+            : `Saved config. ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`,
           details: result,
         });
         onSetupSaved();
@@ -181,10 +265,21 @@ export function SetupWizard({
           <ProfileStep draft={draft} update={update} />
         )}
         {currentStep.key === "workspace" && (
-          <WorkspaceStep draft={draft} update={update} />
+          <WorkspaceStep
+            draft={draft}
+            onWorkspaceChange={updateWorkspaceBase}
+            onChooseFolder={() => chooseDirectory("workspaceBase")}
+          />
         )}
         {currentStep.key === "folders" && <FolderPreviewStep draft={draft} />}
-        {currentStep.key === "gmail" && <GmailStep draft={draft} update={update} />}
+        {currentStep.key === "gmail" && (
+          <GmailStep
+            draft={draft}
+            update={update}
+            onChooseCredentials={() => chooseFile("gmailCredentialsFile")}
+            onChooseTokenFolder={chooseTokenFolder}
+          />
+        )}
         {currentStep.key === "invoices" && (
           <InvoiceRulesStep
             draft={draft}
@@ -195,7 +290,13 @@ export function SetupWizard({
           />
         )}
         {currentStep.key === "contracts" && (
-          <ContractsStep draft={draft} update={update} />
+          <ContractsStep
+            draft={draft}
+            update={update}
+            onChooseSharedScanFolder={() => chooseDirectory("sharedScanFolder")}
+            onChooseOcrTextFolder={() => chooseDirectory("ocrTextOutputFolder")}
+            onChooseContractsOutputFolder={() => chooseDirectory("signedContractsOutputFolder")}
+          />
         )}
         {currentStep.key === "safety" && <SafetyStep draft={draft} update={update} />}
         {currentStep.key === "review" && (
@@ -242,6 +343,11 @@ export function SetupWizard({
       </div>
     </div>
   );
+}
+
+function normalizeDialogSelection(selected: string | string[] | null) {
+  if (Array.isArray(selected)) return selected[0] ?? null;
+  return selected;
 }
 
 type SetupActionResult = {
@@ -304,10 +410,12 @@ function ProfileStep({
 
 function WorkspaceStep({
   draft,
-  update,
+  onWorkspaceChange,
+  onChooseFolder,
 }: {
   draft: SetupDraft;
-  update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
+  onWorkspaceChange: (path: string) => void;
+  onChooseFolder: () => void;
 }) {
   return (
     <SetupStep
@@ -315,14 +423,14 @@ function WorkspaceStep({
       title="Workspace"
       helper="Choose where FlowHost should later keep working folders. This is text only for now."
     >
-      <FieldLabel label="Workspace folder">
-        <input
-          className={inputClassName}
-          value={draft.workspaceBase}
-          onChange={(event) => update("workspaceBase", event.target.value)}
-          placeholder="C:\\FlowHost Workspace"
-        />
-      </FieldLabel>
+      <PathField
+        label="Workspace folder"
+        value={draft.workspaceBase}
+        placeholder="C:\\FlowHost Workspace"
+        hint="Choose a normal folder such as Desktop or Documents, not a drive root."
+        onChange={onWorkspaceChange}
+        onChoose={onChooseFolder}
+      />
       <p className="mt-3 text-sm font-medium text-slate-600">
         Suggested name: FlowHost Workspace
       </p>
@@ -354,9 +462,13 @@ function FolderPreviewStep({ draft }: { draft: SetupDraft }) {
 function GmailStep({
   draft,
   update,
+  onChooseCredentials,
+  onChooseTokenFolder,
 }: {
   draft: SetupDraft;
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
+  onChooseCredentials: () => void;
+  onChooseTokenFolder: () => void;
 }) {
   return (
     <SetupStep
@@ -387,22 +499,24 @@ function GmailStep({
           Gmail file locations
         </summary>
         <div className="mt-4 grid gap-4">
-          <FieldLabel label="Credentials file path">
-            <input
-              className={inputClassName}
-              value={draft.gmailCredentialsFile}
-              onChange={(event) => update("gmailCredentialsFile", event.target.value)}
-              placeholder="C:\\FlowHost Workspace\\Gmail\\Credentials\\gmail_credentials.json"
-            />
-          </FieldLabel>
-          <FieldLabel label="Gmail sign-in file path">
-            <input
-              className={inputClassName}
-              value={draft.gmailTokenFile}
-              onChange={(event) => update("gmailTokenFile", event.target.value)}
-              placeholder="C:\\FlowHost Workspace\\Gmail\\Token\\gmail_token.json"
-            />
-          </FieldLabel>
+          <PathField
+            label="Credentials file path"
+            value={draft.gmailCredentialsFile}
+            placeholder="C:\\FlowHost Workspace\\Gmail\\Credentials\\gmail_credentials.json"
+            hint="Choose the Google credentials JSON file. FlowHost stores only the file path."
+            onChange={(value) => update("gmailCredentialsFile", value)}
+            onChoose={onChooseCredentials}
+            chooseLabel="Choose file"
+          />
+          <PathField
+            label="Gmail sign-in file path"
+            value={draft.gmailTokenFile}
+            placeholder="C:\\FlowHost Workspace\\Gmail\\Token\\gmail_token.json"
+            hint="Choose the token folder. FlowHost will use gmail_token.json in that folder."
+            onChange={(value) => update("gmailTokenFile", value)}
+            onChoose={onChooseTokenFolder}
+            chooseLabel="Choose folder"
+          />
         </div>
       </details>
       <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
@@ -485,9 +599,15 @@ function InvoiceRulesStep({
 function ContractsStep({
   draft,
   update,
+  onChooseSharedScanFolder,
+  onChooseOcrTextFolder,
+  onChooseContractsOutputFolder,
 }: {
   draft: SetupDraft;
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
+  onChooseSharedScanFolder: () => void;
+  onChooseOcrTextFolder: () => void;
+  onChooseContractsOutputFolder: () => void;
 }) {
   return (
     <SetupStep
@@ -521,28 +641,28 @@ function ContractsStep({
             onChange={(event) => update("contractMarkerText", event.target.value)}
           />
         </FieldLabel>
-        <FieldLabel label="Shared scan folder">
-          <input
-            className={inputClassName}
-            value={draft.sharedScanFolder}
-            onChange={(event) => update("sharedScanFolder", event.target.value)}
-            placeholder="\\\\server\\shared\\Scansioni"
-          />
-        </FieldLabel>
-        <FieldLabel label="Document text output folder">
-          <input
-            className={inputClassName}
-            value={draft.ocrTextOutputFolder}
-            onChange={(event) => update("ocrTextOutputFolder", event.target.value)}
-          />
-        </FieldLabel>
-        <FieldLabel label="Signed contracts output folder">
-          <input
-            className={inputClassName}
-            value={draft.signedContractsOutputFolder}
-            onChange={(event) => update("signedContractsOutputFolder", event.target.value)}
-          />
-        </FieldLabel>
+        <PathField
+          label="Shared scan folder"
+          value={draft.sharedScanFolder}
+          placeholder="\\\\server\\shared\\Scansioni"
+          hint="Choose the shared folder where scanned documents arrive."
+          onChange={(value) => update("sharedScanFolder", value)}
+          onChoose={onChooseSharedScanFolder}
+        />
+        <PathField
+          label="Document text output folder"
+          value={draft.ocrTextOutputFolder}
+          hint="FlowHost stores extracted document text here."
+          onChange={(value) => update("ocrTextOutputFolder", value)}
+          onChoose={onChooseOcrTextFolder}
+        />
+        <PathField
+          label="Signed contracts output folder"
+          value={draft.signedContractsOutputFolder}
+          hint="Processed signed contracts will be organized here later."
+          onChange={(value) => update("signedContractsOutputFolder", value)}
+          onChoose={onChooseContractsOutputFolder}
+        />
       </div>
     </SetupStep>
   );
@@ -753,6 +873,80 @@ function SetupActionButton({
       {busy ? "Working..." : label}
     </button>
   );
+}
+
+function PathField({
+  label,
+  value,
+  placeholder,
+  hint,
+  chooseLabel = "Choose",
+  onChange,
+  onChoose,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  hint: string;
+  chooseLabel?: string;
+  onChange: (value: string) => void;
+  onChoose: () => void;
+}) {
+  const status = pathStatus(value);
+  return (
+    <FieldLabel label={label}>
+      <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+        <input
+          className={inputClassName}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        <button
+          className="rounded-md border border-white/70 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm hover:bg-white"
+          onClick={onChoose}
+          type="button"
+        >
+          {chooseLabel}
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          className={[
+            "rounded-md px-2 py-1 text-xs font-bold",
+            status.kind === "ready"
+              ? "bg-emerald-50 text-emerald-800"
+              : status.kind === "warning"
+                ? "bg-amber-50 text-amber-800"
+                : "bg-slate-100 text-slate-700",
+          ].join(" ")}
+        >
+          {status.label}
+        </span>
+        <span className="text-xs font-medium leading-5 text-slate-600">{hint}</span>
+      </div>
+    </FieldLabel>
+  );
+}
+
+function pathStatus(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { kind: "empty", label: "Not selected" } as const;
+  }
+  const normalized = trimmed.replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
+  if (
+    normalized === "c:" ||
+    normalized === "c:\\windows" ||
+    normalized === "c:\\program files" ||
+    normalized === "c:\\program files (x86)" ||
+    normalized.endsWith("\\node_modules") ||
+    normalized.endsWith("\\target") ||
+    normalized.endsWith("\\dist")
+  ) {
+    return { kind: "warning", label: "Needs review" } as const;
+  }
+  return { kind: "ready", label: "Looks usable" } as const;
 }
 
 function InfoCard({ title, text }: { title: string; text: string }) {

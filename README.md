@@ -146,6 +146,7 @@ The Setup page includes a guided setup flow for new installations. It collects h
 Guided setup is intentionally separate from automation runs:
 
 - Preview setup shows the folders and config values FlowHost would use.
+- Folder and file fields include Choose buttons plus editable text fields for setup support.
 - Create folders creates only missing workspace folders and leaves existing folders/files unchanged.
 - Save setup writes FlowHost app config and `automation\config.local.json`; existing config files are backed up first.
 - Check setup reruns FlowHost preflight/alignment checks.

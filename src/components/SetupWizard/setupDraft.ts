@@ -41,9 +41,19 @@ export const folderPreviewItems = [
   "Support/Diagnostics",
 ];
 
+export function defaultPathsForWorkspace(base: string, year: string) {
+  return {
+    gmailCredentialsFile: joinWorkspace(base, "Gmail", "Credentials", "gmail_credentials.json"),
+    gmailTokenFile: joinWorkspace(base, "Gmail", "Token", "gmail_token.json"),
+    ocrTextOutputFolder: joinWorkspace(base, "Scans", "TextOutput"),
+    signedContractsOutputFolder: joinWorkspace(base, "Contracts", year || "2026", "Signed"),
+  };
+}
+
 export function createSetupDraft(config?: HubConfig | null): SetupDraft {
   const workspaceBase = "C:\\FlowHost Workspace";
   const year = new Date().getFullYear().toString();
+  const defaults = defaultPathsForWorkspace(workspaceBase, year);
 
   return {
     hotelDisplayName: config?.client.displayName || "Life Hotel",
@@ -55,9 +65,8 @@ export function createSetupDraft(config?: HubConfig | null): SetupDraft {
     ccEmail: "",
     gmailCredentialsFile:
       config?.gmail.tokenPath.replace(/gmail_token\.json$/i, "gmail_credentials.json") ||
-      joinWorkspace(workspaceBase, "Gmail", "Credentials", "gmail_credentials.json"),
-    gmailTokenFile:
-      config?.gmail.tokenPath || joinWorkspace(workspaceBase, "Gmail", "Token", "gmail_token.json"),
+      defaults.gmailCredentialsFile,
+    gmailTokenFile: config?.gmail.tokenPath || defaults.gmailTokenFile,
     invoiceInputPattern: "Funzione Pubblica amministrazione*.pdf",
     recipientRules: [
       {
@@ -71,10 +80,9 @@ export function createSetupDraft(config?: HubConfig | null): SetupDraft {
     contractMarkerText: "Oggetto: Contratto di lavoro subordinato a tempo determinato",
     sharedScanFolder: config?.folders.scansioniNetworkShare || "",
     ocrTextOutputFolder:
-      config?.folders.ocrTextOutputFolder || joinWorkspace(workspaceBase, "Scans", "TextOutput"),
+      config?.folders.ocrTextOutputFolder || defaults.ocrTextOutputFolder,
     signedContractsOutputFolder:
-      config?.folders.contractsOutputFolder ||
-      joinWorkspace(workspaceBase, "Contracts", year, "Signed"),
+      config?.folders.contractsOutputFolder || defaults.signedContractsOutputFolder,
     safeMode: config?.safety.dryRunDefault ?? true,
     archiveOriginals: true,
     redactLogs: config?.safety.redactLogs ?? true,

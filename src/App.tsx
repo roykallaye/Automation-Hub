@@ -208,6 +208,7 @@ function App() {
           configStatus={configStatus}
           loading={loadingConfig}
           onRefresh={refreshAll}
+          onGoToAutomations={() => setCurrentPage("automations")}
         />
       )}
 
