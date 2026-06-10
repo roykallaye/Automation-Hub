@@ -139,6 +139,19 @@ automation\invoices\process_fatture.py
 
 Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. On a new PC, create a local automation config from `automation\config.example.json`, then set `automation.automationConfigPath` in FlowHost's app config to that local file.
 
+### Guided Setup
+
+The Setup page includes a guided setup flow for new installations. It collects hotel profile details, a FlowHost workspace location, Gmail draft settings, invoice recipient rules, contract/scans settings, and safety preferences.
+
+Guided setup is intentionally separate from automation runs:
+
+- Preview setup shows the folders and config values FlowHost would use.
+- Create folders creates only missing workspace folders and leaves existing folders/files unchanged.
+- Save setup writes FlowHost app config and `automation\config.local.json`; existing config files are backed up first.
+- Check setup reruns FlowHost preflight/alignment checks.
+
+Guided setup does not process invoices, does not create Gmail drafts, does not send emails, and does not move/delete hotel files. Workflows are still run manually from the Automations page after setup is ready.
+
 Recommended local setup:
 
 ```powershell

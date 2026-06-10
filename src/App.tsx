@@ -1,27 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock3, FolderOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   automationActions,
-  contractAction,
-  gmailReconnectAction,
-  invoiceAction,
-  maintenanceActions,
 } from "./actions";
+import { AppShell } from "./components/AppShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
-import { DetailsPanel } from "./components/DetailsPanel";
-import { LiveOutputPanel } from "./components/LiveOutputPanel";
-import { SetupStatusPanel } from "./components/SetupStatusPanel";
-import { StatusPill } from "./components/StatusBadges";
-import {
-  ActionButton,
-  AutomationCard,
-  GmailAccessPanel,
-} from "./components/WorkflowCard";
 import { staffMessage } from "./messages";
+import { ActivityPage } from "./routes/ActivityPage";
+import { AutomationsPage } from "./routes/AutomationsPage";
+import { HomePage } from "./routes/HomePage";
+import { SetupPage } from "./routes/SetupPage";
+import { SupportPage } from "./routes/SupportPage";
 import type {
+  AppPage,
   AppConfigStatus,
   AutomationAction,
   CommandEvent,
@@ -40,6 +33,7 @@ function App() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [notice, setNotice] = useState<string>("Loading setup");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
+  const [currentPage, setCurrentPage] = useState<AppPage>("home");
 
   useEffect(() => {
     void refreshConfigStatus();
@@ -177,128 +171,66 @@ function App() {
     return null;
   }
 
-  const folders = configStatus?.config.folders;
-  const logsFolder = folders?.invoiceLogFolder;
-
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#eef2f4] text-slate-950">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,#f8fafc_0%,#dfe7e8_42%,#f5efe6_100%)]" />
-      <div className="absolute inset-x-0 top-0 h-48 bg-white/45 backdrop-blur-3xl" />
+    <AppShell
+      currentPage={currentPage}
+      displayName={displayName}
+      status={runningCommand ? "warning" : status}
+      statusLabel={runningLabel ?? notice}
+      onPageChange={setCurrentPage}
+    >
+      {currentPage === "home" && (
+        <HomePage
+          configStatus={configStatus}
+          loading={loadingConfig}
+          lastSummary={lastSummary}
+          runningCommand={runningCommand}
+          workflowFor={workflowFor}
+          actionDisabledReason={actionDisabledReason}
+          onRun={startAction}
+          onOpenPath={openPath}
+        />
+      )}
 
-      <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-8 py-7">
-        <header className="flex items-center justify-between gap-5">
-          <div>
-            <p className="text-sm font-medium text-teal-800">{displayName}</p>
-            <h1 className="mt-1 text-4xl font-semibold tracking-normal text-slate-950">
-              FlowHost Automation Hub
-            </h1>
-          </div>
-          <StatusPill status={runningCommand ? "warning" : status} label={runningLabel ?? notice} />
-        </header>
+      {currentPage === "automations" && (
+        <AutomationsPage
+          configStatus={configStatus}
+          runningCommand={runningCommand}
+          workflowFor={workflowFor}
+          actionDisabledReason={actionDisabledReason}
+          onRun={startAction}
+          onOpenPath={openPath}
+        />
+      )}
 
-        <SetupStatusPanel
+      {currentPage === "setup" && (
+        <SetupPage
           configStatus={configStatus}
           loading={loadingConfig}
           onRefresh={refreshAll}
         />
+      )}
 
-        <div className="grid flex-1 grid-cols-[1fr_380px] gap-5">
-          <section className="grid content-start gap-5">
-            <div className="grid grid-cols-2 gap-5">
-              <AutomationCard
-                title="Invoices"
-                action={invoiceAction}
-                workflow={workflowFor(invoiceAction)}
-                runningCommand={runningCommand}
-                disabledReason={actionDisabledReason(invoiceAction)}
-                onRun={startAction}
-                secondaryActions={[
-                  {
-                    label: "Input folder",
-                    icon: FolderOpen,
-                    path: folders?.invoiceInputFolder,
-                  },
-                  {
-                    label: "Ready invoices",
-                    icon: FolderOpen,
-                    path: folders?.invoiceOutputFolder,
-                  },
-                ]}
-                onOpenPath={openPath}
-              />
-              <AutomationCard
-                title="Signed contracts"
-                action={contractAction}
-                workflow={workflowFor(contractAction)}
-                runningCommand={runningCommand}
-                disabledReason={actionDisabledReason(contractAction)}
-                onRun={startAction}
-                secondaryActions={[
-                  {
-                    label: "Shared scan folder",
-                    icon: FolderOpen,
-                    path: folders?.scansioniNetworkShare,
-                  },
-                  {
-                    label: "Signed contracts",
-                    icon: FolderOpen,
-                    path: folders?.contractsOutputFolder,
-                  },
-                ]}
-                onOpenPath={openPath}
-              />
-            </div>
+      {currentPage === "activity" && (
+        <ActivityPage
+          configStatus={configStatus}
+          latestLogs={latestLogs}
+          liveOutput={liveOutput}
+          lastSummary={lastSummary}
+          onOpenPath={openPath}
+          onRefresh={refreshAll}
+        />
+      )}
 
-            <GmailAccessPanel
-              action={gmailReconnectAction}
-              workflow={workflowFor(gmailReconnectAction)}
-              disabledReason={actionDisabledReason(gmailReconnectAction)}
-              disabled={Boolean(runningCommand)}
-              isRunning={runningCommand === gmailReconnectAction.commandName}
-              onRun={() => startAction(gmailReconnectAction)}
-            />
-
-            <section className="rounded-lg border border-white/60 bg-white/48 p-5 shadow-glass backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-slate-950">Support tools</h2>
-                <Clock3 className="h-5 w-5 text-teal-700" />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {maintenanceActions.map((action) => (
-                  <ActionButton
-                    key={action.commandName}
-                    action={action}
-                    workflow={workflowFor(action)}
-                    isRunning={runningCommand === action.commandName}
-                    disabled={Boolean(runningCommand) || Boolean(actionDisabledReason(action))}
-                    disabledReason={actionDisabledReason(action)}
-                    onClick={() => startAction(action)}
-                  />
-                ))}
-                <button
-                  className="inline-flex min-h-16 items-center justify-center gap-2 rounded-md border border-white/70 bg-white/65 px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={Boolean(runningCommand) || !logsFolder}
-                  onClick={() => openPath(logsFolder)}
-                  title={logsFolder ? undefined : "No support log folder is configured."}
-                >
-                  <FolderOpen className="h-5 w-5 text-teal-700" />
-                  Support logs
-                </button>
-              </div>
-            </section>
-
-            <LiveOutputPanel liveOutput={liveOutput} />
-          </section>
-
-          <DetailsPanel
-            summary={lastSummary}
-            latestLogs={latestLogs}
-            configStatus={configStatus}
-            onOpenPath={openPath}
-            onRefresh={refreshAll}
-          />
-        </div>
-      </section>
+      {currentPage === "support" && (
+        <SupportPage
+          configStatus={configStatus}
+          latestLogs={latestLogs}
+          lastSummary={lastSummary}
+          onOpenPath={openPath}
+          onRefresh={refreshAll}
+        />
+      )}
 
       {pendingAction && (
         <ConfirmationModal
@@ -307,7 +239,7 @@ function App() {
           onConfirm={() => runAction(pendingAction, true)}
         />
       )}
-    </main>
+    </AppShell>
   );
 }
 

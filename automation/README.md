@@ -72,6 +72,16 @@ python automation\contracts\process_contratti.py --config <automationConfigPath>
 
 If FlowHost app config has `safety.dryRunDefault` enabled, it also passes `--dry-run` to the invoice and Gmail draft workers. The contract worker is dry-run by default unless `--execute` is explicitly passed.
 
+## Guided Setup
+
+FlowHost's Setup page can generate and save a local setup from a guided wizard. The wizard writes paths and settings only:
+
+- FlowHost app config in the Tauri app data directory.
+- `automation\config.local.json` for the Python automation scripts.
+- Missing workspace folders when the operator explicitly confirms folder creation.
+
+Guided setup does not run these automation scripts, does not create Gmail drafts, and does not send emails. After setup is saved and checked, workflows are still started separately from the FlowHost Automations page.
+
 ## Safe Dry Runs
 
 Invoice processing:

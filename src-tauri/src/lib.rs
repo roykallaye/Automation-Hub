@@ -3,6 +3,7 @@ mod logs;
 mod paths;
 mod preflight;
 mod redaction;
+mod setup;
 mod workflows;
 
 use std::{process::Command, sync::Mutex};
@@ -30,7 +31,11 @@ pub fn run() {
             get_latest_logs,
             get_last_run_summary,
             get_config_status,
-            validate_configuration
+            validate_configuration,
+            preview_setup,
+            initialize_workspace,
+            save_setup_config,
+            validate_setup
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlowHost");
@@ -49,6 +54,33 @@ fn get_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, Strin
 fn validate_configuration(app: AppHandle) -> Result<preflight::PreflightReport, String> {
     let config = config::ensure_config(&app)?;
     Ok(preflight::build_preflight_report(&config))
+}
+
+#[tauri::command]
+fn preview_setup(draft: setup::SetupDraft) -> Result<setup::SetupPreview, String> {
+    setup::preview_setup(draft)
+}
+
+#[tauri::command]
+fn initialize_workspace(
+    draft: setup::SetupDraft,
+    confirmed: Option<bool>,
+) -> Result<setup::WorkspaceInitResult, String> {
+    setup::initialize_workspace(draft, confirmed.unwrap_or(false))
+}
+
+#[tauri::command]
+fn save_setup_config(
+    app: AppHandle,
+    draft: setup::SetupDraft,
+    confirmed: Option<bool>,
+) -> Result<setup::SaveSetupResult, String> {
+    setup::save_setup_config(&app, draft, confirmed.unwrap_or(false))
+}
+
+#[tauri::command]
+fn validate_setup(app: AppHandle) -> Result<preflight::PreflightReport, String> {
+    setup::validate_setup(&app)
 }
 
 #[tauri::command]

@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react";
 
 export type RunStatus = "idle" | "success" | "warning" | "error";
 
+export type AppPage = "home" | "automations" | "setup" | "activity" | "support";
+
 export type ReadinessStatus =
   | "ready"
   | "warning"
@@ -127,4 +129,38 @@ export type AutomationAction = {
   requiresConfirmation?: boolean;
   confirmationTitle: string;
   confirmationMessage: string;
+};
+
+export type SetupFolderPlanItem = {
+  label: string;
+  path: string;
+  status: string;
+  message: string;
+};
+
+export type SetupPreview = {
+  workspaceBase: string;
+  folderPlan: SetupFolderPlanItem[];
+  appConfigPreview: HubConfig;
+  automationConfigPreview: unknown;
+  warnings: string[];
+};
+
+export type SetupFolderActionResult = {
+  label: string;
+  path: string;
+  action: string;
+  message: string;
+};
+
+export type WorkspaceInitResult = {
+  folders: SetupFolderActionResult[];
+  warnings: string[];
+};
+
+export type SaveSetupResult = {
+  appConfigPath: string;
+  automationConfigPath: string;
+  backups: string[];
+  validation: PreflightReport;
 };

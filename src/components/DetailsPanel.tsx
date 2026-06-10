@@ -8,12 +8,14 @@ export function DetailsPanel({
   summary,
   latestLogs,
   configStatus,
+  showDeveloperDetails = true,
   onOpenPath,
   onRefresh,
 }: {
   summary: RunSummary | null;
   latestLogs: LatestLog[];
   configStatus: AppConfigStatus | null;
+  showDeveloperDetails?: boolean;
   onOpenPath: (path?: string | null) => void;
   onRefresh: () => void;
 }) {
@@ -92,7 +94,7 @@ export function DetailsPanel({
         </div>
       </div>
 
-      <DeveloperDetails configStatus={configStatus} />
+      {showDeveloperDetails && <DeveloperDetails configStatus={configStatus} />}
     </aside>
   );
 }
