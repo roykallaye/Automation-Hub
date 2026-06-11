@@ -1,4 +1,4 @@
-import { FileText, FolderOpen, PackageCheck, ShieldCheck } from "lucide-react";
+import { Clipboard, FileText, FolderOpen, PackageCheck, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { DeveloperDetails } from "../components/DeveloperDetails";
@@ -29,8 +29,17 @@ export function SupportPage({
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState<ManagedAutomationInstallResult | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [copiedPythonCommand, setCopiedPythonCommand] = useState(false);
   const config = configStatus?.config;
   const automationRoot = config?.automation.automationRootFolder;
+  const pythonItem = configStatus?.preflight.items.find((item) => item.key === "pythonExecutable");
+  const pythonPackagesItem = configStatus?.preflight.items.find(
+    (item) => item.key === "pythonPackages",
+  );
+  const pythonPackageItems =
+    configStatus?.preflight.dependencies.filter((item) => item.key.startsWith("pythonPackage")) ??
+    [];
+  const pythonInstallCommand = config ? buildPythonInstallCommand(config) : "";
   const canonicalScriptItems =
     configStatus?.preflight.items.filter((item) =>
       ["invoiceWorkflowScript", "gmailDraftScript", "contractProcessingScript"].includes(item.key),
@@ -157,6 +166,80 @@ export function SupportPage({
             )}
           </section>
 
+          <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+            <h2 className="text-xl font-semibold text-slate-950">Python environment</h2>
+            <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
+              Python runs FlowHost automation scripts. Installing packages here does not run workflows.
+            </p>
+            <div className="mt-4 rounded-md bg-white/60 p-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Selected Python</p>
+              <p className="mt-1 break-words font-mono text-xs leading-5 text-slate-700">
+                {config?.automation.pythonExecutable || "Not configured"}
+              </p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-slate-800">
+                  {pythonItem?.status === "ready" ? "Python found" : "Python missing"}
+                </span>
+                {pythonItem && <ReadinessBadge status={pythonItem.status} />}
+              </div>
+              {pythonItem?.message && (
+                <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
+                  {friendlyPythonMessage(pythonItem.message)}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {pythonPackageItems.map((item) => (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-xs font-semibold text-slate-800">{item.label}</p>
+                    <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
+                      {item.message}
+                    </p>
+                  </div>
+                  <ReadinessBadge status={item.status} />
+                </div>
+              ))}
+              {!pythonPackageItems.length && (
+                <div className="rounded-md bg-white/55 p-3 text-sm font-medium text-slate-700">
+                  Python package checks are unavailable.
+                </div>
+              )}
+            </div>
+
+            {pythonPackagesItem?.status !== "ready" && pythonInstallCommand && (
+              <div className="mt-4 rounded-md border border-amber-100 bg-amber-50/80 p-3">
+                <p className="text-sm font-semibold text-amber-950">
+                  Install automation packages
+                </p>
+                <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
+                  Run this in PowerShell after Python is installed.
+                </p>
+                <pre className="mt-3 whitespace-pre-wrap break-words rounded-md bg-white/75 p-3 font-mono text-xs leading-5 text-slate-800">
+                  {pythonInstallCommand}
+                </pre>
+                <button
+                  className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/70 bg-white/75 px-3 text-xs font-semibold text-slate-800 hover:bg-white"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(pythonInstallCommand);
+                      setCopiedPythonCommand(true);
+                    } catch {
+                      setCopiedPythonCommand(false);
+                    }
+                  }}
+                >
+                  <Clipboard className="h-4 w-4 text-teal-700" />
+                  {copiedPythonCommand ? "Copied" : "Copy command"}
+                </button>
+              </div>
+            )}
+          </section>
+
           <section className="rounded-lg border border-teal-100 bg-teal-50/80 p-5 shadow-glass backdrop-blur-xl">
             <div className="flex items-start gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">
@@ -272,4 +355,25 @@ export function SupportPage({
       </section>
     </div>
   );
+}
+
+function buildPythonInstallCommand(config: AppConfigStatus["config"]) {
+  const python = config.automation.pythonExecutable?.trim() || "python";
+  const requirements = joinWindowsPath(config.automation.automationRootFolder, "requirements.txt");
+  const pythonCommand =
+    python.includes("\\") || python.includes("/") || python.includes(":")
+      ? `& "${python}"`
+      : python;
+  return `${pythonCommand} -m pip install -r "${requirements}"`;
+}
+
+function joinWindowsPath(root: string, child: string) {
+  const cleanRoot = root.trim().replace(/[\\/]$/, "");
+  return cleanRoot ? `${cleanRoot}\\${child}` : child;
+}
+
+function friendlyPythonMessage(message: string) {
+  return message
+    .replace("Python found:", "Python found:")
+    .replace("Python was not found at the selected path.", "Python was not found.");
 }

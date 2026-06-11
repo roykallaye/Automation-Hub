@@ -52,6 +52,12 @@ export function staffMessage(
   }
   if (status === "notChecked") return "FlowHost has not checked this yet.";
   if (status === "missingConfiguration") {
+    if (workflowKey === "pythonExecutable") {
+      return "Python needs setup. Open Support for installation steps.";
+    }
+    if (workflowKey === "pythonPackages") {
+      return "Python packages need installing. Open Support for the install command.";
+    }
     if (workflowKey === "gmailCredentialsFile") {
       if (message.toLowerCase().includes("not found")) {
         return "Gmail credentials file not found. Choose the Gmail credentials file.";

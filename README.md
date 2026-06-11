@@ -70,6 +70,39 @@ Print basic Python diagnostics:
 npm run doctor:python
 ```
 
+### Python Environment Setup
+
+FlowHost does not bundle Python yet. Canonical automation scripts require an external Python executable plus the packages in `automation\requirements.txt`.
+
+Recommended short-term managed environment for controlled dry-runs:
+
+```powershell
+python -m venv C:\FlowHost\.venv
+C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+C:\FlowHost\.venv\Scripts\python.exe --version
+```
+
+Then set FlowHost app config:
+
+```text
+automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
+```
+
+If using the app-managed automation folder after `Install/refresh managed scripts`, install requirements from that managed folder instead. Support / Advanced shows the exact PowerShell command based on the current FlowHost setup, for example:
+
+```powershell
+& "C:\FlowHost\.venv\Scripts\python.exe" -m pip install -r "C:\FlowHost\automation\requirements.txt"
+```
+
+This setup only installs Python packages. It does not run workflows, does not call Gmail, does not create drafts, and does not touch hotel folders.
+
+FlowHost checks:
+
+- Python executable is available.
+- PyMuPDF / `fitz` is installed for invoice PDF reading.
+- `googleapiclient` is installed for Gmail draft creation.
+- `google_auth_oauthlib` is installed for Gmail sign-in.
+
 Print local Windows toolchain diagnostics:
 
 ```powershell
@@ -174,11 +207,11 @@ C:\FlowHost\automation\invoices\process_fatture.py
 
 Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. Explicit script paths remain authoritative; `automation.automationRootFolder` is the support-facing folder used for defaults and diagnostics.
 
-On a managed dry-run PC, copy the canonical `automation/` tree to `C:\FlowHost\automation`, create a Python virtual environment such as `C:\FlowHost.venv`, install `automation\requirements.txt`, and set:
+On a managed dry-run PC, copy the canonical `automation/` tree to `C:\FlowHost\automation`, create a Python virtual environment such as `C:\FlowHost\.venv`, install `automation\requirements.txt`, and set:
 
 ```text
 automation.automationRootFolder = C:\FlowHost\automation
-automation.pythonExecutable = C:\FlowHost.venv\Scripts\python.exe
+automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
 ```
 
 Guided setup writes `automation\config.local.json` under the selected FlowHost workspace. That setup file is separate from the managed scripts folder.
@@ -287,16 +320,16 @@ Manual dry-run deployment checklist:
 ```powershell
 New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
 Copy-Item -Recurse -Force automation C:\FlowHost\automation
-python -m venv C:\FlowHost.venv
-C:\FlowHost.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
-C:\FlowHost.venv\Scripts\python.exe --version
+python -m venv C:\FlowHost\.venv
+C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+C:\FlowHost\.venv\Scripts\python.exe --version
 ```
 
 Then set FlowHost app config:
 
 ```text
 automation.automationRootFolder = C:\FlowHost\automation
-automation.pythonExecutable = C:\FlowHost.venv\Scripts\python.exe
+automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
 scripts.invoiceWorkflowScript = C:\FlowHost\automation\invoices\process_fatture.py
 scripts.gmailDraftScript = C:\FlowHost\automation\gmail_drafts\create_gmail_draft.py
 scripts.contractProcessingScript = C:\FlowHost\automation\contracts\process_contratti.py

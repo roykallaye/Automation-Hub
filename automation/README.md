@@ -32,7 +32,7 @@ For a controlled manual hotel dry-run, the recommended managed layout is:
 
 ```text
 C:\FlowHost\automation
-C:\FlowHost.venv
+C:\FlowHost\.venv
 ```
 
 Example setup:
@@ -40,11 +40,11 @@ Example setup:
 ```powershell
 New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
 Copy-Item -Recurse -Force automation C:\FlowHost\automation
-python -m venv C:\FlowHost.venv
-C:\FlowHost.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+python -m venv C:\FlowHost\.venv
+C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
 ```
 
-Then set FlowHost app config `automation.automationRootFolder` to `C:\FlowHost\automation` and `automation.pythonExecutable` to `C:\FlowHost.venv\Scripts\python.exe`.
+Then set FlowHost app config `automation.automationRootFolder` to `C:\FlowHost\automation` and `automation.pythonExecutable` to `C:\FlowHost\.venv\Scripts\python.exe`.
 
 Installed FlowHost builds also include a Support / Advanced action named `Install/refresh managed scripts`. That action copies only the versioned canonical automation files into FlowHost's app data automation folder and updates the app config to point there. It does not run workflows, does not call Gmail, and does not touch hotel folders.
 

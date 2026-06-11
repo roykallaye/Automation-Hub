@@ -5,8 +5,12 @@ use std::{
     fs,
     io::Write,
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,10 +77,12 @@ struct WorkflowPreflight {
 }
 
 pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
+    let python_package_probe = python_package_probe(&config.automation.python_executable);
     let mut items = vec![
         automation_root_check(&config.automation.automation_root_folder),
         automation_config_check(&config.automation.automation_config_path),
         python_check(&config.automation.python_executable),
+        python_package_summary_check(&config.automation.python_executable, &python_package_probe),
         script_check(
             "invoiceWorkflowScript",
             "Invoice workflow script",
@@ -176,12 +182,15 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
         dependency_unknown("cmdExe", "cmd.exe"),
         dependency_unknown("powershellExe", "powershell.exe"),
         dependency_unknown("explorerExe", "explorer.exe"),
-        python_package_check(&config.automation.python_executable),
         dependency_unknown(
             "externalScriptDependencies",
             "PDF/OCR/Gmail dependencies used by external scripts",
         ),
     ];
+    dependencies.extend(python_package_dependency_checks(
+        &config.automation.python_executable,
+        &python_package_probe,
+    ));
 
     let workflows = workflow_preflight(config, &items, &dependencies);
     items.sort_by(|left, right| left.key.cmp(&right.key));
@@ -598,18 +607,30 @@ fn python_check(python_executable: &str) -> PreflightItem {
         };
     }
 
-    let status = std::process::Command::new(python_executable)
-        .arg("--version")
-        .output();
+    let status =
+        command_output_with_timeout(python_executable, &["--version"], PYTHON_CHECK_TIMEOUT);
 
     match status {
-        Ok(output) if output.status.success() => PreflightItem {
+        Ok(output) if output.status.success() => {
+            let version = python_version_from_output(&output.stdout, &output.stderr);
+            PreflightItem {
+                key: "pythonExecutable".to_string(),
+                label: "Python".to_string(),
+                path: Some(python_executable.to_string()),
+                item_type: "dependency".to_string(),
+                status: ReadinessStatus::Ready,
+                message: format!("Python found: {version}."),
+                readable: None,
+                writable: None,
+            }
+        }
+        Err(TimedCommandError::Timeout) => PreflightItem {
             key: "pythonExecutable".to_string(),
             label: "Python".to_string(),
             path: Some(python_executable.to_string()),
             item_type: "dependency".to_string(),
-            status: ReadinessStatus::Ready,
-            message: "Python is available.".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Python check timed out. Choose a working Python executable.".to_string(),
             readable: None,
             writable: None,
         },
@@ -619,7 +640,7 @@ fn python_check(python_executable: &str) -> PreflightItem {
             path: Some(python_executable.to_string()),
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Python is missing or not available on PATH. Ask setup support to install or configure Python."
+            message: "Python was not found at the selected path. Choose a Python executable or ask setup support to install Python."
                 .to_string(),
             readable: None,
             writable: None,
@@ -627,9 +648,122 @@ fn python_check(python_executable: &str) -> PreflightItem {
     }
 }
 
-fn python_package_check(python_executable: &str) -> PreflightItem {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimedCommandError {
+    Io,
+    Timeout,
+}
+
+fn command_output_with_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Output, TimedCommandError> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| TimedCommandError::Io)?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match child.try_wait().map_err(|_| TimedCommandError::Io)? {
+            Some(_) => return child.wait_with_output().map_err(|_| TimedCommandError::Io),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(TimedCommandError::Timeout);
+            }
+            None => thread::sleep(Duration::from_millis(25)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RequiredPythonPackage {
+    key: &'static str,
+    module: &'static str,
+    label: &'static str,
+    ready_message: &'static str,
+    missing_message: &'static str,
+}
+
+const REQUIRED_PYTHON_PACKAGES: &[RequiredPythonPackage] = &[
+    RequiredPythonPackage {
+        key: "pythonPackageFitz",
+        module: "fitz",
+        label: "Invoice PDF reader",
+        ready_message: "Invoice PDF reader installed.",
+        missing_message: "PyMuPDF is needed to read invoice PDFs.",
+    },
+    RequiredPythonPackage {
+        key: "pythonPackageGoogleApi",
+        module: "googleapiclient",
+        label: "Gmail draft library",
+        ready_message: "Gmail draft library installed.",
+        missing_message: "Google API libraries are needed to create Gmail drafts.",
+    },
+    RequiredPythonPackage {
+        key: "pythonPackageGoogleAuthOauthlib",
+        module: "google_auth_oauthlib",
+        label: "Gmail sign-in library",
+        ready_message: "Gmail sign-in library installed.",
+        missing_message: "Google sign-in libraries are needed to reconnect Gmail.",
+    },
+];
+
+#[derive(Debug, Clone)]
+enum PythonPackageProbe {
+    NotConfigured,
+    PythonUnavailable,
+    TimedOut,
+    Ready,
+    Missing(Vec<String>),
+    CheckFailed,
+}
+
+fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
     if python_executable.trim().is_empty() {
-        return PreflightItem {
+        return PythonPackageProbe::NotConfigured;
+    }
+    let required_modules = REQUIRED_PYTHON_PACKAGES
+        .iter()
+        .map(|package| format!("'{}'", package.module))
+        .collect::<Vec<_>>()
+        .join(",");
+    let script = format!(
+        "import importlib.util, sys; required=[{required_modules}]; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)"
+    );
+    let output =
+        command_output_with_timeout(python_executable, &["-c", &script], PYTHON_CHECK_TIMEOUT);
+
+    match output {
+        Ok(output) if output.status.success() => PythonPackageProbe::Ready,
+        Ok(output) => {
+            let missing = String::from_utf8_lossy(&output.stdout)
+                .split(',')
+                .map(str::trim)
+                .filter(|module| !module.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if missing.is_empty() {
+                PythonPackageProbe::CheckFailed
+            } else {
+                PythonPackageProbe::Missing(missing)
+            }
+        }
+        Err(TimedCommandError::Timeout) => PythonPackageProbe::TimedOut,
+        Err(TimedCommandError::Io) => PythonPackageProbe::PythonUnavailable,
+    }
+}
+
+fn python_package_summary_check(
+    python_executable: &str,
+    probe: &PythonPackageProbe,
+) -> PreflightItem {
+    match probe {
+        PythonPackageProbe::NotConfigured => PreflightItem {
             key: "pythonPackages".to_string(),
             label: "Python packages".to_string(),
             path: None,
@@ -638,45 +772,8 @@ fn python_package_check(python_executable: &str) -> PreflightItem {
             message: "Python packages can be checked after Python is configured.".to_string(),
             readable: None,
             writable: None,
-        };
-    }
-
-    let output = std::process::Command::new(python_executable)
-        .args([
-            "-c",
-            "import importlib.util, sys; required=['fitz','googleapiclient','google_auth_oauthlib']; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)",
-        ])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => PreflightItem {
-            key: "pythonPackages".to_string(),
-            label: "Python packages".to_string(),
-            path: Some(python_executable.to_string()),
-            item_type: "dependency".to_string(),
-            status: ReadinessStatus::Ready,
-            message: "Required Python packages are available.".to_string(),
-            readable: None,
-            writable: None,
         },
-        Ok(output) => {
-            let missing = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            PreflightItem {
-                key: "pythonPackages".to_string(),
-                label: "Python packages".to_string(),
-                path: Some(python_executable.to_string()),
-                item_type: "dependency".to_string(),
-                status: ReadinessStatus::MissingConfiguration,
-                message: if missing.is_empty() {
-                    "Required Python packages could not be checked. Ask setup support to install automation requirements.".to_string()
-                } else {
-                    format!("Python packages are missing: {missing}. Ask setup support to install automation requirements.")
-                },
-                readable: None,
-                writable: None,
-            }
-        }
-        Err(_) => PreflightItem {
+        PythonPackageProbe::PythonUnavailable => PreflightItem {
             key: "pythonPackages".to_string(),
             label: "Python packages".to_string(),
             path: Some(python_executable.to_string()),
@@ -687,7 +784,118 @@ fn python_package_check(python_executable: &str) -> PreflightItem {
             readable: None,
             writable: None,
         },
+        PythonPackageProbe::TimedOut => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Python check timed out. Choose a working Python executable.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        PythonPackageProbe::Ready => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "Required Python packages are installed.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        PythonPackageProbe::Missing(missing) => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: format!(
+                "Install the Python packages needed by FlowHost automations. Missing modules: {}.",
+                missing.join(", ")
+            ),
+            readable: None,
+            writable: None,
+        },
+        PythonPackageProbe::CheckFailed => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Required Python packages could not be checked. Ask setup support to install automation requirements.".to_string(),
+            readable: None,
+            writable: None,
+        },
     }
+}
+
+fn python_package_dependency_checks(
+    python_executable: &str,
+    probe: &PythonPackageProbe,
+) -> Vec<PreflightItem> {
+    REQUIRED_PYTHON_PACKAGES
+        .iter()
+        .map(|package| {
+            let missing = match probe {
+                PythonPackageProbe::Missing(missing) => missing
+                    .iter()
+                    .any(|module| module.eq_ignore_ascii_case(package.module)),
+                _ => false,
+            };
+            let (status, message) = match probe {
+                PythonPackageProbe::NotConfigured => (
+                    ReadinessStatus::NotChecked,
+                    "Choose a Python executable before checking this package.".to_string(),
+                ),
+                PythonPackageProbe::PythonUnavailable => (
+                    ReadinessStatus::NotChecked,
+                    "Python was not found, so this package was not checked.".to_string(),
+                ),
+                PythonPackageProbe::TimedOut => (
+                    ReadinessStatus::MissingConfiguration,
+                    "Python check timed out. Choose a working Python executable.".to_string(),
+                ),
+                PythonPackageProbe::Ready => {
+                    (ReadinessStatus::Ready, package.ready_message.to_string())
+                }
+                PythonPackageProbe::Missing(_) if missing => (
+                    ReadinessStatus::MissingConfiguration,
+                    package.missing_message.to_string(),
+                ),
+                PythonPackageProbe::Missing(_) => {
+                    (ReadinessStatus::Ready, package.ready_message.to_string())
+                }
+                PythonPackageProbe::CheckFailed => (
+                    ReadinessStatus::NotChecked,
+                    "This Python package could not be checked.".to_string(),
+                ),
+            };
+
+            PreflightItem {
+                key: package.key.to_string(),
+                label: package.label.to_string(),
+                path: Some(python_executable.to_string()),
+                item_type: "dependency".to_string(),
+                status,
+                message,
+                readable: None,
+                writable: None,
+            }
+        })
+        .collect()
+}
+
+fn python_version_from_output(stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    "available".to_string()
 }
 
 fn script_check(key: &str, label: &str, path: &str) -> PreflightItem {
@@ -1206,6 +1414,7 @@ fn with_python_config(checks: &[&'static str], include_python: bool) -> Vec<&'st
     let mut result = checks.to_vec();
     if include_python {
         result.insert(0, "automationConfigAlignment");
+        result.insert(0, "pythonPackages");
         result.insert(0, "pythonExecutable");
         result.insert(0, "automationConfigPath");
     }
@@ -1709,6 +1918,55 @@ mod tests {
         let item = python_check("definitely_missing_python_for_flowhost_tests.exe");
 
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+    }
+
+    #[test]
+    fn python_version_message_uses_version_output() {
+        let version = python_version_from_output(b"Python 3.12.1\r\n", b"");
+
+        assert_eq!(version, "Python 3.12.1");
+    }
+
+    #[test]
+    fn missing_python_package_summary_is_operator_friendly() {
+        let item = python_package_summary_check(
+            "python",
+            &PythonPackageProbe::Missing(vec!["fitz".to_string()]),
+        );
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+        assert!(item.message.contains("Install the Python packages"));
+        assert!(item.message.contains("fitz"));
+    }
+
+    #[test]
+    fn missing_python_package_dependency_has_friendly_label() {
+        let checks = python_package_dependency_checks(
+            "python",
+            &PythonPackageProbe::Missing(vec!["googleapiclient".to_string()]),
+        );
+        let gmail = checks
+            .iter()
+            .find(|item| item.key == "pythonPackageGoogleApi")
+            .unwrap();
+        let fitz = checks
+            .iter()
+            .find(|item| item.key == "pythonPackageFitz")
+            .unwrap();
+
+        assert_eq!(gmail.label, "Gmail draft library");
+        assert_eq!(gmail.status, ReadinessStatus::MissingConfiguration);
+        assert!(gmail.message.contains("Gmail drafts"));
+        assert_eq!(fitz.status, ReadinessStatus::Ready);
+    }
+
+    #[test]
+    fn timed_out_python_package_check_is_operator_friendly() {
+        let item = python_package_summary_check("python", &PythonPackageProbe::TimedOut);
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+        assert!(item.message.contains("timed out"));
+        assert!(item.message.contains("working Python executable"));
     }
 
     fn write_automation_config(

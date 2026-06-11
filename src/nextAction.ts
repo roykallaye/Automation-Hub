@@ -47,7 +47,7 @@ export function deriveNextAction({
     };
   }
 
-  const latestActivity = activityHistory.at(-1);
+  const latestActivity = activityHistory[activityHistory.length - 1];
   if (lastSummary?.status === "error" || latestActivity?.status === "failed") {
     return {
       id: "review-failed-run",

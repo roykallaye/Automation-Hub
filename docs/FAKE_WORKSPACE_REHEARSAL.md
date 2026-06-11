@@ -38,6 +38,15 @@ npm run tauri dev
 
 Open FlowHost, go to `Setup`, and start the guided setup.
 
+Before running any dry-run automation, open `Support` / `Advanced details` and check the Python environment card:
+
+- Python should be found.
+- Invoice PDF reader should be installed.
+- Gmail draft library should be installed.
+- Gmail sign-in library should be installed.
+
+If packages are missing, copy the install command shown in Support and run it in PowerShell. This installs Python packages only; it does not run workflows or call Gmail.
+
 ## Exact Setup Wizard Values
 
 ### Hotel Profile

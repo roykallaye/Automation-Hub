@@ -52,7 +52,10 @@ export function SetupPage({
   const nextBlockingItem =
     configStatus && nextIssue ? firstBlockingItem(configStatus, nextIssue) : null;
   const scriptsNeedSupport =
-    nextBlockingItem?.itemType === "script" || nextBlockingItem?.key === "automationRootFolder";
+    nextBlockingItem?.itemType === "script" ||
+    nextBlockingItem?.key === "automationRootFolder" ||
+    nextBlockingItem?.key === "pythonExecutable" ||
+    nextBlockingItem?.key === "pythonPackages";
 
   return (
     <div className="space-y-5">
@@ -309,7 +312,16 @@ function setupGuidance(
       tone: "attention",
       title: "Python needs attention",
       summary: "Setup saved. Python is not available yet.",
-      detail: "Ask setup support to install Python or update the Python setting.",
+      detail: "Open Support to check the selected Python executable and installation steps.",
+    };
+  }
+
+  if (item.key === "pythonPackages") {
+    return {
+      tone: "attention",
+      title: "Python packages need installing",
+      summary: "Setup saved. Python packages are not ready yet.",
+      detail: "Open Support and install the Python packages needed by FlowHost automations.",
     };
   }
 
