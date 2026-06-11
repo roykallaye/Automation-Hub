@@ -18,6 +18,7 @@ from shared.config import (  # noqa: E402
     load_config,
     resolve_path,
 )
+from shared.report import now_iso, report_status, standard_report, write_report  # noqa: E402
 
 
 SHORTCUT_PATH = Path(r"C:\Users\back-office-life\Desktop\Scansioni.lnk")
@@ -197,10 +198,54 @@ def build_target_filename(employee_name: str | None) -> tuple[str, bool]:
     return f"Contratto_{safe_name}.pdf", False
 
 
+def default_report_path(log_path: Path) -> Path:
+    name = log_path.name.replace("process_contratti_", "report_contratti_").replace(".log", ".json")
+    return log_path.with_name(name)
+
+
+def write_contract_report(
+    *,
+    report_path: Path,
+    log_path: Path,
+    args: argparse.Namespace,
+    started_at: str,
+    status: str,
+    summary: dict[str, int],
+    items: list[dict],
+    warnings: list[str],
+    errors: list[str],
+) -> None:
+    report = {
+        **standard_report(
+            workflow="contracts",
+            mode="execute" if args.execute else "dry_run",
+            started_at=started_at,
+            finished_at=now_iso(),
+            status=status,
+            summary=summary,
+            items=items,
+            warnings=warnings,
+            errors=errors,
+            report_path=report_path,
+            log_path=log_path,
+        ),
+        "details": {
+            "inputFolder": str(args.input_dir) if args.input_dir else None,
+            "inputShortcut": str(args.input_shortcut),
+            "destinationFolder": str(args.destination_dir),
+            "ocrTextFolder": str(args.ocr_text_dir),
+        },
+    }
+    write_report(report_path, report)
+
+
 def process(args: argparse.Namespace) -> int:
+    started_at = now_iso()
     log_path = setup_logging(args.log_dir)
+    report_path = args.json_report or default_report_path(log_path)
     logging.info("Mode: %s", "EXECUTE" if args.execute else "DRY RUN")
     logging.info("Log file: %s", log_path)
+    logging.info("Report file: %s", report_path)
     logging.info("Shortcut path: %s", args.input_shortcut)
     logging.info("Configured input folder: %s", args.input_dir)
 
@@ -216,10 +261,48 @@ def process(args: argparse.Namespace) -> int:
     except PermissionError as error:
         logging.error("Could not access input folder: %s | error: %s", input_dir, error)
         logging.info("No files were renamed or moved.")
+        write_contract_report(
+            report_path=report_path,
+            log_path=log_path,
+            args=args,
+            started_at=started_at,
+            status="failed",
+            summary={
+                "found": 0,
+                "processed": 0,
+                "planned": 0,
+                "created": 0,
+                "moved": 0,
+                "failed": 1,
+                "warnings": 0,
+            },
+            items=[],
+            warnings=[],
+            errors=[f"Could not access input folder: {error}"],
+        )
         return 2
     except Exception as error:
         logging.error("Could not list input folder: %s | error: %s", input_dir, error)
         logging.info("No files were renamed or moved.")
+        write_contract_report(
+            report_path=report_path,
+            log_path=log_path,
+            args=args,
+            started_at=started_at,
+            status="failed",
+            summary={
+                "found": 0,
+                "processed": 0,
+                "planned": 0,
+                "created": 0,
+                "moved": 0,
+                "failed": 1,
+                "warnings": 0,
+            },
+            items=[],
+            warnings=[],
+            errors=[f"Could not list input folder: {error}"],
+        )
         return 2
 
     if args.limit:
@@ -231,10 +314,36 @@ def process(args: argparse.Namespace) -> int:
 
     if args.list_only:
         logging.info("List-only mode: no TXT read, no rename, and no move will be attempted.")
+        items = []
         for pdf in pdfs:
             logging.info("LIST ONLY PDF: %s", pdf)
-            logging.info("LIST ONLY matching TXT path: %s", matching_text_path(pdf, text_dir))
+            text_path = matching_text_path(pdf, text_dir)
+            logging.info("LIST ONLY matching TXT path: %s", text_path)
+            items.append({
+                "sourcePath": str(pdf),
+                "status": "listed",
+                "textPath": str(text_path),
+            })
         logging.info("Finished list-only report. Log file: %s", log_path)
+        write_contract_report(
+            report_path=report_path,
+            log_path=log_path,
+            args=args,
+            started_at=started_at,
+            status="success",
+            summary={
+                "found": len(pdfs),
+                "processed": 0,
+                "planned": 0,
+                "created": 0,
+                "moved": 0,
+                "failed": 0,
+                "warnings": 0,
+            },
+            items=items,
+            warnings=[],
+            errors=[],
+        )
         return 0
 
     if args.execute:
@@ -249,6 +358,9 @@ def process(args: argparse.Namespace) -> int:
     missing_txt = 0
     text_read_failures = 0
     names_extracted = 0
+    items = []
+    warnings = []
+    errors = []
 
     for pdf_path in pdfs:
         try:
@@ -256,11 +368,23 @@ def process(args: argparse.Namespace) -> int:
         except Exception as error:
             text_read_failures += 1
             logging.exception("OCR text read failure; skipping file: %s | error: %s", pdf_path, error)
+            errors.append(f"OCR text read failure for {pdf_path.name}: {error}")
+            items.append({
+                "sourcePath": str(pdf_path),
+                "status": "error",
+                "error": str(error),
+            })
             continue
 
         if is_missing_text:
             missing_txt += 1
             logging.warning("Missing OCR text; skipping file: %s | expected TXT: %s", pdf_path, text_path)
+            warnings.append(f"Missing OCR text for {pdf_path.name}.")
+            items.append({
+                "sourcePath": str(pdf_path),
+                "status": "missing_ocr_text",
+                "textPath": str(text_path),
+            })
             continue
 
         matching_txt_found += 1
@@ -268,6 +392,11 @@ def process(args: argparse.Namespace) -> int:
         if not is_contract:
             skipped_not_contract += 1
             logging.info("Skipped as not contract: %s | TXT: %s", pdf_path, text_path)
+            items.append({
+                "sourcePath": str(pdf_path),
+                "status": "skipped_not_contract",
+                "textPath": str(text_path),
+            })
             continue
 
         identified += 1
@@ -278,6 +407,7 @@ def process(args: argparse.Namespace) -> int:
             no_name += 1
             logging.warning("Contract identified but employee name was not extracted: %s", pdf_path)
             logging.info("Will use no-name filename: %s", filename)
+            warnings.append(f"Contract identified without employee name: {pdf_path.name}.")
         else:
             names_extracted += 1
             logging.info("Extracted employee name: %s", employee_name)
@@ -290,8 +420,18 @@ def process(args: argparse.Namespace) -> int:
             shutil.move(str(pdf_path), str(final_path))
             moved += 1
             logging.info("Renamed and moved: %s -> %s", pdf_path, final_path)
+            item_status = "moved"
         else:
             logging.info("DRY RUN would rename and move: %s -> %s", pdf_path, final_path)
+            item_status = "planned_move"
+
+        items.append({
+            "sourcePath": str(pdf_path),
+            "status": item_status,
+            "textPath": str(text_path),
+            "destinationPath": str(final_path),
+            "hasEmployeeName": not used_no_name,
+        })
 
     logging.info("Summary")
     logging.info("PDFs found: %s", len(pdfs))
@@ -307,6 +447,27 @@ def process(args: argparse.Namespace) -> int:
 
     if not args.execute:
         logging.info("Dry run only. Re-run with --execute to move positively identified contracts.")
+
+    write_contract_report(
+        report_path=report_path,
+        log_path=log_path,
+        args=args,
+        started_at=started_at,
+        status=report_status(text_read_failures, len(warnings)),
+        summary={
+            "found": len(pdfs),
+            "processed": len(pdfs),
+            "planned": identified,
+            "created": 0,
+            "moved": moved,
+            "failed": text_read_failures,
+            "warnings": len(warnings),
+        },
+        items=items,
+        warnings=warnings,
+        errors=errors,
+    )
+    logging.info("Report: %s", report_path)
 
     return 0
 
@@ -326,6 +487,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--destination-dir", type=Path)
     parser.add_argument("--log-dir", type=Path)
     parser.add_argument("--ocr-text-dir", type=Path)
+    parser.add_argument("--json-report", type=Path, help="Optional path for the JSON report.")
     parser.add_argument("--max-pages", type=int, default=3, help=argparse.SUPPRESS)
     parser.add_argument("--dpi", type=int, default=200, help=argparse.SUPPRESS)
     parser.add_argument("--ocr-language", default="it-IT", help=argparse.SUPPRESS)

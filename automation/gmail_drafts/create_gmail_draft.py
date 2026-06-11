@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 import base64
-import json
 import re
 import shutil
 import sys
@@ -17,6 +16,7 @@ from shared.config import (  # noqa: E402
     config_str,
     load_config,
 )
+from shared.report import now_iso, standard_report, write_report  # noqa: E402
 
 
 ROOT = Path(r"C:\Users\back-office-life\Desktop\Fatture")
@@ -281,9 +281,27 @@ def archive_successful_group(group: dict) -> list[str]:
     return archived_pdf_files
 
 
+def gmail_report_item(group: dict, *, draft_id: str | None = None, archived_pdf_files: list[str] | None = None) -> dict:
+    item = {
+        "recipientEmail": group["recipient_email"],
+        "groupName": group["group_name"],
+        "folder": str(group["folder"]),
+        "pdfCount": len(group["pdf_files"]),
+        "pdfFiles": [pdf.name for pdf in group["pdf_files"]],
+    }
+    if draft_id:
+        item["draftId"] = draft_id
+    if archived_pdf_files is not None:
+        item["archivedPdfFiles"] = archived_pdf_files
+    else:
+        item["wouldArchiveFolder"] = str(ARCHIVE_RUN_DIR / "Output_DraftCreati" / group["group_name"])
+    return item
+
+
 def main(args: argparse.Namespace | None = None):
     args = args or parse_args()
     configure_run(args)
+    started_at = now_iso()
     dry_run = args.dry_run
     input_pdfs = sorted(INPUT_DIR.glob("Funzione Pubblica amministrazione*.pdf"))
 
@@ -302,27 +320,44 @@ def main(args: argparse.Namespace | None = None):
             f"({len(group['pdf_files'])} PDF)"
         )
 
-    report = {
-        "run_timestamp": RUN_TS,
-        "output_folder": str(OUTPUT_DIR),
-        "dry_run": dry_run,
-        "subject": SUBJECT,
-        "cc_email": CC_EMAIL,
-        "draft_groups_found": len(groups),
-        "drafts_expected": len(groups),
-        "drafts_created": 0,
-        "groups": [],
-    }
-
     if not groups:
+        report = {
+            **standard_report(
+                workflow="gmail_drafts",
+                mode="dry_run" if dry_run else "execute",
+                started_at=started_at,
+                finished_at=now_iso(),
+                status="success",
+                summary={
+                    "found": 0,
+                    "processed": 0,
+                    "planned": 0,
+                    "created": 0,
+                    "moved": 0,
+                    "failed": 0,
+                    "warnings": 0,
+                },
+                items=[],
+                warnings=[],
+                errors=[],
+                report_path=REPORT_FILE,
+                log_path=LOG_FILE,
+            ),
+            "details": {
+                "outputFolder": str(OUTPUT_DIR),
+                "subject": SUBJECT,
+                "ccEmail": CC_EMAIL,
+            },
+        }
         log("No draft groups with PDFs found. Gmail drafts not created.")
         log("Total drafts created: 0")
-        REPORT_FILE.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        write_report(REPORT_FILE, report)
         log(f"Report: {REPORT_FILE}")
         log("=== END ===")
         return
 
     if dry_run:
+        items = []
         for group in groups:
             recipient_label = group["recipient_email"] or "SenzaEmail (CC only)"
             attachment_names = [pdf.name for pdf in group["pdf_files"]]
@@ -330,25 +365,49 @@ def main(args: argparse.Namespace | None = None):
                 f"DRY RUN would create draft for {recipient_label}; "
                 f"CC: {CC_EMAIL}; subject: {SUBJECT}; attachments: {attachment_names}"
             )
-            report["groups"].append({
-                "recipient_email": group["recipient_email"],
-                "cc_email": CC_EMAIL,
-                "subject": SUBJECT,
-                "group_name": group["group_name"],
-                "folder": str(group["folder"]),
-                "pdf_count": len(group["pdf_files"]),
-                "pdf_files": attachment_names,
-                "would_create_draft": True,
-                "would_archive_folder": str(ARCHIVE_RUN_DIR / "Output_DraftCreati" / group["group_name"]),
-            })
+            item = gmail_report_item(group)
+            item["wouldCreateDraft"] = True
+            item["ccEmail"] = CC_EMAIL
+            item["subject"] = SUBJECT
+            items.append(item)
 
-        REPORT_FILE.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        report = {
+            **standard_report(
+                workflow="gmail_drafts",
+                mode="dry_run",
+                started_at=started_at,
+                finished_at=now_iso(),
+                status="success",
+                summary={
+                    "found": len(groups),
+                    "processed": len(groups),
+                    "planned": len(groups),
+                    "created": 0,
+                    "moved": 0,
+                    "failed": 0,
+                    "warnings": 0,
+                },
+                items=items,
+                warnings=[],
+                errors=[],
+                report_path=REPORT_FILE,
+                log_path=LOG_FILE,
+            ),
+            "details": {
+                "outputFolder": str(OUTPUT_DIR),
+                "subject": SUBJECT,
+                "ccEmail": CC_EMAIL,
+            },
+        }
+        write_report(REPORT_FILE, report)
         log(f"Dry-run draft count: {len(groups)}")
         log(f"Report: {REPORT_FILE}")
         log("=== END ===")
         return
 
     service = get_service()
+    items = []
+    archived_count = 0
 
     for group in groups:
         draft_id = create_draft(
@@ -361,23 +420,45 @@ def main(args: argparse.Namespace | None = None):
         recipient_label = group["recipient_email"] or "SenzaEmail (CC only)"
         log(f"Draft created for {recipient_label}. Draft ID: {draft_id}")
         archived_pdf_files = archive_successful_group(group)
+        archived_count += len(archived_pdf_files)
         log(f"Archived {len(archived_pdf_files)} PDF for {recipient_label}.")
 
-        report["groups"].append({
-            "recipient_email": group["recipient_email"],
-            "cc_email": CC_EMAIL,
-            "group_name": group["group_name"],
-            "folder": str(group["folder"]),
-            "pdf_count": len(group["pdf_files"]),
-            "pdf_files": [pdf.name for pdf in group["pdf_files"]],
-            "archived_pdf_files": archived_pdf_files,
-            "draft_id": draft_id,
-        })
-        report["drafts_created"] += 1
+        item = gmail_report_item(group, draft_id=draft_id, archived_pdf_files=archived_pdf_files)
+        item["ccEmail"] = CC_EMAIL
+        item["subject"] = SUBJECT
+        items.append(item)
 
-    REPORT_FILE.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    report = {
+        **standard_report(
+            workflow="gmail_drafts",
+            mode="execute",
+            started_at=started_at,
+            finished_at=now_iso(),
+            status="success",
+            summary={
+                "found": len(groups),
+                "processed": len(groups),
+                "planned": len(groups),
+                "created": len(items),
+                "moved": archived_count,
+                "failed": 0,
+                "warnings": 0,
+            },
+            items=items,
+            warnings=[],
+            errors=[],
+            report_path=REPORT_FILE,
+            log_path=LOG_FILE,
+        ),
+        "details": {
+            "outputFolder": str(OUTPUT_DIR),
+            "subject": SUBJECT,
+            "ccEmail": CC_EMAIL,
+        },
+    }
+    write_report(REPORT_FILE, report)
 
-    log(f"Total drafts created: {report['drafts_created']}")
+    log(f"Total drafts created: {len(items)}")
     log(f"Report: {REPORT_FILE}")
     log("=== END ===")
 

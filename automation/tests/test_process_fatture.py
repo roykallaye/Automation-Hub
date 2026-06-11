@@ -58,10 +58,13 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(count_files(workspace.invoice_archive), 0)
 
             data = json.loads(report.read_text(encoding="utf-8"))
-            self.assertTrue(data["dry_run"])
-            self.assertEqual(data["pdfs_found"], 1)
-            self.assertEqual(data["failed"], 1)
-            self.assertEqual(data["results"][0]["status"], "error")
+            self.assertEqual(data["workflow"], "invoices")
+            self.assertEqual(data["mode"], "dry_run")
+            self.assertEqual(data["status"], "failed")
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["failed"], 1)
+            self.assertEqual(data["items"][0]["status"], "error")
+            self.assertEqual(data["outputs"]["reportPath"], str(report))
 
     def test_dry_run_keeps_original_and_does_not_finalize_outputs(self) -> None:
         with FlowHostWorkspace() as workspace:
@@ -85,10 +88,15 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(count_files(workspace.invoice_archive), 0)
 
             data = json.loads(report.read_text(encoding="utf-8"))
-            self.assertTrue(data["dry_run"])
-            self.assertEqual(data["pdfs_found"], 1)
-            self.assertEqual(data["processed_ok"], 1)
-            self.assertIn("test@example.com", data["groups_created_by_email"])
+            self.assertEqual(data["workflow"], "invoices")
+            self.assertEqual(data["mode"], "dry_run")
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["processed"], 1)
+            self.assertEqual(data["summary"]["planned"], 1)
+            self.assertEqual(data["summary"]["created"], 0)
+            self.assertEqual(data["items"][0]["recipient_email"], "test@example.com")
+            self.assertIn("test@example.com", data["details"]["recipientGroups"])
 
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with FlowHostWorkspace() as workspace:

@@ -1,6 +1,5 @@
 import argparse
 import re
-import json
 import shutil
 import sys
 import tempfile
@@ -17,6 +16,7 @@ from shared.config import (  # noqa: E402
     load_config,
     recipient_rules,
 )
+from shared.report import now_iso, standard_report, write_report  # noqa: E402
 
 
 ROOT = Path(r"C:\Users\back-office-life\Desktop\Fatture")
@@ -352,9 +352,40 @@ def collect_groups_by_email(processed_files: list[dict]) -> dict:
     return groups
 
 
+def invoice_report_item(result: dict) -> dict:
+    item = {
+        "sourcePath": result.get("input_pdf") or result.get("input_pdf_original_deleted"),
+        "status": result.get("status"),
+    }
+    for key in [
+        "recipient_email",
+        "reason",
+        "output_pdf",
+        "planned_output_pdf",
+        "would_create_output_pdf",
+        "input_pdf_original_archived",
+        "would_archive_original",
+        "would_copy_to_failed_archive",
+    ]:
+        if result.get(key) is not None:
+            item[key] = result[key]
+    if result.get("output_pdf_name"):
+        item["outputName"] = result["output_pdf_name"]
+    return item
+
+
+def invoice_status(failed_count: int, warning_count: int) -> str:
+    if failed_count:
+        return "failed"
+    if warning_count:
+        return "needs_attention"
+    return "success"
+
+
 def main(args: argparse.Namespace | None = None):
     args = args or parse_args()
     configure_run(args)
+    started_at = now_iso()
     dry_run = args.dry_run
     input_pdfs = sorted(INPUT_DIR.glob(INPUT_GLOB))
 
@@ -367,20 +398,35 @@ def main(args: argparse.Namespace | None = None):
 
     if not input_pdfs:
         report = {
-            "run_timestamp": RUN_TS,
-            "input_folder": str(INPUT_DIR),
-            "output_folder": str(OUTPUT_DIR),
-            "archive_folder": str(ARCHIVE_RUN_DIR),
-            "pdfs_found": 0,
-            "dry_run": dry_run,
-            "processed_ok": 0,
-            "missing_email": 0,
-            "failed": 0,
-            "groups_created_by_email": {},
-            "drafts_expected": 0,
-            "results": [],
+            **standard_report(
+                workflow="invoices",
+                mode="dry_run" if dry_run else "execute",
+                started_at=started_at,
+                finished_at=now_iso(),
+                status="success",
+                summary={
+                    "found": 0,
+                    "processed": 0,
+                    "planned": 0,
+                    "created": 0,
+                    "moved": 0,
+                    "failed": 0,
+                    "warnings": 0,
+                },
+                items=[],
+                warnings=[],
+                errors=[],
+                report_path=REPORT_FILE,
+                log_path=LOG_FILE,
+            ),
+            "details": {
+                "inputFolder": str(INPUT_DIR),
+                "outputFolder": str(OUTPUT_DIR),
+                "archiveFolder": str(ARCHIVE_RUN_DIR),
+                "recipientGroups": {},
+            },
         }
-        REPORT_FILE.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        write_report(REPORT_FILE, report)
 
         log("No new input invoices found. Output_ProntoInvio was left unchanged.")
         log("Gmail draft skipped because no new invoices were processed.")
@@ -602,21 +648,42 @@ def main(args: argparse.Namespace | None = None):
             log(f"Group created: {recipient_email} ({len(pdf_names)} PDF)")
 
     report = {
-        "run_timestamp": RUN_TS,
-        "input_folder": str(INPUT_DIR),
-        "output_folder": str(OUTPUT_DIR),
-        "archive_folder": str(ARCHIVE_RUN_DIR),
-        "pdfs_found": len(input_pdfs),
-        "dry_run": dry_run,
-        "processed_ok": len(processed_items),
-        "missing_email": len(missing_email_items),
-        "failed": len(failed_items),
-        "groups_created_by_email": groups_by_email,
-        "drafts_expected": len(groups_by_email) + (1 if missing_email_items else 0),
-        "results": results,
+        **standard_report(
+            workflow="invoices",
+            mode="dry_run" if dry_run else "execute",
+            started_at=started_at,
+            finished_at=now_iso(),
+            status=invoice_status(len(failed_items), len(missing_email_items)),
+            summary={
+                "found": len(input_pdfs),
+                "processed": len(processed_items),
+                "planned": len(groups_by_email) + (1 if missing_email_items else 0),
+                "created": 0 if dry_run else len(processed_items),
+                "moved": 0 if dry_run else len(processed_items),
+                "failed": len(failed_items),
+                "warnings": len(missing_email_items),
+            },
+            items=[invoice_report_item(result) for result in results],
+            warnings=[
+                f"No recipient rule matched for {Path(item.get('input_pdf', '')).name}"
+                for item in missing_email_items
+            ],
+            errors=[
+                f"{Path((item.get('input_pdf') or item.get('input_pdf_original_deleted') or '')).name}: {item.get('reason', item.get('status'))}"
+                for item in failed_items
+            ],
+            report_path=REPORT_FILE,
+            log_path=LOG_FILE,
+        ),
+        "details": {
+            "inputFolder": str(INPUT_DIR),
+            "outputFolder": str(OUTPUT_DIR),
+            "archiveFolder": str(ARCHIVE_RUN_DIR),
+            "recipientGroups": groups_by_email,
+        },
     }
 
-    REPORT_FILE.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_report(REPORT_FILE, report)
 
     log("=== SUMMARY ===")
     log(f"PDFs found: {len(input_pdfs)}")

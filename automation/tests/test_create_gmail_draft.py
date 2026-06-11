@@ -33,11 +33,15 @@ class CreateGmailDraftTests(unittest.TestCase):
             self.assertTrue(report.exists())
 
             data = json.loads(report.read_text(encoding="utf-8"))
-            self.assertTrue(data["dry_run"])
-            self.assertEqual(data["drafts_expected"], 1)
-            self.assertEqual(data["drafts_created"], 0)
-            self.assertEqual(data["groups"][0]["recipient_email"], "test@example.com")
-            self.assertEqual(data["groups"][0]["pdf_files"], ["fake_invoice.pdf"])
+            self.assertEqual(data["workflow"], "gmail_drafts")
+            self.assertEqual(data["mode"], "dry_run")
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["planned"], 1)
+            self.assertEqual(data["summary"]["created"], 0)
+            self.assertEqual(data["items"][0]["recipientEmail"], "test@example.com")
+            self.assertEqual(data["items"][0]["pdfFiles"], ["fake_invoice.pdf"])
+            self.assertEqual(data["outputs"]["reportPath"], str(report))
 
     def test_dry_run_does_not_need_or_expose_credential_contents(self) -> None:
         with FlowHostWorkspace() as workspace:

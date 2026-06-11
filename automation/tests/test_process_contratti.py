@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import unittest
 
-from helpers import FlowHostWorkspace, count_files, latest_log_text, run_script
+from helpers import FlowHostWorkspace, count_files, run_script
 
 
 class ProcessContrattiTests(unittest.TestCase):
@@ -20,19 +21,30 @@ class ProcessContrattiTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            report = workspace.root / "contracts-report.json"
 
             result = run_script(
                 "automation/contracts/process_contratti.py",
                 "--config",
                 workspace.config_path,
+                "--json-report",
+                report,
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(pdf.exists())
             self.assertEqual(count_files(workspace.contracts_signed), 0)
-            log_text = latest_log_text(workspace.contract_logs, "process_contratti_*.log")
-            self.assertIn("PDF identified as contract", log_text)
-            self.assertIn("DRY RUN would rename and move", log_text)
+            self.assertTrue(report.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["workflow"], "contracts")
+            self.assertEqual(data["mode"], "dry_run")
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["planned"], 1)
+            self.assertEqual(data["summary"]["moved"], 0)
+            self.assertEqual(data["items"][0]["status"], "planned_move")
+            self.assertIn("destinationPath", data["items"][0])
 
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with FlowHostWorkspace() as workspace:
@@ -43,6 +55,8 @@ class ProcessContrattiTests(unittest.TestCase):
                 "automation/contracts/process_contratti.py",
                 "--config",
                 workspace.root / "missing.json",
+                "--json-report",
+                workspace.root / "contracts-report.json",
             )
 
             self.assertEqual(result.returncode, 2)

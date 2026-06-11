@@ -110,6 +110,46 @@ The contract script defaults to dry-run. It only moves and renames files when ru
 
 Do not run these commands against real hotel folders unless you intentionally want to inspect those local folders. For tests, use fake fixture folders and synthetic PDFs/text files.
 
+## JSON Reports
+
+The canonical scripts can write structured JSON reports for FlowHost activity history:
+
+```powershell
+python automation\invoices\process_fatture.py --config automation\config.local.json --dry-run --json-report C:\Temp\invoice-report.json
+python automation\gmail_drafts\create_gmail_draft.py --config automation\config.local.json --dry-run --json-report C:\Temp\gmail-report.json
+python automation\contracts\process_contratti.py --config automation\config.local.json --json-report C:\Temp\contracts-report.json
+```
+
+Reports use this common shape:
+
+```json
+{
+  "workflow": "invoices",
+  "mode": "dry_run",
+  "startedAt": "2026-01-01T10:00:00+01:00",
+  "finishedAt": "2026-01-01T10:00:01+01:00",
+  "status": "success",
+  "summary": {
+    "found": 0,
+    "processed": 0,
+    "planned": 0,
+    "created": 0,
+    "moved": 0,
+    "failed": 0,
+    "warnings": 0
+  },
+  "items": [],
+  "warnings": [],
+  "errors": [],
+  "outputs": {
+    "reportPath": "C:\\Temp\\invoice-report.json",
+    "logPath": "C:\\Temp\\process.log"
+  }
+}
+```
+
+Reports are intended as safe summaries for FlowHost. They do not include Gmail credential or token contents, raw OCR text, or email body text. They may include operational file paths, recipient folder names, and planned destination paths so setup support can understand what happened.
+
 ## Automation Tests
 
 The automation tests use Python `unittest` and temporary fake workspaces only. They do not call Gmail, do not create Gmail drafts, do not send emails, and do not use real hotel PDFs, contracts, credentials, tokens, logs, or reports.
