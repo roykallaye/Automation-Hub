@@ -164,6 +164,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
             true,
             true,
         ),
+        gmail_credentials_file_check(config),
         token_check("gmailTokenPath", "Gmail token", &config.gmail.token_path),
         token_parent_folder_check(&config.gmail.token_path),
         profile_check(&config.client.display_name),
@@ -206,6 +207,7 @@ struct AutomationFilePaths {
     invoice_output_dir: Option<String>,
     invoice_archive_dir: Option<String>,
     invoice_log_dir: Option<String>,
+    gmail_credentials_file: Option<String>,
     gmail_token_file: Option<String>,
     contract_destination_dir: Option<String>,
     contract_ocr_text_dir: Option<String>,
@@ -785,6 +787,116 @@ fn token_check(key: &str, label: &str, path: &str) -> PreflightItem {
     }
 }
 
+fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
+    let automation_config_path = config.automation.automation_config_path.trim();
+    if automation_config_path.is_empty() || !Path::new(automation_config_path).is_file() {
+        return PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: None,
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Gmail credentials are checked after the automation setup file is saved."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let contents = match fs::read_to_string(automation_config_path) {
+        Ok(contents) => contents,
+        Err(_) => {
+            return PreflightItem {
+                key: "gmailCredentialsFile".to_string(),
+                label: "Gmail credentials file".to_string(),
+                path: None,
+                item_type: "credentials".to_string(),
+                status: ReadinessStatus::MissingConfiguration,
+                message: "Gmail credentials file could not be checked. Ask setup support to update FlowHost setup."
+                    .to_string(),
+                readable: None,
+                writable: None,
+            }
+        }
+    };
+
+    let automation_config: AutomationFileConfig = match serde_json::from_str(&contents) {
+        Ok(config) => config,
+        Err(_) => {
+            return PreflightItem {
+                key: "gmailCredentialsFile".to_string(),
+                label: "Gmail credentials file".to_string(),
+                path: None,
+                item_type: "credentials".to_string(),
+                status: ReadinessStatus::MissingConfiguration,
+                message: "Gmail credentials file could not be checked. Ask setup support to update FlowHost setup."
+                    .to_string(),
+                readable: None,
+                writable: None,
+            }
+        }
+    };
+
+    let credentials_path = automation_config
+        .paths
+        .and_then(|paths| paths.gmail_credentials_file)
+        .unwrap_or_default();
+    let credentials_path = credentials_path.trim();
+    if credentials_path.is_empty() {
+        return PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: None,
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Choose the Gmail credentials file. Gmail sign-in can be completed after credentials are selected."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let path = Path::new(credentials_path);
+    if !path.exists() {
+        return PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: Some(credentials_path.to_string()),
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Gmail credentials file not found. Choose the Gmail credentials file."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    if !path.is_file() {
+        return PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: Some(credentials_path.to_string()),
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Gmail credentials path is not a file. Choose the Gmail credentials file."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: "gmailCredentialsFile".to_string(),
+        label: "Gmail credentials file".to_string(),
+        path: Some(credentials_path.to_string()),
+        item_type: "credentials".to_string(),
+        status: ReadinessStatus::Ready,
+        message: "Gmail credentials file found.".to_string(),
+        readable: Some(true),
+        writable: None,
+    }
+}
+
 fn token_parent_folder_check(token_path: &str) -> PreflightItem {
     if token_path.trim().is_empty() {
         return PreflightItem {
@@ -875,6 +987,7 @@ fn workflow_preflight(
             "invoiceInputFolder",
             "invoiceOutputFolder",
             "invoiceLogFolder",
+            "gmailCredentialsFile",
             "gmailTokenFolder",
             "gmailTokenAlignment",
         ],
@@ -885,6 +998,7 @@ fn workflow_preflight(
             "gmailDraftScript",
             "invoiceOutputFolder",
             "invoiceLogFolder",
+            "gmailCredentialsFile",
             "gmailTokenPath",
             "gmailTokenFolder",
             "gmailTokenAlignment",
@@ -1184,7 +1298,7 @@ mod tests {
             .with_file_name("different_gmail_token.json")
             .to_string_lossy()
             .to_string();
-        write_automation_config(&config, Some(&mismatched_token), None);
+        write_automation_config(&config, Some(&mismatched_token), None, None);
 
         let report = build_preflight_report(&config);
         let token_alignment = report
@@ -1206,6 +1320,97 @@ mod tests {
         assert_eq!(token_alignment.status, ReadinessStatus::PermissionProblem);
         assert!(!gmail.can_run);
         assert!(!invoice.can_run);
+    }
+
+    #[test]
+    fn missing_gmail_credentials_path_blocks_gmail_workflows() {
+        let config = config_with_temp_paths();
+        write_automation_config(&config, None, Some(""), None);
+
+        let report = build_preflight_report(&config);
+        let credentials = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailCredentialsFile")
+            .unwrap();
+        let gmail = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "gmailDraftsWorkflow")
+            .unwrap();
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert_eq!(credentials.status, ReadinessStatus::MissingConfiguration);
+        assert!(!gmail.can_run);
+        assert!(!invoice.can_run);
+    }
+
+    #[test]
+    fn missing_gmail_credentials_file_is_reported() {
+        let config = config_with_temp_paths();
+        let missing_credentials = Path::new(&config.gmail.token_path)
+            .with_file_name("missing_gmail_credentials.json")
+            .to_string_lossy()
+            .to_string();
+        write_automation_config(&config, None, Some(&missing_credentials), None);
+
+        let report = build_preflight_report(&config);
+        let credentials = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailCredentialsFile")
+            .unwrap();
+
+        assert_eq!(credentials.status, ReadinessStatus::MissingConfiguration);
+        assert!(credentials.message.contains("not found"));
+    }
+
+    #[test]
+    fn existing_gmail_credentials_file_is_ready() {
+        let config = config_with_temp_paths();
+
+        let report = build_preflight_report(&config);
+        let credentials = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailCredentialsFile")
+            .unwrap();
+
+        assert_eq!(credentials.status, ReadinessStatus::Ready);
+    }
+
+    #[test]
+    fn gmail_credentials_message_does_not_expose_file_contents() {
+        let config = config_with_temp_paths();
+        let secret_marker = "secret-client-value-that-must-not-leak";
+        let credentials_path =
+            Path::new(&config.gmail.token_path).with_file_name("gmail_credentials.json");
+        fs::write(
+            &credentials_path,
+            format!(r#"{{"secret":"{secret_marker}"}}"#),
+        )
+        .unwrap();
+        write_automation_config(
+            &config,
+            None,
+            Some(credentials_path.to_string_lossy().as_ref()),
+            None,
+        );
+
+        let report = build_preflight_report(&config);
+        let credentials = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailCredentialsFile")
+            .unwrap();
+
+        assert_eq!(credentials.status, ReadinessStatus::Ready);
+        assert!(!credentials.message.contains(secret_marker));
+        assert!(!credentials.label.contains(secret_marker));
     }
 
     #[test]
@@ -1280,6 +1485,7 @@ mod tests {
         let copy_script = scripts.join("copy.cmd");
         let ocr_script = scripts.join("ocr.ps1");
         let contract_script = scripts.join("contracts.cmd");
+        let credentials_file = scripts.join("gmail_credentials.json");
 
         for file in [
             &invoice_script,
@@ -1287,6 +1493,7 @@ mod tests {
             &copy_script,
             &ocr_script,
             &contract_script,
+            &credentials_file,
         ] {
             fs::write(file, b"echo fake").unwrap();
         }
@@ -1333,21 +1540,27 @@ mod tests {
                 redact_logs: true,
             },
         };
-        write_automation_config(&config, None, None);
+        write_automation_config(&config, None, None, None);
         config
     }
 
     fn write_automation_config(
         config: &HubConfig,
         gmail_token_override: Option<&str>,
+        gmail_credentials_override: Option<&str>,
         dry_run_override: Option<bool>,
     ) {
+        let default_credentials = Path::new(&config.gmail.token_path)
+            .with_file_name("gmail_credentials.json")
+            .to_string_lossy()
+            .to_string();
         let automation_config = serde_json::json!({
             "paths": {
                 "invoiceInputDir": config.folders.invoice_input_folder,
                 "invoiceOutputDir": config.folders.invoice_output_folder,
                 "invoiceArchiveDir": config.folders.invoice_archive_folder,
                 "invoiceLogDir": config.folders.invoice_log_folder,
+                "gmailCredentialsFile": gmail_credentials_override.unwrap_or(&default_credentials),
                 "gmailTokenFile": gmail_token_override.unwrap_or(&config.gmail.token_path),
                 "contractDestinationDir": config.folders.contracts_output_folder,
                 "contractOcrTextDir": config.folders.ocr_text_output_folder,

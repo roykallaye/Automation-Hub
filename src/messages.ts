@@ -52,6 +52,12 @@ export function staffMessage(
   }
   if (status === "notChecked") return "FlowHost has not checked this yet.";
   if (status === "missingConfiguration") {
+    if (workflowKey === "gmailCredentialsFile") {
+      if (message.toLowerCase().includes("not found")) {
+        return "Gmail credentials file not found. Choose the Gmail credentials file.";
+      }
+      return "Choose the Gmail credentials file. Gmail sign-in can be completed after credentials are selected.";
+    }
     if (message.toLowerCase().includes("automation setup file")) {
       return "Automation setup file is missing. Ask setup support to select or create it.";
     }

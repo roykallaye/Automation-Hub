@@ -17,19 +17,47 @@ type ModuleDefinition = {
   readyNextAction: string;
 };
 
+// These keys mirror backend PreflightItem.key values in src-tauri/src/preflight.rs.
+// Keep this list in sync when backend readiness items are added or renamed.
+const PREFLIGHT_KEYS = {
+  automationConfigAlignment: "automationConfigAlignment",
+  automationConfigPath: "automationConfigPath",
+  clientProfile: "clientProfile",
+  configAlignment: "configAlignment",
+  contractLogFolder: "contractLogFolder",
+  contractProcessingScript: "contractProcessingScript",
+  contractsOutputFolder: "contractsOutputFolder",
+  copyScansioniScript: "copyScansioniScript",
+  gmailCredentialsFile: "gmailCredentialsFile",
+  gmailDraftScript: "gmailDraftScript",
+  gmailTokenAlignment: "gmailTokenAlignment",
+  gmailTokenFolder: "gmailTokenFolder",
+  gmailTokenPath: "gmailTokenPath",
+  invoiceArchiveFolder: "invoiceArchiveFolder",
+  invoiceInputFolder: "invoiceInputFolder",
+  invoiceLogFolder: "invoiceLogFolder",
+  invoiceOutputFolder: "invoiceOutputFolder",
+  invoiceWorkflowScript: "invoiceWorkflowScript",
+  ocrPreprocessingScript: "ocrPreprocessingScript",
+  ocrTextOutputFolder: "ocrTextOutputFolder",
+  pythonExecutable: "pythonExecutable",
+  scansioniLocalCacheFolder: "scansioniLocalCacheFolder",
+  scansioniNetworkShare: "scansioniNetworkShare",
+} as const;
+
 const definitions: ModuleDefinition[] = [
   {
     id: "invoices",
     title: "Invoices",
     itemKeys: [
-      "invoiceWorkflowScript",
-      "invoiceInputFolder",
-      "invoiceOutputFolder",
-      "invoiceArchiveFolder",
-      "invoiceLogFolder",
-      "automationConfigPath",
-      "automationConfigAlignment",
-      "configAlignment",
+      PREFLIGHT_KEYS.invoiceWorkflowScript,
+      PREFLIGHT_KEYS.invoiceInputFolder,
+      PREFLIGHT_KEYS.invoiceOutputFolder,
+      PREFLIGHT_KEYS.invoiceArchiveFolder,
+      PREFLIGHT_KEYS.invoiceLogFolder,
+      PREFLIGHT_KEYS.automationConfigPath,
+      PREFLIGHT_KEYS.automationConfigAlignment,
+      PREFLIGHT_KEYS.configAlignment,
     ],
     workflowKeys: ["invoiceWorkflow"],
     relatedWorkflowCommandNames: ["process_invoices_and_drafts"],
@@ -40,13 +68,14 @@ const definitions: ModuleDefinition[] = [
     id: "gmailDrafts",
     title: "Gmail drafts",
     itemKeys: [
-      "gmailDraftScript",
-      "gmailTokenFolder",
-      "gmailTokenAlignment",
-      "gmailTokenPath",
-      "automationConfigPath",
-      "automationConfigAlignment",
-      "configAlignment",
+      PREFLIGHT_KEYS.gmailDraftScript,
+      PREFLIGHT_KEYS.gmailCredentialsFile,
+      PREFLIGHT_KEYS.gmailTokenFolder,
+      PREFLIGHT_KEYS.gmailTokenAlignment,
+      PREFLIGHT_KEYS.gmailTokenPath,
+      PREFLIGHT_KEYS.automationConfigPath,
+      PREFLIGHT_KEYS.automationConfigAlignment,
+      PREFLIGHT_KEYS.configAlignment,
     ],
     workflowKeys: ["gmailDraftsWorkflow"],
     relatedWorkflowCommandNames: ["process_invoices_and_drafts", "reconnect_gmail"],
@@ -56,7 +85,11 @@ const definitions: ModuleDefinition[] = [
   {
     id: "scanCopy",
     title: "Scanned documents",
-    itemKeys: ["copyScansioniScript", "scansioniNetworkShare", "scansioniLocalCacheFolder"],
+    itemKeys: [
+      PREFLIGHT_KEYS.copyScansioniScript,
+      PREFLIGHT_KEYS.scansioniNetworkShare,
+      PREFLIGHT_KEYS.scansioniLocalCacheFolder,
+    ],
     workflowKeys: ["scansioniNetwork"],
     relatedWorkflowCommandNames: ["copy_scansioni"],
     readyReason: "Scanned-document folders are ready.",
@@ -65,7 +98,11 @@ const definitions: ModuleDefinition[] = [
   {
     id: "ocr",
     title: "Document reading",
-    itemKeys: ["ocrPreprocessingScript", "scansioniLocalCacheFolder", "ocrTextOutputFolder"],
+    itemKeys: [
+      PREFLIGHT_KEYS.ocrPreprocessingScript,
+      PREFLIGHT_KEYS.scansioniLocalCacheFolder,
+      PREFLIGHT_KEYS.ocrTextOutputFolder,
+    ],
     workflowKeys: ["ocrWorkflow"],
     relatedWorkflowCommandNames: ["ocr_preprocessing"],
     readyReason: "Document reading is ready.",
@@ -75,17 +112,17 @@ const definitions: ModuleDefinition[] = [
     id: "contracts",
     title: "Signed contracts",
     itemKeys: [
-      "contractProcessingScript",
-      "copyScansioniScript",
-      "ocrPreprocessingScript",
-      "scansioniNetworkShare",
-      "scansioniLocalCacheFolder",
-      "ocrTextOutputFolder",
-      "contractsOutputFolder",
-      "contractLogFolder",
-      "automationConfigPath",
-      "automationConfigAlignment",
-      "configAlignment",
+      PREFLIGHT_KEYS.contractProcessingScript,
+      PREFLIGHT_KEYS.copyScansioniScript,
+      PREFLIGHT_KEYS.ocrPreprocessingScript,
+      PREFLIGHT_KEYS.scansioniNetworkShare,
+      PREFLIGHT_KEYS.scansioniLocalCacheFolder,
+      PREFLIGHT_KEYS.ocrTextOutputFolder,
+      PREFLIGHT_KEYS.contractsOutputFolder,
+      PREFLIGHT_KEYS.contractLogFolder,
+      PREFLIGHT_KEYS.automationConfigPath,
+      PREFLIGHT_KEYS.automationConfigAlignment,
+      PREFLIGHT_KEYS.configAlignment,
     ],
     workflowKeys: ["contractsWorkflow"],
     relatedWorkflowCommandNames: ["process_signed_contracts"],
@@ -95,7 +132,11 @@ const definitions: ModuleDefinition[] = [
   {
     id: "support",
     title: "Support",
-    itemKeys: ["invoiceLogFolder", "contractLogFolder", "clientProfile"],
+    itemKeys: [
+      PREFLIGHT_KEYS.invoiceLogFolder,
+      PREFLIGHT_KEYS.contractLogFolder,
+      PREFLIGHT_KEYS.clientProfile,
+    ],
     workflowKeys: ["clientProfile"],
     relatedWorkflowCommandNames: [],
     readyReason: "Support folders and hotel profile are ready.",
@@ -269,6 +310,11 @@ function moduleReason(moduleId: ModuleReadinessId, item: PreflightItem) {
   if (item.key === "automationConfigPath") {
     return "Setup has not been saved yet.";
   }
+  if (item.key === "gmailCredentialsFile") {
+    return item.message.toLowerCase().includes("not found")
+      ? "Gmail credentials file not found."
+      : "Gmail credentials file is not selected.";
+  }
   if (item.key === "gmailTokenAlignment") {
     return "Gmail sign-in paths do not match.";
   }
@@ -288,6 +334,9 @@ function moduleNextAction(moduleId: ModuleReadinessId, item: PreflightItem) {
   }
   if (item.key === "gmailTokenFolder") {
     return "Create folders, then check setup again.";
+  }
+  if (item.key === "gmailCredentialsFile") {
+    return "Choose the Gmail credentials file in guided setup, then save and check setup.";
   }
   if (item.key === "gmailTokenAlignment") {
     return "Check Gmail sign-in path and save setup again.";
