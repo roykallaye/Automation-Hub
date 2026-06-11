@@ -1,9 +1,15 @@
-import { FileText, FolderOpen, ShieldCheck } from "lucide-react";
+import { FileText, FolderOpen, PackageCheck, ShieldCheck } from "lucide-react";
+import { useState } from "react";
 
 import { DeveloperDetails } from "../components/DeveloperDetails";
 import { PageHeader } from "../components/PageHeader";
 import { ReadinessBadge } from "../components/StatusBadges";
-import type { AppConfigStatus, LatestLog, RunSummary } from "../types";
+import type {
+  AppConfigStatus,
+  LatestLog,
+  ManagedAutomationInstallResult,
+  RunSummary,
+} from "../types";
 
 export function SupportPage({
   configStatus,
@@ -11,14 +17,27 @@ export function SupportPage({
   lastSummary,
   onOpenPath,
   onRefresh,
+  onInstallAutomation,
 }: {
   configStatus: AppConfigStatus | null;
   latestLogs: LatestLog[];
   lastSummary: RunSummary | null;
   onOpenPath: (path?: string | null) => void;
   onRefresh: () => void;
+  onInstallAutomation: () => Promise<ManagedAutomationInstallResult>;
 }) {
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<ManagedAutomationInstallResult | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
   const config = configStatus?.config;
+  const automationRoot = config?.automation.automationRootFolder;
+  const canonicalScriptItems =
+    configStatus?.preflight.items.filter((item) =>
+      ["invoiceWorkflowScript", "gmailDraftScript", "contractProcessingScript"].includes(item.key),
+    ) ?? [];
+  const canonicalScriptsReady =
+    canonicalScriptItems.length > 0 &&
+    canonicalScriptItems.every((item) => item.status === "ready");
   const paths = config
     ? [
         ["Automation scripts folder", config.automation.automationRootFolder],
@@ -77,6 +96,67 @@ export function SupportPage({
         </section>
 
         <aside className="space-y-5">
+          <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">
+                <PackageCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">Automation scripts</h2>
+                <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
+                  Copies FlowHost's own automation scripts into the app data folder. This does not run workflows or touch hotel files.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-md bg-white/60 p-3 text-sm font-semibold text-slate-800">
+              {canonicalScriptsReady ? "Canonical scripts found" : "Canonical scripts need attention"}
+            </div>
+            <p className="mt-3 break-words font-mono text-xs leading-5 text-slate-600">
+              {automationRoot || "Automation scripts folder is not configured."}
+            </p>
+            <button
+              className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={installing}
+              onClick={async () => {
+                const confirmed = window.confirm(
+                  "Install or refresh FlowHost automation scripts? This copies FlowHost's own scripts into the app data folder. It does not run workflows or touch hotel files.",
+                );
+                if (!confirmed) return;
+                setInstalling(true);
+                setInstallResult(null);
+                setInstallError(null);
+                try {
+                  const result = await onInstallAutomation();
+                  setInstallResult(result);
+                } catch (error) {
+                  setInstallError(error instanceof Error ? error.message : String(error));
+                } finally {
+                  setInstalling(false);
+                }
+              }}
+            >
+              {installing ? "Installing..." : "Install/refresh managed scripts"}
+            </button>
+            {installResult && (
+              <div className="mt-4 rounded-md bg-white/65 p-3 text-sm font-medium leading-6 text-slate-700">
+                <p className="font-semibold text-slate-950">Managed scripts refreshed.</p>
+                <p>Copied: {installResult.copied.length}</p>
+                <p>Backups: {installResult.backedUp.length}</p>
+                <p>Skipped: {installResult.skipped.length}</p>
+                {installResult.errors.length > 0 && (
+                  <p className="font-semibold text-rose-800">
+                    Needs attention: {installResult.errors.length}
+                  </p>
+                )}
+              </div>
+            )}
+            {installError && (
+              <div className="mt-4 rounded-md bg-rose-50 p-3 text-sm font-semibold leading-6 text-rose-800">
+                {installError}
+              </div>
+            )}
+          </section>
+
           <section className="rounded-lg border border-teal-100 bg-teal-50/80 p-5 shadow-glass backdrop-blur-xl">
             <div className="flex items-start gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">

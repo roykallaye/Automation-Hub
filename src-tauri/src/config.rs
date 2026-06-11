@@ -122,6 +122,18 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
     }
 }
 
+pub(crate) fn save_config_for_app(app: &AppHandle, config: &HubConfig) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not locate app data directory: {error}"))?;
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|error| format!("Could not create app data directory: {error}"))?;
+    let config_path = app_data_dir.join("config.json");
+    write_config(&config_path, config)?;
+    Ok(config_path)
+}
+
 fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), String> {
     let value: serde_json::Value =
         serde_json::from_str(contents).map_err(|error| format!("Invalid config file: {error}"))?;

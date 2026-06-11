@@ -26,6 +26,17 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "../automation/invoices/process_fatture.py": "automation/invoices/process_fatture.py",
+      "../automation/gmail_drafts/create_gmail_draft.py": "automation/gmail_drafts/create_gmail_draft.py",
+      "../automation/contracts/process_contratti.py": "automation/contracts/process_contratti.py",
+      "../automation/shared/__init__.py": "automation/shared/__init__.py",
+      "../automation/shared/config.py": "automation/shared/config.py",
+      "../automation/shared/report.py": "automation/shared/report.py",
+      "../automation/requirements.txt": "automation/requirements.txt",
+      "../automation/README.md": "automation/README.md",
+      "../automation/config.example.json": "automation/config.example.json"
+    },
     "publisher": "Life Hotel"
   }
 }

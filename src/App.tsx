@@ -22,6 +22,7 @@ import type {
   AutomationAction,
   CommandEvent,
   LatestLog,
+  ManagedAutomationInstallResult,
   RunStatus,
   RunSummary,
 } from "./types";
@@ -160,6 +161,14 @@ function App() {
     }
   }
 
+  async function installManagedAutomationScripts() {
+    const result = await invoke<ManagedAutomationInstallResult>("install_managed_automation_scripts", {
+      confirmed: true,
+    });
+    await refreshAll();
+    return result;
+  }
+
   async function startAction(action: AutomationAction) {
     const disabledReason = actionDisabledReason(action);
     if (disabledReason) {
@@ -263,6 +272,7 @@ function App() {
           nextAction={nextAction}
           onRefresh={refreshAll}
           onGoToAutomations={() => setCurrentPage("automations")}
+          onGoToSupport={() => setCurrentPage("support")}
         />
       )}
 
@@ -287,6 +297,7 @@ function App() {
           lastSummary={lastSummary}
           onOpenPath={openPath}
           onRefresh={refreshAll}
+          onInstallAutomation={installManagedAutomationScripts}
         />
       )}
 

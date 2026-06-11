@@ -21,6 +21,7 @@ export function SetupPage({
   nextAction,
   onRefresh,
   onGoToAutomations,
+  onGoToSupport,
 }: {
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
@@ -28,6 +29,7 @@ export function SetupPage({
   nextAction: NextAction;
   onRefresh: () => void;
   onGoToAutomations: () => void;
+  onGoToSupport: () => void;
 }) {
   const [showWizard, setShowWizard] = useState(false);
   const guidance = setupGuidance(configStatus, loading);
@@ -47,6 +49,10 @@ export function SetupPage({
     !loading &&
     Boolean(configStatus) &&
     !configStatus?.preflight.workflows.some((workflow) => workflow.commandName && !workflow.canRun);
+  const nextBlockingItem =
+    configStatus && nextIssue ? firstBlockingItem(configStatus, nextIssue) : null;
+  const scriptsNeedSupport =
+    nextBlockingItem?.itemType === "script" || nextBlockingItem?.key === "automationRootFolder";
 
   return (
     <div className="space-y-5">
@@ -129,10 +135,22 @@ export function SetupPage({
 
       {!showWizard && !setupReady && nextIssue && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-glass">
-          <p className="text-sm font-semibold text-amber-950">{guidance.title}</p>
-          <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
-            {guidance.detail}
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-950">{guidance.title}</p>
+              <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
+                {guidance.detail}
+              </p>
+            </div>
+            {scriptsNeedSupport && (
+              <button
+                className="shrink-0 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                onClick={onGoToSupport}
+              >
+                Open Support
+              </button>
+            )}
+          </div>
         </section>
       )}
 
@@ -220,6 +238,15 @@ function setupGuidance(
       title: "Save setup to finish",
       summary: "Setup draft is not saved yet.",
       detail: "Create folders, then save setup from the guided setup review step.",
+    };
+  }
+
+  if (item.key === "automationRootFolder") {
+    return {
+      tone: "attention",
+      title: "Automation scripts need installing",
+      summary: "Setup saved. FlowHost automation scripts are not installed yet.",
+      detail: "Open Support and install FlowHost automation scripts, then run Check setup.",
     };
   }
 
@@ -352,9 +379,9 @@ function scriptGuidance(item: PreflightItem) {
       return "Collect or configure the scan-copy and document-reading scripts, then run Check setup.";
     case "invoiceWorkflowScript":
     case "gmailDraftScript":
-      return "Check the invoice and Gmail draft script paths, then run Check setup.";
+      return "Open Support and install FlowHost automation scripts, then run Check setup.";
     case "contractProcessingScript":
-      return "Check the contract processing script path, then run Check setup.";
+      return "Open Support and install FlowHost automation scripts, then run Check setup.";
     default:
       return staffMessage(item.message, item.status, item.key);
   }

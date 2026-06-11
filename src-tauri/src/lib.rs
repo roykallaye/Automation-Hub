@@ -1,4 +1,5 @@
 mod activity;
+mod automation_install;
 mod config;
 mod logs;
 mod paths;
@@ -38,6 +39,7 @@ pub fn run() {
             initialize_workspace,
             save_setup_config,
             validate_setup,
+            install_managed_automation_scripts,
             get_activity_history,
             get_activity_detail,
             open_activity_report
@@ -112,6 +114,14 @@ fn save_setup_config(
 #[tauri::command]
 fn validate_setup(app: AppHandle) -> Result<preflight::PreflightReport, String> {
     setup::validate_setup(&app)
+}
+
+#[tauri::command]
+fn install_managed_automation_scripts(
+    app: AppHandle,
+    confirmed: Option<bool>,
+) -> Result<automation_install::ManagedAutomationInstallResult, String> {
+    automation_install::install_managed_automation_scripts(&app, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]

@@ -52,6 +52,12 @@ npm run test:automation
 
 Those Python tests also use temporary fake data only.
 
+Check that the Tauri automation resource bundle cannot include generated or sensitive local files:
+
+```powershell
+npm run doctor:resources
+```
+
 Install Python packages for the canonical automation scripts into the active Python environment:
 
 ```powershell
@@ -274,7 +280,7 @@ Current supported locations:
 
 - Development: repo-local `automation/`
 - Controlled hotel dry-run: `C:\FlowHost\automation`
-- Future production: app-managed automation folder copied or bundled by the installer
+- Installed app: app-managed automation folder under the Tauri app data directory
 
 Manual dry-run deployment checklist:
 
@@ -297,6 +303,45 @@ scripts.contractProcessingScript = C:\FlowHost\automation\contracts\process_cont
 ```
 
 `copy_scansioni.cmd` and `preprocess_scansioni_to_text.ps1` are still separate legacy/import scripts until they are collected and converted into canonical automation workers.
+
+### App-Managed Automation Scripts
+
+FlowHost bundles only an explicit allowlist of versioned automation files as Tauri resources. It does not bundle the whole `automation/` directory recursively. From `Support` / `Advanced details`, setup support can run:
+
+```text
+Install/refresh managed scripts
+```
+
+That action copies only FlowHost's canonical automation source files into the app data automation folder, for example:
+
+```text
+%LOCALAPPDATA%\...\automation
+```
+
+It copies only known versioned files such as:
+
+- `invoices\process_fatture.py`
+- `gmail_drafts\create_gmail_draft.py`
+- `contracts\process_contratti.py`
+- `shared\*.py`
+- `requirements.txt`
+- documentation/example config files
+
+It does not run workflows, does not call Gmail, does not create drafts, and does not touch hotel folders. It never copies local `config.local.json`, Gmail tokens, Gmail credentials, bytecode, logs, reports, PDFs, input/output/archive folders, or cache folders.
+
+After a successful refresh, FlowHost updates `automation.automationRootFolder` and canonical Python script paths to the managed app data folder. Explicit legacy script paths remain supported for `.cmd` and `.ps1` workflows.
+
+Python is still separate. Install or configure Python manually, then install automation requirements into the selected Python environment.
+
+Before building an installer, run:
+
+```powershell
+npm run doctor:resources
+npm run build
+npm run tauri build
+```
+
+`doctor:resources` fails if generated or sensitive files are found under `automation/`, including local config, tokens, credentials, bytecode, logs, reports, PDFs, or real input/output/archive folders.
 
 ## Resetting Config
 

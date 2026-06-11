@@ -46,6 +46,21 @@ C:\FlowHost.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\req
 
 Then set FlowHost app config `automation.automationRootFolder` to `C:\FlowHost\automation` and `automation.pythonExecutable` to `C:\FlowHost.venv\Scripts\python.exe`.
 
+Installed FlowHost builds also include a Support / Advanced action named `Install/refresh managed scripts`. That action copies only the versioned canonical automation files into FlowHost's app data automation folder and updates the app config to point there. It does not run workflows, does not call Gmail, and does not touch hotel folders.
+
+The Tauri installer bundles only an explicit allowlist of canonical automation resource files. It does not bundle the whole `automation/` directory recursively. Run this before building an installer:
+
+```powershell
+npm run doctor:resources
+```
+
+The managed install action intentionally does not copy:
+
+- `config.local.json`
+- Gmail tokens or credentials
+- `__pycache__` or `*.pyc`
+- logs, reports, PDFs, input/output/archive folders, or local cache folders
+
 ## Local Config
 
 Copy the example config to a local, uncommitted file:

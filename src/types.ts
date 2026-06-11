@@ -217,3 +217,14 @@ export type SaveSetupResult = {
   backups: string[];
   validation: PreflightReport;
 };
+
+export type ManagedAutomationInstallResult = {
+  sourceRoot: string;
+  destinationRoot: string;
+  copied: string[];
+  skipped: string[];
+  backedUp: string[];
+  errors: string[];
+  configPath?: string | null;
+  preflight?: PreflightReport | null;
+};
