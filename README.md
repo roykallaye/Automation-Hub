@@ -198,6 +198,12 @@ If an older generated config only contains a `paths` object, FlowHost migrates i
 
 Use this checklist before testing FlowHost on a real hotel PC. This rehearsal must use fake data only.
 
+For the full step-by-step rehearsal package, exact wizard values, fake credentials command, expected statuses, and result template, see:
+
+```text
+docs\FAKE_WORKSPACE_REHEARSAL.md
+```
+
 1. Start the app:
 
    ```powershell

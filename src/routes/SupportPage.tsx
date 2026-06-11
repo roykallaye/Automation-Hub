@@ -88,6 +88,17 @@ export function SupportPage({
                 </p>
               </div>
             </div>
+            <div className="mt-4 rounded-md border border-teal-100 bg-white/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">
+                Rehearsal guide
+              </p>
+              <p className="mt-1 font-mono text-xs text-slate-700">
+                docs\FAKE_WORKSPACE_REHEARSAL.md
+              </p>
+              <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
+                Follow this checklist for exact fake setup values, fake credentials, expected statuses, and result notes.
+              </p>
+            </div>
             <div className="mt-4 rounded-md bg-white/60 p-3 text-sm font-semibold text-slate-800">
               Safe mode is {config?.safety.dryRunDefault ? "on" : "off"}
             </div>
