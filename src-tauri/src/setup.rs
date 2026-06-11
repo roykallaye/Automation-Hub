@@ -123,7 +123,7 @@ pub(crate) fn initialize_workspace(
 ) -> Result<WorkspaceInitResult, String> {
     if !confirmed {
         return Err(
-            "This setup action needs confirmation before FlowHost can create folders.".to_string(),
+            "This setup action needs confirmation before InnPilot can create folders.".to_string(),
         );
     }
 
@@ -183,7 +183,7 @@ pub(crate) fn save_setup_config(
 ) -> Result<SaveSetupResult, String> {
     if !confirmed {
         return Err(
-            "This setup action needs confirmation before FlowHost can save configuration."
+            "This setup action needs confirmation before InnPilot can save configuration."
                 .to_string(),
         );
     }
@@ -208,7 +208,7 @@ pub(crate) fn save_setup_config(
 
     if let Some(app_parent) = app_config_path.parent() {
         fs::create_dir_all(app_parent)
-            .map_err(|error| format!("Could not prepare FlowHost setup folder: {error}"))?;
+            .map_err(|error| format!("Could not prepare InnPilot setup folder: {error}"))?;
     }
 
     let mut backups = Vec::new();
@@ -349,7 +349,7 @@ impl GeneratedSetup {
         let app_config = HubConfig {
             schema_version: current.schema_version,
             client: ClientConfig {
-                display_name: non_empty_or(&draft.hotel_display_name, "FlowHost Hotel"),
+                display_name: non_empty_or(&draft.hotel_display_name, "Your Hotel"),
             },
             automation: AutomationConfig {
                 automation_root_folder: current.automation.automation_root_folder,
@@ -398,8 +398,8 @@ impl GeneratedSetup {
 
         let automation_config = serde_json::json!({
             "client": {
-                "displayName": non_empty_or(&draft.hotel_display_name, "FlowHost Hotel"),
-                "emailSignatureName": non_empty_or(&draft.email_signature_name, "FlowHost Team"),
+                "displayName": non_empty_or(&draft.hotel_display_name, "Your Hotel"),
+                "emailSignatureName": non_empty_or(&draft.email_signature_name, "Your Hotel Team"),
             },
             "paths": {
                 "invoiceInputDir": app_config.folders.invoice_input_folder,
@@ -600,7 +600,7 @@ fn validate_workspace_base(path: &Path) -> Result<(), String> {
     }
 
     if normalized.ends_with(r"\users") || is_user_home_root(path) {
-        return Err("Choose a FlowHost workspace folder inside Desktop or Documents, not the whole user folder.".to_string());
+        return Err("Choose an InnPilot workspace folder inside Desktop or Documents, not the whole user folder.".to_string());
     }
 
     let blocked_segments = ["node_modules", "target", "dist", ".git"];
@@ -623,7 +623,7 @@ fn validate_child_path(workspace: &Path, child: &Path) -> Result<(), String> {
     let child = normalize_path(child);
     if !child.starts_with(&format!("{workspace}\\")) {
         return Err(
-            "FlowHost workspace folders must stay inside the selected workspace.".to_string(),
+            "InnPilot workspace folders must stay inside the selected workspace.".to_string(),
         );
     }
     Ok(())
@@ -853,7 +853,7 @@ mod tests {
 
     fn temp_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "flowhost_setup_{name}_{}",
+            "innpilot_setup_{name}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

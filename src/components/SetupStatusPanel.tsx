@@ -24,13 +24,13 @@ export function SetupStatusPanel({
     <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-4 flex items-start justify-between gap-5">
         <div>
-          <h2 className="text-xl font-semibold text-slate-950">FlowHost setup</h2>
+          <h2 className="text-xl font-semibold text-slate-950">InnPilot setup</h2>
           <p className="mt-1 text-sm font-medium text-slate-600">
             {configStatus
-              ? "FlowHost checks setup and folders before enabling workflows."
+              ? "InnPilot checks setup and folders before enabling workflows."
               : loading
                 ? "Checking setup..."
-                : "FlowHost setup could not be loaded."}
+                : "InnPilot setup could not be loaded."}
           </p>
         </div>
         <button

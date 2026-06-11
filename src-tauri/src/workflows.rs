@@ -55,7 +55,7 @@ enum WorkflowImpact {
 
 pub(crate) fn ensure_confirmation(command_name: &str, confirmed: bool) -> Result<(), String> {
     if workflow_impact(command_name).is_some() && !confirmed {
-        Err("This action needs confirmation before FlowHost can run it.".to_string())
+        Err("This action needs confirmation before InnPilot can run it.".to_string())
     } else {
         Ok(())
     }
@@ -513,7 +513,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            "This action needs confirmation before FlowHost can run it."
+            "This action needs confirmation before InnPilot can run it."
         );
     }
 
@@ -687,7 +687,7 @@ mod tests {
 
     fn temp_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "flowhost_workflow_e2e_{name}_{}",
+            "innpilot_workflow_e2e_{name}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

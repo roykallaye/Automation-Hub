@@ -1,8 +1,10 @@
-# FlowHost Automation Hub
+# InnPilot
 
 Windows desktop control panel for hotel office automations.
 
-FlowHost is a Tauri + React operator dashboard. The versionable automation workers now live under `automation/`. The legacy `Script/` folder is treated as a local-only manager-PC import mirror and is ignored by git. FlowHost calls configured script paths through a Rust backend allowlist and performs app-side preflight checks before enabling workflow buttons.
+InnPilot is a Tauri + React operator dashboard for hotel automation. The versionable automation workers now live under `automation/`. The legacy `Script/` folder is treated as a local-only manager-PC import mirror and is ignored by git. InnPilot calls configured script paths through a Rust backend allowlist and performs app-side preflight checks before enabling workflow buttons.
+
+Branding note: the app identity was renamed to InnPilot before production use. Existing pre-production Life Hotel or FlowHost app data can be ignored or removed manually during development; no automated migration is implemented yet.
 
 ## Tech Stack
 
@@ -72,31 +74,31 @@ npm run doctor:python
 
 ### Python Environment Setup
 
-FlowHost does not bundle Python yet. Canonical automation scripts require an external Python executable plus the packages in `automation\requirements.txt`.
+InnPilot does not bundle Python yet. Canonical automation scripts require an external Python executable plus the packages in `automation\requirements.txt`.
 
 Recommended short-term managed environment for controlled dry-runs:
 
 ```powershell
-python -m venv C:\FlowHost\.venv
-C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
-C:\FlowHost\.venv\Scripts\python.exe --version
+python -m venv C:\InnPilot\.venv
+C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
+C:\InnPilot\.venv\Scripts\python.exe --version
 ```
 
-Then set FlowHost app config:
+Then set InnPilot app config:
 
 ```text
-automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
+automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
 ```
 
-If using the app-managed automation folder after `Install/refresh managed scripts`, install requirements from that managed folder instead. Support / Advanced shows the exact PowerShell command based on the current FlowHost setup, for example:
+If using the app-managed automation folder after `Install/refresh managed scripts`, install requirements from that managed folder instead. Support / Advanced shows the exact PowerShell command based on the current InnPilot setup, for example:
 
 ```powershell
-& "C:\FlowHost\.venv\Scripts\python.exe" -m pip install -r "C:\FlowHost\automation\requirements.txt"
+& "C:\InnPilot\.venv\Scripts\python.exe" -m pip install -r "C:\InnPilot\automation\requirements.txt"
 ```
 
 This setup only installs Python packages. It does not run workflows, does not call Gmail, does not create drafts, and does not touch hotel folders.
 
-FlowHost checks:
+InnPilot checks:
 
 - Python executable is available.
 - PyMuPDF / `fitz` is installed for invoice PDF reading.
@@ -131,7 +133,7 @@ Rust tests and Tauri builds on Windows use the MSVC linker. If `npm run test:rus
 LINK : fatal error LNK1104: cannot open file 'msvcrt.lib'
 ```
 
-that usually means the local Visual Studio C++ toolchain or Windows SDK is missing, incomplete, or not visible to the shell. This is an environment issue, not a FlowHost workflow issue.
+that usually means the local Visual Studio C++ toolchain or Windows SDK is missing, incomplete, or not visible to the shell. This is an environment issue, not an InnPilot workflow issue.
 
 Check diagnostics:
 
@@ -156,11 +158,11 @@ Manual fix if tools or SDK libraries are missing:
 5. Restart the terminal after installation.
 6. Run `npm run doctor:windows`, then `npm run test:rust` again.
 
-Do not downgrade FlowHost dependencies to hide this linker error.
+Do not downgrade InnPilot dependencies to hide this linker error.
 
 ## Configuration
 
-On first launch, FlowHost creates:
+On first launch, InnPilot creates:
 
 ```text
 config.json
@@ -193,40 +195,40 @@ The config contains:
 - `safety.requireConfirmationForFileMoves`
 - `safety.redactLogs`
 
-Fresh default config prefers the canonical Python scripts under a managed automation scripts folder. In development, FlowHost uses the repo `automation/` folder when the canonical scripts are present. Outside the repo, the short-term managed location is:
+Fresh default config prefers the canonical Python scripts under a managed automation scripts folder. In development, InnPilot uses the repo `automation/` folder when the canonical scripts are present. Outside the repo, the short-term managed location is:
 
 ```text
-C:\FlowHost\automation
+C:\InnPilot\automation
 ```
 
 For example:
 
 ```text
-C:\FlowHost\automation\invoices\process_fatture.py
+C:\InnPilot\automation\invoices\process_fatture.py
 ```
 
 Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. Explicit script paths remain authoritative; `automation.automationRootFolder` is the support-facing folder used for defaults and diagnostics.
 
-On a managed dry-run PC, copy the canonical `automation/` tree to `C:\FlowHost\automation`, create a Python virtual environment such as `C:\FlowHost\.venv`, install `automation\requirements.txt`, and set:
+On a managed dry-run PC, copy the canonical `automation/` tree to `C:\InnPilot\automation`, create a Python virtual environment such as `C:\InnPilot\.venv`, install `automation\requirements.txt`, and set:
 
 ```text
-automation.automationRootFolder = C:\FlowHost\automation
-automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
+automation.automationRootFolder = C:\InnPilot\automation
+automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
 ```
 
-Guided setup writes `automation\config.local.json` under the selected FlowHost workspace. That setup file is separate from the managed scripts folder.
+Guided setup writes `automation\config.local.json` under the selected InnPilot workspace. That setup file is separate from the managed scripts folder.
 
 ### Guided Setup
 
-The Setup page includes a guided setup flow for new installations. It collects hotel profile details, a FlowHost workspace location, Gmail draft settings, invoice recipient rules, contract/scans settings, and safety preferences.
+The Setup page includes a guided setup flow for new installations. It collects hotel profile details, an InnPilot workspace location, Gmail draft settings, invoice recipient rules, contract/scans settings, and safety preferences.
 
 Guided setup is intentionally separate from automation runs:
 
-- Preview setup shows the folders and config values FlowHost would use.
+- Preview setup shows the folders and config values InnPilot would use.
 - Folder and file fields include Choose buttons plus editable text fields for setup support.
 - Create folders creates only missing workspace folders and leaves existing folders/files unchanged.
-- Save setup writes FlowHost app config and `automation\config.local.json`; existing config files are backed up first.
-- Check setup reruns FlowHost preflight/alignment checks.
+- Save setup writes InnPilot app config and `automation\config.local.json`; existing config files are backed up first.
+- Check setup reruns InnPilot preflight/alignment checks.
 
 Guided setup does not process invoices, does not create Gmail drafts, does not send emails, and does not move/delete hotel files. Workflows are still run manually from the Automations page after setup is ready.
 
@@ -239,17 +241,17 @@ Copy-Item automation\config.example.json automation\config.local.json
 Then edit:
 
 - `automation\config.local.json` for script-level folders, Gmail credential/token paths, email subject/CC, invoice routing rules, and contract routing settings.
-- FlowHost app `config.json` for app-side script paths, `automation.automationConfigPath`, `automation.pythonExecutable`, visible hotel name, and folder preflight/open-folder settings.
+- InnPilot app `config.json` for app-side script paths, `automation.automationConfigPath`, `automation.pythonExecutable`, visible hotel name, and folder preflight/open-folder settings.
 
-The two config files must agree where they describe the same operational path. In particular, FlowHost app `gmail.tokenPath` and automation config `paths.gmailTokenFile` must point to the same token file. If they differ, FlowHost blocks Gmail draft/reconnect workflows so setup support can fix the mismatch before token reset or OAuth behavior touches the wrong file.
+The two config files must agree where they describe the same operational path. In particular, InnPilot app `gmail.tokenPath` and automation config `paths.gmailTokenFile` must point to the same token file. If they differ, InnPilot blocks Gmail draft/reconnect workflows so setup support can fix the mismatch before token reset or OAuth behavior touches the wrong file.
 
-FlowHost also warns when these overlapping values differ:
+InnPilot also warns when these overlapping values differ:
 
 - invoice input, output, archive, and log folders
 - contract output, OCR text, and log folders
 - `safety.dryRunDefault`
 
-When FlowHost runs a canonical Python automation script, it invokes it like:
+When InnPilot runs a canonical Python automation script, it invokes it like:
 
 ```text
 python automation\invoices\process_fatture.py --config <automationConfigPath>
@@ -257,13 +259,13 @@ python automation\gmail_drafts\create_gmail_draft.py --config <automationConfigP
 python automation\contracts\process_contratti.py --config <automationConfigPath>
 ```
 
-If `safety.dryRunDefault` is enabled in the FlowHost app config, FlowHost also passes `--dry-run` to the invoice and Gmail draft Python scripts. The contract script is dry-run by default unless `--execute` is explicitly passed; FlowHost does not pass `--execute` to the canonical Python contract script.
+If `safety.dryRunDefault` is enabled in the InnPilot app config, InnPilot also passes `--dry-run` to the invoice and Gmail draft Python scripts. The contract script is dry-run by default unless `--execute` is explicitly passed; InnPilot does not pass `--execute` to the canonical Python contract script.
 
-If an older generated config only contains a `paths` object, FlowHost migrates it to the new schema on startup.
+If an older generated config only contains a `paths` object, InnPilot migrates it to the new schema on startup.
 
 ## Safe Local Runtime Rehearsal
 
-Use this checklist before testing FlowHost on a real hotel PC. This rehearsal must use fake data only.
+Use this checklist before testing InnPilot on a real hotel PC. This rehearsal must use fake data only.
 
 For the full step-by-step rehearsal package, exact wizard values, fake credentials command, expected statuses, and result template, see:
 
@@ -281,7 +283,7 @@ docs\FAKE_WORKSPACE_REHEARSAL.md
 3. Start guided setup and choose a fake workspace, for example:
 
    ```text
-   C:\Users\<you>\Desktop\FlowHost-Test-Workspace
+   C:\Users\<you>\Desktop\InnPilot-Test-Workspace
    ```
 
 4. Keep `Safe mode` enabled.
@@ -293,62 +295,62 @@ docs\FAKE_WORKSPACE_REHEARSAL.md
 10. Add fake test files only if needed:
 
     ```text
-    FlowHost-Test-Workspace\Invoices\Input\fake-invoice.pdf
-    FlowHost-Test-Workspace\Scans\IncomingCache\Sharp MFP fake.pdf
-    FlowHost-Test-Workspace\Scans\TextOutput\Sharp MFP fake.txt
+    InnPilot-Test-Workspace\Invoices\Input\fake-invoice.pdf
+    InnPilot-Test-Workspace\Scans\IncomingCache\Sharp MFP fake.pdf
+    InnPilot-Test-Workspace\Scans\TextOutput\Sharp MFP fake.txt
     ```
 
 11. Run a dry-run automation from `Automations`.
 12. Confirm the Activity page receives a structured history entry marked `Safe mode`.
 13. Confirm no real Gmail authentication, sending, moving, deleting, or hotel-folder access occurred.
-14. Close FlowHost and delete the fake workspace when finished.
+14. Close InnPilot and delete the fake workspace when finished.
 
-FlowHost passes app-controlled `--json-report` paths to the canonical Python scripts that support structured reports. Legacy `.cmd` and `.ps1` wrappers are left unchanged for compatibility.
+InnPilot passes app-controlled `--json-report` paths to the canonical Python scripts that support structured reports. Legacy `.cmd` and `.ps1` wrappers are left unchanged for compatibility.
 
 ## Managed Automation Deployment
 
-FlowHost does not bundle Python yet and does not freeze the automation scripts into executables yet.
+InnPilot does not bundle Python yet and does not freeze the automation scripts into executables yet.
 
 Current supported locations:
 
 - Development: repo-local `automation/`
-- Controlled hotel dry-run: `C:\FlowHost\automation`
+- Controlled hotel dry-run: `C:\InnPilot\automation`
 - Installed app: app-managed automation folder under the Tauri app data directory
 
 Manual dry-run deployment checklist:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
-Copy-Item -Recurse -Force automation C:\FlowHost\automation
-python -m venv C:\FlowHost\.venv
-C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
-C:\FlowHost\.venv\Scripts\python.exe --version
+New-Item -ItemType Directory -Force C:\InnPilot | Out-Null
+Copy-Item -Recurse -Force automation C:\InnPilot\automation
+python -m venv C:\InnPilot\.venv
+C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
+C:\InnPilot\.venv\Scripts\python.exe --version
 ```
 
-Then set FlowHost app config:
+Then set InnPilot app config:
 
 ```text
-automation.automationRootFolder = C:\FlowHost\automation
-automation.pythonExecutable = C:\FlowHost\.venv\Scripts\python.exe
-scripts.invoiceWorkflowScript = C:\FlowHost\automation\invoices\process_fatture.py
-scripts.gmailDraftScript = C:\FlowHost\automation\gmail_drafts\create_gmail_draft.py
-scripts.contractProcessingScript = C:\FlowHost\automation\contracts\process_contratti.py
+automation.automationRootFolder = C:\InnPilot\automation
+automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
+scripts.invoiceWorkflowScript = C:\InnPilot\automation\invoices\process_fatture.py
+scripts.gmailDraftScript = C:\InnPilot\automation\gmail_drafts\create_gmail_draft.py
+scripts.contractProcessingScript = C:\InnPilot\automation\contracts\process_contratti.py
 ```
 
 `copy_scansioni.cmd` and `preprocess_scansioni_to_text.ps1` are still separate legacy/import scripts until they are collected and converted into canonical automation workers.
 
 ### App-Managed Automation Scripts
 
-FlowHost bundles only an explicit allowlist of versioned automation files as Tauri resources. It does not bundle the whole `automation/` directory recursively. From `Support` / `Advanced details`, setup support can run:
+InnPilot bundles only an explicit allowlist of versioned automation files as Tauri resources. It does not bundle the whole `automation/` directory recursively. From `Support` / `Advanced details`, setup support can run:
 
 ```text
 Install/refresh managed scripts
 ```
 
-That action copies only FlowHost's canonical automation source files into the app data automation folder, for example:
+That action copies only InnPilot's canonical automation source files into the app data automation folder, for example:
 
 ```text
-%LOCALAPPDATA%\...\automation
+%APPDATA%\com.innpilot.app\automation
 ```
 
 It copies only known versioned files such as:
@@ -362,7 +364,7 @@ It copies only known versioned files such as:
 
 It does not run workflows, does not call Gmail, does not create drafts, and does not touch hotel folders. It never copies local `config.local.json`, Gmail tokens, Gmail credentials, bytecode, logs, reports, PDFs, input/output/archive folders, or cache folders.
 
-After a successful refresh, FlowHost updates `automation.automationRootFolder` and canonical Python script paths to the managed app data folder. Explicit legacy script paths remain supported for `.cmd` and `.ps1` workflows.
+After a successful refresh, InnPilot updates `automation.automationRootFolder` and canonical Python script paths to the managed app data folder. Explicit legacy script paths remain supported for `.cmd` and `.ps1` workflows.
 
 Python is still separate. Install or configure Python manually, then install automation requirements into the selected Python environment.
 
@@ -378,9 +380,9 @@ npm run tauri build
 
 ## Resetting Config
 
-To reset configuration, close FlowHost, delete the generated `config.json`, and start the app again. FlowHost will recreate defaults.
+To reset configuration, close InnPilot, delete the generated `config.json`, and start the app again. InnPilot will recreate defaults.
 
-PowerShell helper to locate likely FlowHost configs:
+PowerShell helper to locate likely InnPilot configs:
 
 ```powershell
 Get-ChildItem $env:APPDATA,$env:LOCALAPPDATA -Recurse -Filter config.json -ErrorAction SilentlyContinue |
@@ -391,10 +393,10 @@ Review the paths before deleting any file.
 
 ## Preflight Checks
 
-FlowHost validates the configured app-side dependencies before enabling workflow buttons:
+InnPilot validates the configured app-side dependencies before enabling workflow buttons:
 
 - automation setup file path exists when canonical Python scripts are used
-- automation setup file agrees with overlapping FlowHost app config values
+- automation setup file agrees with overlapping InnPilot app config values
 - Python executable is available when canonical Python scripts are used
 - configured script path exists and is a file
 - configured folder path exists and is a folder
@@ -424,7 +426,7 @@ Expected configured paths:
 
 Deletes the configured Gmail token file if it exists, then reruns the configured Gmail draft script so the external script can trigger OAuth again.
 
-FlowHost itself does not create Gmail drafts and does not send emails. That behavior belongs to the external script.
+InnPilot itself does not create Gmail drafts and does not send emails. That behavior belongs to the external script.
 
 ### Scansioni Copy
 
@@ -448,9 +450,9 @@ Expected configured paths:
 
 ### Signed Contracts
 
-Runs copy scansioni, OCR preprocessing, then the configured contract processing script. For legacy `.cmd` wrappers, FlowHost preserves the previous behavior and passes `--execute`. For the canonical Python contract script under `automation/`, FlowHost does not pass `--execute`, so the script remains dry-run by default.
+Runs copy scansioni, OCR preprocessing, then the configured contract processing script. For legacy `.cmd` wrappers, InnPilot preserves the previous behavior and passes `--execute`. For the canonical Python contract script under `automation/`, InnPilot does not pass `--execute`, so the script remains dry-run by default.
 
-By default, FlowHost requires confirmation before this file-moving workflow runs. Keep `safety.requireConfirmationForFileMoves` enabled for production.
+By default, InnPilot requires confirmation before this file-moving workflow runs. Keep `safety.requireConfirmationForFileMoves` enabled for production.
 
 ## Automation Scripts
 
@@ -481,7 +483,7 @@ Example fake script behavior:
 
 Use temporary folders for every configured folder path. Never point test config at real guest PDFs, real contracts, or the real Gmail token.
 
-Future improvement: add canonical, config-driven scan-copy and OCR-preprocessing workers, then have FlowHost run them with the same `--config` convention.
+Future improvement: add canonical, config-driven scan-copy and OCR-preprocessing workers, then have InnPilot run them with the same `--config` convention.
 
 ## Data That Must Never Be Committed
 

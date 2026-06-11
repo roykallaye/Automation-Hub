@@ -1,1 +1,1 @@
-"""Shared helpers for FlowHost automation scripts."""
+"""Shared helpers for InnPilot automation scripts."""

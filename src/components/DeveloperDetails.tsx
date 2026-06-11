@@ -18,7 +18,7 @@ export function DeveloperDetails({ configStatus }: { configStatus: AppConfigStat
       <div className="mt-3 space-y-4">
         <div>
           <p className="mb-2 text-xs font-semibold uppercase text-slate-500">
-            FlowHost setup file
+            InnPilot setup file
           </p>
           <p className="break-words rounded-md bg-white/55 px-3 py-2 text-xs font-medium leading-5 text-slate-600">
             {configStatus?.configPath ?? "Setup path unavailable."}

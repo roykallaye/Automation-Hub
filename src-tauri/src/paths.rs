@@ -74,7 +74,7 @@ mod tests {
 
     fn config_with_temp_paths() -> HubConfig {
         let root = std::env::temp_dir().join(format!(
-            "flowhost_paths_test_{}",
+            "innpilot_paths_test_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

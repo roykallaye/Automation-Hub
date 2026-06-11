@@ -10,7 +10,7 @@ export const invoiceAction: AutomationAction = {
   requiresConfirmation: true,
   confirmationTitle: "Process invoices?",
   confirmationMessage:
-    "FlowHost will process invoice files and create Gmail drafts. No emails will be sent automatically.",
+    "InnPilot will process invoice files and create Gmail drafts. No emails will be sent automatically.",
 };
 
 export const contractAction: AutomationAction = {
@@ -20,7 +20,7 @@ export const contractAction: AutomationAction = {
   icon: ShieldCheck,
   requiresConfirmation: true,
   confirmationTitle: "Process signed contracts?",
-  confirmationMessage: "FlowHost will process signed contracts and organize files.",
+  confirmationMessage: "InnPilot will process signed contracts and organize files.",
 };
 
 export const gmailReconnectAction: AutomationAction = {
@@ -31,7 +31,7 @@ export const gmailReconnectAction: AutomationAction = {
   requiresConfirmation: true,
   confirmationTitle: "Reconnect Gmail?",
   confirmationMessage:
-    "FlowHost will reset Gmail access and may ask you to sign in again. No emails will be sent automatically.",
+    "InnPilot will reset Gmail access and may ask you to sign in again. No emails will be sent automatically.",
 };
 
 export const maintenanceActions: AutomationAction[] = [
@@ -42,7 +42,7 @@ export const maintenanceActions: AutomationAction[] = [
     icon: Copy,
     requiresConfirmation: true,
     confirmationTitle: "Copy scanned documents?",
-    confirmationMessage: "FlowHost will copy scanned documents from the shared folder.",
+    confirmationMessage: "InnPilot will copy scanned documents from the shared folder.",
   },
   {
     label: "Read scanned documents",
@@ -51,7 +51,7 @@ export const maintenanceActions: AutomationAction[] = [
     icon: ScanText,
     requiresConfirmation: true,
     confirmationTitle: "Read scanned documents?",
-    confirmationMessage: "FlowHost will read scanned documents and write text output.",
+    confirmationMessage: "InnPilot will read scanned documents and write text output.",
   },
 ];
 

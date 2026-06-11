@@ -1,6 +1,6 @@
-# FlowHost Automation Scripts
+# InnPilot Automation Scripts
 
-These are the versionable FlowHost automation workers. The legacy `Script/` folder is a local import mirror from the manager PC and is ignored by git; do not treat it as the canonical source.
+These are the versionable InnPilot automation workers. The legacy `Script/` folder is a local import mirror from the manager PC and is ignored by git; do not treat it as the canonical source.
 
 ## Structure
 
@@ -31,22 +31,29 @@ The `.cmd` wrappers under `automation/` use `python` from `PATH`. If a hotel PC 
 For a controlled manual hotel dry-run, the recommended managed layout is:
 
 ```text
-C:\FlowHost\automation
-C:\FlowHost\.venv
+C:\InnPilot\automation
+C:\InnPilot\.venv
 ```
 
 Example setup:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
-Copy-Item -Recurse -Force automation C:\FlowHost\automation
-python -m venv C:\FlowHost\.venv
-C:\FlowHost\.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+New-Item -ItemType Directory -Force C:\InnPilot | Out-Null
+Copy-Item -Recurse -Force automation C:\InnPilot\automation
+python -m venv C:\InnPilot\.venv
+C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
 ```
 
-Then set FlowHost app config `automation.automationRootFolder` to `C:\FlowHost\automation` and `automation.pythonExecutable` to `C:\FlowHost\.venv\Scripts\python.exe`.
+Then set InnPilot app config `automation.automationRootFolder` to `C:\InnPilot\automation` and `automation.pythonExecutable` to `C:\InnPilot\.venv\Scripts\python.exe`.
 
-Installed FlowHost builds also include a Support / Advanced action named `Install/refresh managed scripts`. That action copies only the versioned canonical automation files into FlowHost's app data automation folder and updates the app config to point there. It does not run workflows, does not call Gmail, and does not touch hotel folders.
+Installed InnPilot builds also include a Support / Advanced action named `Install/refresh managed scripts`. That action copies only the versioned canonical automation files into InnPilot's app data automation folder and updates the app config to point there. It does not run workflows, does not call Gmail, and does not touch hotel folders.
+
+Expected installed app data location:
+
+```text
+%APPDATA%\com.innpilot.app
+%APPDATA%\com.innpilot.app\automation
+```
 
 The Tauri installer bundles only an explicit allowlist of canonical automation resource files. It does not bundle the whole `automation/` directory recursively. Run this before building an installer:
 
@@ -69,7 +76,7 @@ Copy the example config to a local, uncommitted file:
 Copy-Item automation\config.example.json automation\config.local.json
 ```
 
-Edit `automation\config.local.json` for the PC where FlowHost is installed. Do not put real Gmail tokens or credentials into the example file. Local config files can contain real paths, but they must not contain guest PDFs, contracts, logs, or OAuth token contents.
+Edit `automation\config.local.json` for the PC where InnPilot is installed. Do not put real Gmail tokens or credentials into the example file. Local config files can contain real paths, but they must not contain guest PDFs, contracts, logs, or OAuth token contents.
 
 Important config sections:
 
@@ -80,30 +87,30 @@ Important config sections:
 - `contracts`: scanner filename prefix, contract marker text, and year metadata.
 - `safety`: dry-run default, original archiving, and log redaction flags.
 
-## FlowHost Integration
+## InnPilot Integration
 
-FlowHost has its own app config file in the Tauri app data directory. That app config should point `automation.automationConfigPath` at the local automation config file, usually:
+InnPilot has its own app config file in the Tauri app data directory. That app config should point `automation.automationConfigPath` at the local automation config file, usually:
 
 ```text
 automation\config.local.json
 ```
 
-FlowHost app config also has `automation.automationRootFolder`, which is the folder containing the versioned automation scripts:
+InnPilot app config also has `automation.automationRootFolder`, which is the folder containing the versioned automation scripts:
 
 ```text
-C:\FlowHost\automation
+C:\InnPilot\automation
 ```
 
 Explicit `scripts.*` paths remain authoritative for compatibility with legacy `.cmd` and `.ps1` workflows. New installs should point canonical Python script paths at files under `automation.automationRootFolder`.
 
-Keep overlapping FlowHost app config values and `automation\config.local.json` aligned. The most important one is Gmail:
+Keep overlapping InnPilot app config values and `automation\config.local.json` aligned. The most important one is Gmail:
 
-- FlowHost app config: `gmail.tokenPath`
+- InnPilot app config: `gmail.tokenPath`
 - automation config: `paths.gmailTokenFile`
 
-These must point to the same token file. If they differ, FlowHost blocks Gmail draft/reconnect workflows because the app may check or reset one token file while the Gmail worker uses another. FlowHost also warns when invoice folders, contract folders, or `safety.dryRunDefault` differ between the two config files.
+These must point to the same token file. If they differ, InnPilot blocks Gmail draft/reconnect workflows because the app may check or reset one token file while the Gmail worker uses another. InnPilot also warns when invoice folders, contract folders, or `safety.dryRunDefault` differ between the two config files.
 
-When FlowHost runs canonical Python workers, it passes the config path:
+When InnPilot runs canonical Python workers, it passes the config path:
 
 ```text
 python automation\invoices\process_fatture.py --config <automationConfigPath>
@@ -111,17 +118,17 @@ python automation\gmail_drafts\create_gmail_draft.py --config <automationConfigP
 python automation\contracts\process_contratti.py --config <automationConfigPath>
 ```
 
-If FlowHost app config has `safety.dryRunDefault` enabled, it also passes `--dry-run` to the invoice and Gmail draft workers. The contract worker is dry-run by default unless `--execute` is explicitly passed.
+If InnPilot app config has `safety.dryRunDefault` enabled, it also passes `--dry-run` to the invoice and Gmail draft workers. The contract worker is dry-run by default unless `--execute` is explicitly passed.
 
 ## Guided Setup
 
-FlowHost's Setup page can generate and save a local setup from a guided wizard. The wizard writes paths and settings only:
+InnPilot's Setup page can generate and save a local setup from a guided wizard. The wizard writes paths and settings only:
 
-- FlowHost app config in the Tauri app data directory.
+- InnPilot app config in the Tauri app data directory.
 - `automation\config.local.json` for the Python automation scripts.
 - Missing workspace folders when the operator explicitly confirms folder creation.
 
-Guided setup does not run these automation scripts, does not create Gmail drafts, and does not send emails. After setup is saved and checked, workflows are still started separately from the FlowHost Automations page.
+Guided setup does not run these automation scripts, does not create Gmail drafts, and does not send emails. After setup is saved and checked, workflows are still started separately from the InnPilot Automations page.
 
 ## Safe Dry Runs
 
@@ -153,7 +160,7 @@ Do not run these commands against real hotel folders unless you intentionally wa
 
 ## JSON Reports
 
-The canonical scripts can write structured JSON reports for FlowHost activity history:
+The canonical scripts can write structured JSON reports for InnPilot activity history:
 
 ```powershell
 python automation\invoices\process_fatture.py --config automation\config.local.json --dry-run --json-report C:\Temp\invoice-report.json
@@ -189,7 +196,7 @@ Reports use this common shape:
 }
 ```
 
-Reports are intended as safe summaries for FlowHost. They do not include Gmail credential or token contents, raw OCR text, or email body text. They may include operational file paths, recipient folder names, and planned destination paths so setup support can understand what happened.
+Reports are intended as safe summaries for InnPilot. They do not include Gmail credential or token contents, raw OCR text, or email body text. They may include operational file paths, recipient folder names, and planned destination paths so setup support can understand what happened.
 
 ## Automation Tests
 

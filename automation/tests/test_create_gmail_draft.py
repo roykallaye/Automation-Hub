@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import unittest
 
-from helpers import FlowHostWorkspace, count_files, latest_log_text, run_script
+from helpers import InnPilotWorkspace, count_files, latest_log_text, run_script
 
 
 class CreateGmailDraftTests(unittest.TestCase):
     def test_dry_run_reports_drafts_without_auth_or_file_moves(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             recipient_folder = workspace.invoice_output / "test@example.com"
             recipient_folder.mkdir(parents=True)
             invoice = recipient_folder / "fake_invoice.pdf"
@@ -44,7 +44,7 @@ class CreateGmailDraftTests(unittest.TestCase):
             self.assertEqual(data["outputs"]["reportPath"], str(report))
 
     def test_dry_run_does_not_need_or_expose_credential_contents(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             secret_marker = "secret-value-that-must-not-appear"
             workspace.gmail_credentials_file.write_text(secret_marker, encoding="utf-8")
             workspace.gmail_token_file.write_text(secret_marker, encoding="utf-8")
@@ -70,7 +70,7 @@ class CreateGmailDraftTests(unittest.TestCase):
             self.assertNotIn(secret_marker, output)
 
     def test_missing_config_fails_safely_without_google_auth(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             result = run_script(
                 "automation/gmail_drafts/create_gmail_draft.py",
                 "--config",

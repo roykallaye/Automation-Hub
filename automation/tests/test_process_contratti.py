@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import unittest
 
-from helpers import FlowHostWorkspace, count_files, run_script
+from helpers import InnPilotWorkspace, count_files, run_script
 
 
 class ProcessContrattiTests(unittest.TestCase):
     def test_default_dry_run_reports_candidate_without_moving_pdf(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             pdf = workspace.scans_cache / "Sharp MFP fixture.pdf"
             pdf.write_bytes(b"%PDF-1.4\n% fake scan\n")
             text = workspace.ocr_text / "Sharp MFP fixture.txt"
@@ -47,7 +47,7 @@ class ProcessContrattiTests(unittest.TestCase):
             self.assertIn("destinationPath", data["items"][0])
 
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             sentinel = workspace.scans_cache / "Sharp MFP sentinel.pdf"
             sentinel.write_bytes(b"keep")
 

@@ -32,7 +32,7 @@ export function AppShell({
           <div>
             <p className="text-sm font-semibold text-teal-800">{displayName}</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal text-slate-950 sm:text-4xl">
-              FlowHost
+              InnPilot
             </h1>
             <p className="mt-2 text-sm font-medium text-slate-600">
               Hotel operations, prepared with care.

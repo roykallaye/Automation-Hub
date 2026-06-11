@@ -76,7 +76,7 @@ export function deriveNextAction({
     return {
       id: "checking-setup",
       title: "Checking setup",
-      shortMessage: "FlowHost is checking folders and tools.",
+      shortMessage: "InnPilot is checking folders and tools.",
       targetPage: "setup",
       buttonLabel: "Open Setup",
       priority: 80,
@@ -88,7 +88,7 @@ export function deriveNextAction({
     return {
       id: "setup-unavailable",
       title: "Setup needs attention",
-      shortMessage: "FlowHost setup could not be loaded.",
+      shortMessage: "InnPilot setup could not be loaded.",
       targetPage: "setup",
       buttonLabel: "Go to Setup",
       priority: 85,

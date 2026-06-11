@@ -82,7 +82,7 @@ export function DetailsPanel({
         </div>
       ) : (
         <div className="rounded-lg border border-white/70 bg-white/60 p-5 text-sm font-medium leading-6 text-slate-700">
-          No run yet. When an automation finishes, FlowHost will show the result here.
+          No run yet. When an automation finishes, InnPilot will show the result here.
         </div>
       )}
 

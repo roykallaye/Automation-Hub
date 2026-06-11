@@ -185,7 +185,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
     HubConfig {
         schema_version: CONFIG_VERSION,
         client: ClientConfig {
-            display_name: "Life Hotel".to_string(),
+            display_name: "Your Hotel".to_string(),
         },
         automation: default_config().automation,
         scripts: ScriptPaths {
@@ -221,7 +221,7 @@ pub(crate) fn default_config() -> HubConfig {
     HubConfig {
         schema_version: CONFIG_VERSION,
         client: ClientConfig {
-            display_name: "Life Hotel".to_string(),
+            display_name: "Your Hotel".to_string(),
         },
         automation: AutomationConfig {
             automation_root_folder: automation_root.to_string_lossy().to_string(),
@@ -231,33 +231,23 @@ pub(crate) fn default_config() -> HubConfig {
         scripts: ScriptPaths {
             invoice_workflow_script: script_paths.invoice_workflow_script,
             gmail_draft_script: script_paths.gmail_draft_script,
-            copy_scansioni_script: r"C:\Users\back-office-life\Documents\copy_scansioni.cmd"
-                .to_string(),
-            ocr_preprocessing_script:
-                r"C:\Users\back-office-life\Documents\CodexScripts\preprocess_scansioni_to_text.ps1"
-                    .to_string(),
+            copy_scansioni_script: script_paths.copy_scansioni_script,
+            ocr_preprocessing_script: script_paths.ocr_preprocessing_script,
             contract_processing_script: script_paths.contract_processing_script,
         },
         folders: FolderPaths {
-            invoice_input_folder: r"C:\Users\back-office-life\Desktop\Fatture\Input".to_string(),
-            invoice_output_folder: r"C:\Users\back-office-life\Desktop\Fatture\Output_ProntoInvio"
-                .to_string(),
-            invoice_archive_folder: r"C:\Users\back-office-life\Desktop\Fatture\Archivio"
-                .to_string(),
-            invoice_log_folder: r"C:\Users\back-office-life\Desktop\Fatture\Log".to_string(),
-            scansioni_network_share: r"\\172.16.47.20\shared\Scansioni".to_string(),
-            scansioni_local_cache_folder:
-                r"C:\Users\back-office-life\Documents\CodexInput\Scansioni".to_string(),
-            ocr_text_output_folder: r"C:\Users\back-office-life\Documents\CodexInput\ScansioniText"
-                .to_string(),
-            contracts_output_folder:
-                r"C:\Users\back-office-life\Desktop\Life Hotel\Staff\2026\CONTRATTI FIRMATI"
-                    .to_string(),
-            contract_log_folder: r"C:\Users\back-office-life\Desktop\Fatture\Log".to_string(),
+            invoice_input_folder: r"C:\InnPilot\workspace\Invoices\Input".to_string(),
+            invoice_output_folder: r"C:\InnPilot\workspace\Invoices\ReadyToSend".to_string(),
+            invoice_archive_folder: r"C:\InnPilot\workspace\Invoices\Archive".to_string(),
+            invoice_log_folder: r"C:\InnPilot\workspace\Invoices\Logs".to_string(),
+            scansioni_network_share: r"C:\InnPilot\workspace\Scans\IncomingCache".to_string(),
+            scansioni_local_cache_folder: r"C:\InnPilot\workspace\Scans\IncomingCache".to_string(),
+            ocr_text_output_folder: r"C:\InnPilot\workspace\Scans\TextOutput".to_string(),
+            contracts_output_folder: r"C:\InnPilot\workspace\Contracts\2026\Signed".to_string(),
+            contract_log_folder: r"C:\InnPilot\workspace\Contracts\Logs".to_string(),
         },
         gmail: GmailConfig {
-            token_path: r"C:\Users\back-office-life\Desktop\Fatture\Script\gmail_token.json"
-                .to_string(),
+            token_path: r"C:\InnPilot\workspace\Gmail\Token\gmail_token.json".to_string(),
         },
         safety: SafetyConfig {
             dry_run_default: false,
@@ -292,7 +282,7 @@ fn default_automation_root_for_locations(exe_dir: Option<&Path>, current_dir: &P
     if looks_like_automation_root(&current_automation) {
         current_automation
     } else {
-        PathBuf::from(r"C:\FlowHost\automation")
+        PathBuf::from(r"C:\InnPilot\automation")
     }
 }
 
@@ -308,11 +298,14 @@ pub(crate) fn canonical_script_paths(automation_root: &Path) -> ScriptPaths {
             .join("create_gmail_draft.py")
             .to_string_lossy()
             .to_string(),
-        copy_scansioni_script: r"C:\Users\back-office-life\Documents\copy_scansioni.cmd"
+        copy_scansioni_script: automation_root
+            .join("copy_scansioni.cmd")
+            .to_string_lossy()
             .to_string(),
-        ocr_preprocessing_script:
-            r"C:\Users\back-office-life\Documents\CodexScripts\preprocess_scansioni_to_text.ps1"
-                .to_string(),
+        ocr_preprocessing_script: automation_root
+            .join("preprocess_scansioni_to_text.ps1")
+            .to_string_lossy()
+            .to_string(),
         contract_processing_script: automation_root
             .join("contracts")
             .join("process_contratti.py")
@@ -338,11 +331,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_contains_portable_schema_and_manager_pc_defaults() {
+    fn default_config_contains_portable_schema_and_generic_defaults() {
         let config = default_config();
 
         assert_eq!(config.schema_version, CONFIG_VERSION);
-        assert_eq!(config.client.display_name, "Life Hotel");
+        assert_eq!(config.client.display_name, "Your Hotel");
         assert!(config
             .scripts
             .invoice_workflow_script
@@ -397,7 +390,7 @@ mod tests {
 
     #[test]
     fn repo_automation_root_is_used_when_canonical_scripts_exist() {
-        let root = std::env::temp_dir().join("flowhost_repo_root_for_config_test");
+        let root = std::env::temp_dir().join("innpilot_repo_root_for_config_test");
         let automation = root.join("automation");
         fs::create_dir_all(automation.join("invoices")).unwrap();
         fs::create_dir_all(automation.join("gmail_drafts")).unwrap();
@@ -421,17 +414,17 @@ mod tests {
 
     #[test]
     fn managed_automation_root_is_used_when_repo_scripts_are_missing() {
-        let root = std::env::temp_dir().join("flowhost_missing_repo_root_for_config_test");
+        let root = std::env::temp_dir().join("innpilot_missing_repo_root_for_config_test");
 
         assert_eq!(
             default_automation_root_for_current_dir(&root),
-            PathBuf::from(r"C:\FlowHost\automation")
+            PathBuf::from(r"C:\InnPilot\automation")
         );
     }
 
     #[test]
     fn installed_exe_automation_root_is_preferred_over_current_directory() {
-        let root = std::env::temp_dir().join("flowhost_installed_root_for_config_test");
+        let root = std::env::temp_dir().join("innpilot_installed_root_for_config_test");
         let exe_dir = root.join("installed");
         let current_dir = root.join("working");
         let automation = exe_dir.join("automation");
@@ -446,20 +439,20 @@ mod tests {
 
     #[test]
     fn canonical_paths_are_derived_from_automation_root() {
-        let root = PathBuf::from(r"C:\FlowHost\automation");
+        let root = PathBuf::from(r"C:\InnPilot\automation");
         let scripts = canonical_script_paths(&root);
 
         assert_eq!(
             scripts.invoice_workflow_script,
-            r"C:\FlowHost\automation\invoices\process_fatture.py"
+            r"C:\InnPilot\automation\invoices\process_fatture.py"
         );
         assert_eq!(
             scripts.gmail_draft_script,
-            r"C:\FlowHost\automation\gmail_drafts\create_gmail_draft.py"
+            r"C:\InnPilot\automation\gmail_drafts\create_gmail_draft.py"
         );
         assert_eq!(
             scripts.contract_processing_script,
-            r"C:\FlowHost\automation\contracts\process_contratti.py"
+            r"C:\InnPilot\automation\contracts\process_contratti.py"
         );
     }
 

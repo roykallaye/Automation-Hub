@@ -46,11 +46,11 @@ export function staffMessage(
   if (status === "ready") return message;
   if (status === "warning") {
     if (message.toLowerCase().includes("do not match")) {
-      return "Automation setup does not match FlowHost setup.";
+      return "Automation setup does not match InnPilot setup.";
     }
-    return "Setup needs review. Ask setup support to check FlowHost.";
+    return "Setup needs review. Ask setup support to check InnPilot.";
   }
-  if (status === "notChecked") return "FlowHost has not checked this yet.";
+  if (status === "notChecked") return "InnPilot has not checked this yet.";
   if (status === "missingConfiguration") {
     if (workflowKey === "pythonExecutable") {
       return "Python needs setup. Open Support for installation steps.";
@@ -67,19 +67,19 @@ export function staffMessage(
     if (message.toLowerCase().includes("automation setup file")) {
       return "Automation setup file is missing. Ask setup support to select or create it.";
     }
-    return "Setup needs attention. Ask setup support to update FlowHost.";
+    return "Setup needs attention. Ask setup support to update InnPilot.";
   }
   if (status === "missingScript") {
-    return "The automation setup is missing. Ask setup support to update FlowHost.";
+    return "The automation setup is missing. Ask setup support to update InnPilot.";
   }
   if (status === "permissionProblem") {
-    return "FlowHost cannot access a required folder. Ask setup support to check permissions.";
+    return "InnPilot cannot access a required folder. Ask setup support to check permissions.";
   }
   if (workflowKey === "scansioniNetwork" && status === "missingFolder") {
     return "The folder used for scanned documents is not reachable.";
   }
   if (status === "missingFolder") {
-    return "A required folder is missing. Ask setup support to update FlowHost.";
+    return "A required folder is missing. Ask setup support to update InnPilot.";
   }
 
   return message

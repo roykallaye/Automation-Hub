@@ -80,7 +80,7 @@ function App() {
     return actions.find((action) => action.commandName === runningCommand)?.label;
   }, [actions, runningCommand]);
 
-  const displayName = configStatus?.config.client.displayName || "FlowHost";
+  const displayName = configStatus?.config.client.displayName || "InnPilot";
   const modules = useMemo(() => deriveModuleReadiness(configStatus), [configStatus]);
   const nextAction = useMemo(
     () =>
@@ -213,8 +213,8 @@ function App() {
   }
 
   function actionDisabledReason(action: AutomationAction) {
-    if (loadingConfig) return "FlowHost setup is still loading.";
-    if (!configStatus) return "FlowHost setup could not be loaded.";
+    if (loadingConfig) return "InnPilot setup is still loading.";
+    if (!configStatus) return "InnPilot setup could not be loaded.";
     const workflow = workflowFor(action);
     if (!workflow) return "Workflow status is not available.";
     if (!workflow.canRun) {

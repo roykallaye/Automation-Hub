@@ -45,7 +45,7 @@ pub fn run() {
             open_activity_report
         ])
         .run(tauri::generate_context!())
-        .expect("error while running FlowHost");
+        .expect("error while running InnPilot");
 }
 
 #[tauri::command]
@@ -64,7 +64,7 @@ fn get_activity_detail(
 #[tauri::command]
 fn open_activity_report(app: AppHandle, path: String) -> Result<(), String> {
     if !activity::is_activity_report_path(&app, &path)? {
-        return Err("This activity report is not in the FlowHost activity folder.".to_string());
+        return Err("This activity report is not in the InnPilot activity folder.".to_string());
     }
 
     Command::new("explorer.exe")
@@ -163,7 +163,7 @@ async fn run_command(
 fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     let config = config::ensure_config(&app)?;
     if !paths::is_allowed_path(&config, &path) {
-        return Err("This path is not in the FlowHost allowlist.".to_string());
+        return Err("This path is not in the InnPilot allowlist.".to_string());
     }
 
     Command::new("explorer.exe")

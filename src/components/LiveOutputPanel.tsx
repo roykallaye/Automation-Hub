@@ -14,7 +14,7 @@ export function LiveOutputPanel({ liveOutput }: { liveOutput: string[] }) {
       </div>
       <p className="text-sm font-medium text-slate-200">
         {liveOutput.length
-          ? "FlowHost is tracking this run."
+          ? "InnPilot is tracking this run."
           : "No automation is running right now."}
       </p>
       <details className="mt-4">

@@ -11,11 +11,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-class FlowHostWorkspace:
+class InnPilotWorkspace:
     def __init__(self) -> None:
-        self._temp = TemporaryDirectory(prefix="flowhost_automation_test_")
+        self._temp = TemporaryDirectory(prefix="innpilot_automation_test_")
         self.root = Path(self._temp.name)
-        self.workspace = self.root / "FlowHost Workspace"
+        self.workspace = self.root / "InnPilot" / "workspace"
         self.invoice_input = self.workspace / "Invoices" / "Input"
         self.invoice_output = self.workspace / "Invoices" / "ReadyToSend"
         self.invoice_archive = self.workspace / "Invoices" / "Archive"
@@ -29,7 +29,7 @@ class FlowHostWorkspace:
         self.support_diagnostics = self.workspace / "Support" / "Diagnostics"
         self.config_path = self.root / "automation.config.local.json"
 
-    def __enter__(self) -> "FlowHostWorkspace":
+    def __enter__(self) -> "InnPilotWorkspace":
         for folder in [
             self.invoice_input,
             self.invoice_output,

@@ -4,17 +4,17 @@
     "emailSignatureName": "Example Hotel Team"
   },
   "paths": {
-    "invoiceInputDir": "C:\\FlowHost\\Invoices\\Input",
-    "invoiceOutputDir": "C:\\FlowHost\\Invoices\\Output_ProntoInvio",
-    "invoiceArchiveDir": "C:\\FlowHost\\Invoices\\Archivio",
-    "invoiceLogDir": "C:\\FlowHost\\Invoices\\Log",
-    "gmailCredentialsFile": "C:\\FlowHost\\Secrets\\gmail_credentials.json",
-    "gmailTokenFile": "C:\\FlowHost\\Secrets\\gmail_token.json",
-    "contractInputShortcut": "C:\\FlowHost\\Scansioni.lnk",
-    "contractInputDir": "C:\\FlowHost\\Scansioni",
-    "contractDestinationDir": "C:\\FlowHost\\Contracts\\2026\\CONTRATTI FIRMATI",
-    "contractOcrTextDir": "C:\\FlowHost\\OCR\\ScansioniText",
-    "contractLogDir": "C:\\FlowHost\\Invoices\\Log"
+    "invoiceInputDir": "C:\\InnPilot\\Invoices\\Input",
+    "invoiceOutputDir": "C:\\InnPilot\\Invoices\\Output_ProntoInvio",
+    "invoiceArchiveDir": "C:\\InnPilot\\Invoices\\Archivio",
+    "invoiceLogDir": "C:\\InnPilot\\Invoices\\Log",
+    "gmailCredentialsFile": "C:\\InnPilot\\Secrets\\gmail_credentials.json",
+    "gmailTokenFile": "C:\\InnPilot\\Secrets\\gmail_token.json",
+    "contractInputShortcut": "C:\\InnPilot\\Scansioni.lnk",
+    "contractInputDir": "C:\\InnPilot\\Scansioni",
+    "contractDestinationDir": "C:\\InnPilot\\Contracts\\2026\\CONTRATTI FIRMATI",
+    "contractOcrTextDir": "C:\\InnPilot\\OCR\\ScansioniText",
+    "contractLogDir": "C:\\InnPilot\\Invoices\\Log"
   },
   "gmail": {
     "subject": "Invoices - Example Hotel",

@@ -19,7 +19,7 @@ from shared.config import (  # noqa: E402
 from shared.report import now_iso, standard_report, write_report  # noqa: E402
 
 
-ROOT = Path(r"C:\Users\back-office-life\Desktop\Fatture")
+ROOT = Path(r"C:\InnPilot\workspace\Invoices")
 SCRIPT_DIR = ROOT / "Script"
 INPUT_DIR = ROOT / "Input"
 OUTPUT_DIR = ROOT / "Output_ProntoInvio"
@@ -29,9 +29,9 @@ LOG_DIR = ROOT / "Log"
 CREDENTIALS_FILE = SCRIPT_DIR / "gmail_credentials.json"
 TOKEN_FILE = SCRIPT_DIR / "gmail_token.json"
 
-SUBJECT = "Invoices - Life Hotel Bibione"
+SUBJECT = "Invoices - Your Hotel"
 CC_EMAIL = "rossella@apogia.net"
-EMAIL_SIGNATURE_NAME = "Life Hotel Bibione"
+EMAIL_SIGNATURE_NAME = "Your Hotel"
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 NO_EMAIL_FOLDER_NAME = "SenzaEmail"
 
@@ -95,7 +95,7 @@ def unique_path(path: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create Gmail drafts for prepared invoice PDFs.")
     parser.add_argument("--dry-run", action="store_true", help="Report draft candidates without calling Gmail or moving files.")
-    parser.add_argument("--config", type=Path, help="Optional FlowHost automation JSON config file.")
+    parser.add_argument("--config", type=Path, help="Optional InnPilot automation JSON config file.")
     parser.add_argument("--json-report", type=Path, help="Optional path for the JSON report.")
     return parser.parse_args()
 
@@ -156,7 +156,7 @@ def build_no_email_body(pdf_files: list[Path]) -> str:
     return "\n".join([
         "Buongiorno,",
         "",
-        "alleghiamo fatture dei clienti che hanno soggiornato presso il Life Hotel.",
+        "alleghiamo fatture dei clienti che hanno soggiornato presso il Your Hotel.",
         "",
         "Nomi dei clienti:",
         *client_lines,

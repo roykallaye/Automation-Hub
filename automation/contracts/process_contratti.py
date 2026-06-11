@@ -21,10 +21,10 @@ from shared.config import (  # noqa: E402
 from shared.report import now_iso, report_status, standard_report, write_report  # noqa: E402
 
 
-SHORTCUT_PATH = Path(r"C:\Users\back-office-life\Desktop\Scansioni.lnk")
-DESTINATION_DIR = Path(r"C:\Users\back-office-life\Desktop\Life Hotel\Staff\2026\CONTRATTI FIRMATI")
-LOG_DIR = Path(r"C:\Users\back-office-life\Desktop\Fatture\Log")
-OCR_TEXT_DIR = Path(r"C:\Users\back-office-life\Documents\CodexInput\ScansioniText")
+SHORTCUT_PATH = Path(r"C:\InnPilot\workspace\Scans\IncomingCache")
+DESTINATION_DIR = Path(r"C:\InnPilot\workspace\Contracts\2026\Signed")
+LOG_DIR = Path(r"C:\InnPilot\workspace\Contracts\Logs")
+OCR_TEXT_DIR = Path(r"C:\InnPilot\workspace\Scans\TextOutput")
 
 FILE_PREFIX = "Sharp MFP"
 CONTRACT_MARKER = "Oggetto: Contratto di lavoro subordinato a tempo determinato"
@@ -476,7 +476,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Use preprocessed OCR text to identify employee contract PDFs, rename them by employee name, and move them safely.",
     )
-    parser.add_argument("--config", type=Path, help="Optional FlowHost automation JSON config file.")
+    parser.add_argument("--config", type=Path, help="Optional InnPilot automation JSON config file.")
     parser.add_argument(
         "--execute",
         action="store_true",

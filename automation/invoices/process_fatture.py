@@ -19,14 +19,14 @@ from shared.config import (  # noqa: E402
 from shared.report import now_iso, standard_report, write_report  # noqa: E402
 
 
-ROOT = Path(r"C:\Users\back-office-life\Desktop\Fatture")
+ROOT = Path(r"C:\InnPilot\workspace\Invoices")
 
 INPUT_DIR = ROOT / "Input"
 OUTPUT_DIR = ROOT / "Output_ProntoInvio"
 ARCHIVE_DIR = ROOT / "Archivio"
 LOG_DIR = ROOT / "Log"
 INPUT_GLOB = "Funzione Pubblica amministrazione*.pdf"
-EMAIL_SIGNATURE_NAME = "Life Hotel Bibione"
+EMAIL_SIGNATURE_NAME = "Your Hotel"
 ARCHIVE_SUCCESSFUL_ORIGINALS = True
 
 RUN_TS = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -88,7 +88,7 @@ def unique_path(path: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Process hotel invoice PDFs for Gmail draft preparation.")
     parser.add_argument("--dry-run", action="store_true", help="Inspect invoices without writing output PDFs or deleting originals.")
-    parser.add_argument("--config", type=Path, help="Optional FlowHost automation JSON config file.")
+    parser.add_argument("--config", type=Path, help="Optional InnPilot automation JSON config file.")
     parser.add_argument("--json-report", type=Path, help="Optional path for the JSON report.")
     return parser.parse_args()
 
@@ -448,7 +448,7 @@ def main(args: argparse.Namespace | None = None):
     for pdf_path in input_pdfs:
         log(f"Processing: {pdf_path.name}")
 
-        temp_context = tempfile.TemporaryDirectory(prefix="flowhost_invoice_") if dry_run else None
+        temp_context = tempfile.TemporaryDirectory(prefix="innpilot_invoice_") if dry_run else None
         temp_base = Path(temp_context.name) if temp_context else OUTPUT_DIR
         temp_pdf = temp_base / f"__TEMP__{pdf_path.stem}.pdf"
 

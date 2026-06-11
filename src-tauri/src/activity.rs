@@ -680,7 +680,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "flowhost_activity_test_{name}_{}",
+            "innpilot_activity_test_{name}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

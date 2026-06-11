@@ -355,7 +355,7 @@ fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
             path: None,
             item_type: "alignment".to_string(),
             status: ReadinessStatus::Ready,
-            message: "FlowHost setup and automation setup match.".to_string(),
+            message: "InnPilot setup and automation setup match.".to_string(),
             readable: None,
             writable: None,
         }];
@@ -369,7 +369,7 @@ fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
         item_type: "alignment".to_string(),
         status: ReadinessStatus::Warning,
         message: format!(
-            "FlowHost setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {field_list}."
+            "InnPilot setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {field_list}."
         ),
         readable: None,
         writable: None,
@@ -388,7 +388,7 @@ fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
             item_type: "alignment".to_string(),
             status: ReadinessStatus::PermissionProblem,
             message: format!(
-                "FlowHost setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {}.",
+                "InnPilot setup and automation setup do not match. Ask setup support to update the configuration. Mismatched fields: {}.",
                 gmail_mismatch.join(", ")
             ),
             readable: None,
@@ -487,7 +487,7 @@ fn automation_config_check(path: &str) -> PreflightItem {
             path: Some(path.to_string()),
             item_type: "config".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Automation setup path is not a file. Ask setup support to update FlowHost configuration."
+            message: "Automation setup path is not a file. Ask setup support to update InnPilot configuration."
                 .to_string(),
             readable: None,
             writable: None,
@@ -515,7 +515,7 @@ fn automation_root_check(path: &str) -> PreflightItem {
             item_type: "config".to_string(),
             status: ReadinessStatus::MissingConfiguration,
             message:
-                "Automation scripts folder is not configured. Ask setup support to update FlowHost."
+                "Automation scripts folder is not configured. Ask setup support to update InnPilot."
                     .to_string(),
             readable: None,
             writable: None,
@@ -546,7 +546,7 @@ fn automation_root_check(path: &str) -> PreflightItem {
             item_type: "config".to_string(),
             status: ReadinessStatus::MissingFolder,
             message:
-                "Automation scripts path is not a folder. Ask setup support to update FlowHost."
+                "Automation scripts path is not a folder. Ask setup support to update InnPilot."
                     .to_string(),
             readable: None,
             writable: None,
@@ -600,7 +600,7 @@ fn python_check(python_executable: &str) -> PreflightItem {
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
             message:
-                "Python is not configured. Ask setup support to update FlowHost configuration."
+                "Python is not configured. Ask setup support to update InnPilot configuration."
                     .to_string(),
             readable: None,
             writable: None,
@@ -811,7 +811,7 @@ fn python_package_summary_check(
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
             message: format!(
-                "Install the Python packages needed by FlowHost automations. Missing modules: {}.",
+                "Install the Python packages needed by InnPilot automations. Missing modules: {}.",
                 missing.join(", ")
             ),
             readable: None,
@@ -933,7 +933,7 @@ fn script_check(key: &str, label: &str, path: &str) -> PreflightItem {
             path: Some(path.to_string()),
             item_type: "script".to_string(),
             status: ReadinessStatus::MissingScript,
-            message: "Setup needs attention. The configured automation script path is not a script file. Ask setup support to update FlowHost configuration.".to_string(),
+            message: "Setup needs attention. The configured automation script path is not a script file. Ask setup support to update InnPilot configuration.".to_string(),
             readable: None,
             writable: None,
         };
@@ -992,7 +992,7 @@ fn folder_check(
             path: Some(path.to_string()),
             item_type: "folder".to_string(),
             status: ReadinessStatus::MissingFolder,
-            message: "Setup needs attention. The configured path is not a folder. Ask setup support to update FlowHost configuration.".to_string(),
+            message: "Setup needs attention. The configured path is not a folder. Ask setup support to update InnPilot configuration.".to_string(),
             readable: None,
             writable: None,
         };
@@ -1038,7 +1038,7 @@ fn script_missing_message(key: &str) -> String {
         _ => "automation script",
     };
     format!(
-        "Setup needs attention. The {script_name} is missing. Ask setup support to update FlowHost configuration."
+        "Setup needs attention. The {script_name} is missing. Ask setup support to update InnPilot configuration."
     )
 }
 
@@ -1056,7 +1056,7 @@ fn folder_missing_message(key: &str) -> String {
         _ => "configured folder",
     };
     format!(
-        "Setup needs attention. The {folder_name} is missing or not reachable. Ask setup support to update FlowHost configuration."
+        "Setup needs attention. The {folder_name} is missing or not reachable. Ask setup support to update InnPilot configuration."
     )
 }
 
@@ -1074,7 +1074,7 @@ fn folder_permission_message(key: &str) -> String {
         _ => "configured folder",
     };
     format!(
-        "Setup needs attention. FlowHost cannot read or write the {folder_name}. Ask setup support to check folder permissions."
+        "Setup needs attention. InnPilot cannot read or write the {folder_name}. Ask setup support to check folder permissions."
     )
 }
 
@@ -1144,7 +1144,7 @@ fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
                 path: None,
                 item_type: "credentials".to_string(),
                 status: ReadinessStatus::MissingConfiguration,
-                message: "Gmail credentials file could not be checked. Ask setup support to update FlowHost setup."
+                message: "Gmail credentials file could not be checked. Ask setup support to update InnPilot setup."
                     .to_string(),
                 readable: None,
                 writable: None,
@@ -1161,7 +1161,7 @@ fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
                 path: None,
                 item_type: "credentials".to_string(),
                 status: ReadinessStatus::MissingConfiguration,
-                message: "Gmail credentials file could not be checked. Ask setup support to update FlowHost setup."
+                message: "Gmail credentials file could not be checked. Ask setup support to update InnPilot setup."
                     .to_string(),
                 readable: None,
                 writable: None,
@@ -1282,7 +1282,7 @@ fn token_parent_folder_check(token_path: &str) -> PreflightItem {
     );
 
     if item.status != ReadinessStatus::Ready {
-        item.message = "Setup needs attention. The Gmail sign-in folder is missing or cannot be used. Ask setup support to update FlowHost configuration.".to_string();
+        item.message = "Setup needs attention. The Gmail sign-in folder is missing or cannot be used. Ask setup support to update InnPilot configuration.".to_string();
     } else {
         item.message = "Gmail sign-in folder is available.".to_string();
     }
@@ -1501,9 +1501,9 @@ fn can_write_to_folder(path: &Path) -> bool {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    let probe_path = path.join(format!(".flowhost_write_probe_{stamp}.tmp"));
+    let probe_path = path.join(format!(".innpilot_write_probe_{stamp}.tmp"));
     let result =
-        fs::File::create(&probe_path).and_then(|mut file| file.write_all(b"flowhost preflight"));
+        fs::File::create(&probe_path).and_then(|mut file| file.write_all(b"innpilot preflight"));
     let _ = fs::remove_file(&probe_path);
     result.is_ok()
 }
@@ -1569,7 +1569,7 @@ mod tests {
     fn missing_gmail_token_parent_folder_is_reported_and_blocks_reconnect() {
         let mut config = config_with_temp_paths();
         let missing_parent = std::env::temp_dir().join(format!(
-            "flowhost_missing_token_parent_{}",
+            "innpilot_missing_token_parent_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1803,7 +1803,7 @@ mod tests {
 
     fn config_with_temp_paths() -> HubConfig {
         let root = std::env::temp_dir().join(format!(
-            "flowhost_preflight_test_{}_{}",
+            "innpilot_preflight_test_{}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1895,7 +1895,7 @@ mod tests {
     fn missing_automation_root_folder_is_reported() {
         let mut config = config_with_temp_paths();
         config.automation.automation_root_folder = std::env::temp_dir()
-            .join("flowhost_missing_automation_root")
+            .join("innpilot_missing_automation_root")
             .join("automation")
             .to_string_lossy()
             .to_string();
@@ -1915,7 +1915,7 @@ mod tests {
 
     #[test]
     fn missing_python_executable_is_reported() {
-        let item = python_check("definitely_missing_python_for_flowhost_tests.exe");
+        let item = python_check("definitely_missing_python_for_innpilot_tests.exe");
 
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
     }

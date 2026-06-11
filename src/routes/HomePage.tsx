@@ -175,7 +175,7 @@ function AttentionBanner({
     return (
       <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-glass">
         <p className="text-sm font-semibold text-rose-900">
-          FlowHost setup could not be loaded.
+          InnPilot setup could not be loaded.
         </p>
       </section>
     );
@@ -211,7 +211,7 @@ function AttentionBanner({
     <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
       <p className="text-sm font-semibold text-amber-950">Main setup needs attention</p>
       <p className="mt-1 text-sm font-medium text-amber-800">
-        {primaryIssue ? primaryIssue.nextAction : "Ask setup support to check FlowHost."}
+        {primaryIssue ? primaryIssue.nextAction : "Ask setup support to check InnPilot."}
       </p>
     </section>
   );

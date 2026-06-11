@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from helpers import FlowHostWorkspace, count_files, run_script
+from helpers import InnPilotWorkspace, count_files, run_script
 
 
 def create_invoice_pdf(path: Path) -> None:
@@ -19,7 +19,7 @@ def create_invoice_pdf(path: Path) -> None:
         (50, 72),
         "\n".join(
             [
-                "Life Hotel",
+                "Your Hotel",
                 "123",
                 "01/02/2026",
                 "Eurotours Fixture",
@@ -37,7 +37,7 @@ def create_invoice_pdf(path: Path) -> None:
 
 class ProcessFattureTests(unittest.TestCase):
     def test_dry_run_invalid_pdf_keeps_original_and_writes_temp_report(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             invoice = workspace.invoice_input / "Funzione Pubblica amministrazione invalid.pdf"
             report = workspace.root / "invoice-invalid-report.json"
             invoice.write_bytes(b"not a real pdf")
@@ -67,7 +67,7 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(data["outputs"]["reportPath"], str(report))
 
     def test_dry_run_keeps_original_and_does_not_finalize_outputs(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             invoice = workspace.invoice_input / "Funzione Pubblica amministrazione fixture.pdf"
             report = workspace.root / "invoice-report.json"
             create_invoice_pdf(invoice)
@@ -99,7 +99,7 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertIn("test@example.com", data["details"]["recipientGroups"])
 
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
-        with FlowHostWorkspace() as workspace:
+        with InnPilotWorkspace() as workspace:
             sentinel = workspace.invoice_input / "sentinel.txt"
             sentinel.write_text("keep", encoding="utf-8")
 

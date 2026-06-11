@@ -14,12 +14,12 @@ export function buildConfigPreview(draft: SetupDraft) {
   const contractLogs = joinWorkspace(draft.workspaceBase, "Contracts", "Logs");
 
   return {
-    flowHostAppConfig: {
+    innPilotAppConfig: {
       client: {
         displayName: draft.hotelDisplayName,
       },
       automation: {
-        automationRootFolder: "C:\\FlowHost\\automation",
+        automationRootFolder: "C:\\InnPilot\\automation",
         automationConfigPath: joinWorkspace(draft.workspaceBase, "automation", "config.local.json"),
         pythonExecutable: "python",
       },

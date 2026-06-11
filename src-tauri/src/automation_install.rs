@@ -41,7 +41,7 @@ pub(crate) fn install_managed_automation_scripts(
 ) -> Result<ManagedAutomationInstallResult, String> {
     if !confirmed {
         return Err(
-            "This support action needs confirmation before FlowHost can install automation scripts."
+            "This support action needs confirmation before InnPilot can install automation scripts."
                 .to_string(),
         );
     }
@@ -76,7 +76,7 @@ fn find_automation_source(candidates: Vec<PathBuf>) -> Result<PathBuf, String> {
         .into_iter()
         .find(|candidate| has_canonical_sources(candidate))
         .ok_or_else(|| {
-            "FlowHost could not find its packaged automation scripts. Ask setup support to reinstall FlowHost or copy the automation folder manually.".to_string()
+            "InnPilot could not find its packaged automation scripts. Ask setup support to reinstall InnPilot or copy the automation folder manually.".to_string()
         })
 }
 
@@ -420,7 +420,7 @@ mod tests {
 
     fn temp_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "flowhost_automation_install_{name}_{}",
+            "innpilot_automation_install_{name}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

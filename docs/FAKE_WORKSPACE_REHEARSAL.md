@@ -1,6 +1,6 @@
-# FlowHost Fake Workspace Rehearsal
+# InnPilot Fake Workspace Rehearsal
 
-Use this guide to rehearse FlowHost in Tauri with fake local data before any hotel-PC dry-run.
+Use this guide to rehearse InnPilot in Tauri with fake local data before any hotel-PC dry-run.
 
 ## Purpose
 
@@ -25,10 +25,17 @@ This rehearsal checks that guided setup, config saving, dry-run automation launc
 Use this exact local test workspace:
 
 ```text
-C:\Users\rkall\Desktop\FlowHost-Test-Workspace
+C:\Users\rkall\Desktop\InnPilot-Test-Workspace
 ```
 
-Do not point FlowHost at Life Hotel folders, manager-PC folders, network shares, Downloads folders with real documents, or any shared production location.
+Installed builds use the InnPilot app data identity:
+
+```text
+%APPDATA%\com.innpilot.app
+%APPDATA%\com.innpilot.app\automation
+```
+
+Do not point InnPilot at real hotel folders, manager-PC folders, network shares, Downloads folders with real documents, or any shared production location.
 
 ## Start The App
 
@@ -36,7 +43,7 @@ Do not point FlowHost at Life Hotel folders, manager-PC folders, network shares,
 npm run tauri dev
 ```
 
-Open FlowHost, go to `Setup`, and start the guided setup.
+Open InnPilot, go to `Setup`, and start the guided setup.
 
 Before running any dry-run automation, open `Support` / `Advanced details` and check the Python environment card:
 
@@ -51,19 +58,19 @@ If packages are missing, copy the install command shown in Support and run it in
 
 ### Hotel Profile
 
-- Hotel display name: `FlowHost Test Hotel`
-- Email signature name: `FlowHost Test Hotel`
+- Hotel display name: `InnPilot Test Hotel`
+- Email signature name: `InnPilot Test Hotel`
 
 ### Workspace
 
-- Workspace folder: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace`
+- Workspace folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace`
 
 ### Folder Preview
 
 Confirm the preview contains only folders under:
 
 ```text
-C:\Users\rkall\Desktop\FlowHost-Test-Workspace
+C:\Users\rkall\Desktop\InnPilot-Test-Workspace
 ```
 
 Expected folders include:
@@ -82,12 +89,12 @@ Expected folders include:
 
 ### Gmail Drafts
 
-- Draft subject: `Test invoices - FlowHost rehearsal`
+- Draft subject: `Test invoices - InnPilot rehearsal`
 - CC email: `test-cc@example.invalid`
-- Credentials file: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace\Gmail\Credentials\gmail_credentials.json`
-- Token file: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace\Gmail\Token\gmail_token.json`
+- Credentials file: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Gmail\Credentials\gmail_credentials.json`
+- Token file: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Gmail\Token\gmail_token.json`
 
-FlowHost creates Gmail drafts only. It never sends emails automatically. For this rehearsal, do not use real Google credentials.
+InnPilot creates Gmail drafts only. It never sends emails automatically. For this rehearsal, do not use real Google credentials.
 
 ### Invoice Rules
 
@@ -100,9 +107,9 @@ FlowHost creates Gmail drafts only. It never sends emails automatically. For thi
 - Contract year: `2026`
 - Scanner filename prefix: `Sharp MFP`
 - Contract marker: `Oggetto: Contratto di lavoro subordinato a tempo determinato`
-- Shared scan folder: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace\Scans\IncomingCache`
-- OCR text output folder: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace\Scans\TextOutput`
-- Signed contracts output folder: `C:\Users\rkall\Desktop\FlowHost-Test-Workspace\Contracts\2026\Signed`
+- Shared scan folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Scans\IncomingCache`
+- OCR text output folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Scans\TextOutput`
+- Signed contracts output folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Contracts\2026\Signed`
 
 ### Safety
 
@@ -115,13 +122,13 @@ FlowHost creates Gmail drafts only. It never sends emails automatically. For thi
 Run this PowerShell command after the workspace folder is selected or created:
 
 ```powershell
-$root = "C:\Users\rkall\Desktop\FlowHost-Test-Workspace"
+$root = "C:\Users\rkall\Desktop\InnPilot-Test-Workspace"
 New-Item -ItemType Directory -Force "$root\Gmail\Credentials" | Out-Null
-'{"installed":{"client_id":"fake-client","project_id":"flowhost-test","auth_uri":"https://example.invalid","token_uri":"https://example.invalid"}}' |
+'{"installed":{"client_id":"fake-client","project_id":"innpilot-test","auth_uri":"https://example.invalid","token_uri":"https://example.invalid"}}' |
 Set-Content -Encoding UTF8 "$root\Gmail\Credentials\gmail_credentials.json"
 ```
 
-This is not a real Google credential. It is only a fake file so FlowHost can validate that a credentials path exists.
+This is not a real Google credential. It is only a fake file so InnPilot can validate that a credentials path exists.
 
 Do not create `gmail_token.json`. A missing token file is expected and non-blocking because a real Gmail sign-in would create it later. This rehearsal must not perform real Gmail sign-in.
 
@@ -150,10 +157,10 @@ Acceptable warning during this fake rehearsal:
 
 Unexpected warnings that should be investigated:
 
-- Any path outside `C:\Users\rkall\Desktop\FlowHost-Test-Workspace`
+- Any path outside `C:\Users\rkall\Desktop\InnPilot-Test-Workspace`
 - Gmail credentials file not found after the fake credentials command was run
 - Automation setup file is missing after saving setup
-- FlowHost setup and automation setup do not match
+- InnPilot setup and automation setup do not match
 - Any prompt for real Gmail sign-in
 
 ## Expected Module Readiness
@@ -176,7 +183,7 @@ Only create fake files inside the fake workspace. Do not copy real hotel PDFs or
 Example placeholders:
 
 ```powershell
-$root = "C:\Users\rkall\Desktop\FlowHost-Test-Workspace"
+$root = "C:\Users\rkall\Desktop\InnPilot-Test-Workspace"
 New-Item -ItemType Directory -Force "$root\Invoices\Input" | Out-Null
 New-Item -ItemType Directory -Force "$root\Scans\IncomingCache" | Out-Null
 New-Item -ItemType Directory -Force "$root\Scans\TextOutput" | Out-Null
@@ -214,10 +221,10 @@ Expected:
 
 ## Cleanup
 
-After the rehearsal, close FlowHost and remove only the fake workspace if no longer needed:
+After the rehearsal, close InnPilot and remove only the fake workspace if no longer needed:
 
 ```powershell
-Remove-Item -LiteralPath "C:\Users\rkall\Desktop\FlowHost-Test-Workspace" -Recurse -Force
+Remove-Item -LiteralPath "C:\Users\rkall\Desktop\InnPilot-Test-Workspace" -Recurse -Force
 ```
 
 Before running that command, verify the path is exactly the fake workspace path above.

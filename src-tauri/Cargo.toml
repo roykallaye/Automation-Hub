@@ -1,12 +1,12 @@
 [package]
-name = "life-hotel-automation-hub"
+name = "innpilot"
 version = "0.1.0"
-description = "Life Hotel Automation Hub"
-authors = ["Life Hotel"]
+description = "InnPilot"
+authors = ["InnPilot"]
 edition = "2021"
 
 [lib]
-name = "life_hotel_automation_hub_lib"
+name = "innpilot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

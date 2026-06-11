@@ -113,7 +113,7 @@ export function SupportPage({
               <div>
                 <h2 className="text-xl font-semibold text-slate-950">Automation scripts</h2>
                 <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
-                  Copies FlowHost's own automation scripts into the app data folder. This does not run workflows or touch hotel files.
+                  Copies InnPilot's own automation scripts into the app data folder. This does not run workflows or touch hotel files.
                 </p>
               </div>
             </div>
@@ -128,7 +128,7 @@ export function SupportPage({
               disabled={installing}
               onClick={async () => {
                 const confirmed = window.confirm(
-                  "Install or refresh FlowHost automation scripts? This copies FlowHost's own scripts into the app data folder. It does not run workflows or touch hotel files.",
+                  "Install or refresh InnPilot automation scripts? This copies InnPilot's own scripts into the app data folder. It does not run workflows or touch hotel files.",
                 );
                 if (!confirmed) return;
                 setInstalling(true);
@@ -169,7 +169,7 @@ export function SupportPage({
           <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
             <h2 className="text-xl font-semibold text-slate-950">Python environment</h2>
             <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
-              Python runs FlowHost automation scripts. Installing packages here does not run workflows.
+              Python runs InnPilot automation scripts. Installing packages here does not run workflows.
             </p>
             <div className="mt-4 rounded-md bg-white/60 p-3">
               <p className="text-xs font-semibold uppercase text-slate-500">Selected Python</p>
@@ -248,7 +248,7 @@ export function SupportPage({
               <div>
                 <h2 className="text-xl font-semibold text-slate-950">Safe local rehearsal</h2>
                 <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
-                  Use a fake workspace and Safe mode for runtime smoke tests. FlowHost creates Gmail drafts only and never sends emails automatically.
+                  Use a fake workspace and Safe mode for runtime smoke tests. InnPilot creates Gmail drafts only and never sends emails automatically.
                 </p>
               </div>
             </div>

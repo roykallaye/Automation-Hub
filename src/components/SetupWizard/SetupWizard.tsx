@@ -99,7 +99,7 @@ export function SetupWizard({
       const shouldRefreshDefaults =
         !hasCustomValues ||
         window.confirm(
-          "Update FlowHost's suggested Gmail, scan, and contract paths to match the new workspace folder?",
+          "Update InnPilot's suggested Gmail, scan, and contract paths to match the new workspace folder?",
         );
 
       return {
@@ -180,8 +180,8 @@ export function SetupWizard({
       (action === "initialize" || action === "save") &&
       !window.confirm(
         action === "initialize"
-          ? "Create the missing FlowHost setup folders? Existing folders and files will be left unchanged."
-          : "Save FlowHost setup files now? Existing setup files will be backed up first.",
+          ? "Create the missing InnPilot setup folders? Existing folders and files will be left unchanged."
+          : "Save InnPilot setup files now? Existing setup files will be backed up first.",
       )
     ) {
       return;
@@ -415,8 +415,8 @@ function WelcomeStep() {
   return (
     <SetupStep
       icon={<Sparkles className="h-6 w-6" />}
-      title="Set up FlowHost"
-      helper="A few guided steps prepare FlowHost for this hotel."
+      title="Set up InnPilot"
+      helper="A few guided steps prepare InnPilot for this hotel."
     >
       <div className="grid gap-3 md:grid-cols-3">
         <InfoCard title="Drafts only" text="No emails are sent automatically." />
@@ -438,7 +438,7 @@ function ProfileStep({
     <SetupStep
       icon={<Building2 className="h-6 w-6" />}
       title="Hotel profile"
-      helper="These names appear in FlowHost and in draft email text."
+      helper="These names appear in InnPilot and in draft email text."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <FieldLabel label="Hotel display name">
@@ -446,7 +446,7 @@ function ProfileStep({
             className={inputClassName}
             value={draft.hotelDisplayName}
             onChange={(event) => update("hotelDisplayName", event.target.value)}
-            placeholder="Life Hotel"
+            placeholder="Your Hotel"
           />
         </FieldLabel>
         <FieldLabel label="Email signature name">
@@ -454,7 +454,7 @@ function ProfileStep({
             className={inputClassName}
             value={draft.emailSignatureName}
             onChange={(event) => update("emailSignatureName", event.target.value)}
-            placeholder="Life Hotel Team"
+            placeholder="Your Hotel Team"
           />
         </FieldLabel>
       </div>
@@ -475,18 +475,18 @@ function WorkspaceStep({
     <SetupStep
       icon={<FolderTree className="h-6 w-6" />}
       title="Workspace"
-      helper="Choose where FlowHost keeps its working folders."
+      helper="Choose where InnPilot keeps its working folders."
     >
       <PathField
         label="Workspace folder"
         value={draft.workspaceBase}
-        placeholder="C:\\FlowHost Workspace"
+        placeholder="C:\\InnPilot\\workspace"
         hint="Choose a normal folder such as Desktop or Documents, not a drive root."
         onChange={onWorkspaceChange}
         onChoose={onChooseFolder}
       />
       <p className="mt-3 text-sm font-medium text-slate-600">
-        Suggested name: FlowHost Workspace
+        Suggested folder: C:\InnPilot\workspace
       </p>
     </SetupStep>
   );
@@ -531,7 +531,7 @@ function GmailStep({
     <SetupStep
       icon={<Mail className="h-6 w-6" />}
       title="Gmail drafts"
-      helper="FlowHost prepares drafts for review. No emails are sent automatically."
+      helper="InnPilot prepares drafts for review. No emails are sent automatically."
     >
       <div className="grid gap-4 md:grid-cols-2">
         <FieldLabel label="Draft subject">
@@ -539,7 +539,7 @@ function GmailStep({
             className={inputClassName}
             value={draft.gmailSubject}
             onChange={(event) => update("gmailSubject", event.target.value)}
-            placeholder="Invoices - Life Hotel"
+            placeholder="Invoices - Your Hotel"
           />
         </FieldLabel>
         <FieldLabel label="CC email">
@@ -559,8 +559,8 @@ function GmailStep({
           <PathField
             label="Credentials file path"
             value={draft.gmailCredentialsFile}
-            placeholder="C:\\FlowHost Workspace\\Gmail\\Credentials\\gmail_credentials.json"
-            hint="Choose the Google credentials JSON file. FlowHost stores only the file path."
+            placeholder="C:\\InnPilot\\workspace\\Gmail\\Credentials\\gmail_credentials.json"
+            hint="Choose the Google credentials JSON file. InnPilot stores only the file path."
             onChange={(value) => update("gmailCredentialsFile", value)}
             onChoose={onChooseCredentials}
             chooseLabel="Choose file"
@@ -568,8 +568,8 @@ function GmailStep({
           <PathField
             label="Gmail sign-in file path"
             value={draft.gmailTokenFile}
-            placeholder="C:\\FlowHost Workspace\\Gmail\\Token\\gmail_token.json"
-            hint="Choose the token folder. FlowHost will use gmail_token.json in that folder."
+            placeholder="C:\\InnPilot\\workspace\\Gmail\\Token\\gmail_token.json"
+            hint="Choose the token folder. InnPilot will use gmail_token.json in that folder."
             onChange={(value) => update("gmailTokenFile", value)}
             onChoose={onChooseTokenFolder}
             chooseLabel="Choose folder"
@@ -709,7 +709,7 @@ function ContractsStep({
         <PathField
           label="Document text output folder"
           value={draft.ocrTextOutputFolder}
-          hint="FlowHost stores extracted document text here."
+          hint="InnPilot stores extracted document text here."
           onChange={(value) => update("ocrTextOutputFolder", value)}
           onChoose={onChooseOcrTextFolder}
         />

@@ -51,17 +51,17 @@ export function defaultPathsForWorkspace(base: string, year: string) {
 }
 
 export function createSetupDraft(config?: HubConfig | null): SetupDraft {
-  const workspaceBase = "C:\\FlowHost Workspace";
+  const workspaceBase = "C:\\InnPilot\\workspace";
   const year = new Date().getFullYear().toString();
   const defaults = defaultPathsForWorkspace(workspaceBase, year);
 
   return {
-    hotelDisplayName: config?.client.displayName || "Life Hotel",
+    hotelDisplayName: config?.client.displayName || "Your Hotel",
     emailSignatureName: config?.client.displayName
       ? `${config.client.displayName} Team`
-      : "Life Hotel Team",
+      : "Your Hotel Team",
     workspaceBase,
-    gmailSubject: "Invoices - Life Hotel",
+    gmailSubject: "Invoices - Your Hotel",
     ccEmail: "",
     gmailCredentialsFile:
       config?.gmail.tokenPath.replace(/gmail_token\.json$/i, "gmail_credentials.json") ||

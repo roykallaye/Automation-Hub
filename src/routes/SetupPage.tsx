@@ -123,7 +123,7 @@ export function SetupPage({
             <div>
               <h2 className="text-xl font-semibold text-emerald-950">Setup is ready</h2>
               <p className="mt-1 text-sm font-medium text-emerald-800">
-                FlowHost setup checks are passing. Workflows are still started manually.
+                InnPilot setup checks are passing. Workflows are still started manually.
               </p>
             </div>
             <button
@@ -199,8 +199,8 @@ function setupGuidance(
     return {
       tone: "attention",
       title: "Checking setup",
-      summary: "Checking FlowHost setup...",
-      detail: "FlowHost is checking folders and tools.",
+      summary: "Checking InnPilot setup...",
+      detail: "InnPilot is checking folders and tools.",
     };
   }
 
@@ -208,8 +208,8 @@ function setupGuidance(
     return {
       tone: "attention",
       title: "Setup could not be loaded",
-      summary: "FlowHost setup could not be loaded.",
-      detail: "Refresh setup or ask setup support to check FlowHost.",
+      summary: "InnPilot setup could not be loaded.",
+      detail: "Refresh setup or ask setup support to check InnPilot.",
     };
   }
 
@@ -221,7 +221,7 @@ function setupGuidance(
       tone: "ready",
       title: "Setup is ready",
       summary: "Setup is ready.",
-      detail: "FlowHost setup checks are passing. Workflows are still started manually.",
+      detail: "InnPilot setup checks are passing. Workflows are still started manually.",
     };
   }
 
@@ -248,8 +248,8 @@ function setupGuidance(
     return {
       tone: "attention",
       title: "Automation scripts need installing",
-      summary: "Setup saved. FlowHost automation scripts are not installed yet.",
-      detail: "Open Support and install FlowHost automation scripts, then run Check setup.",
+      summary: "Setup saved. InnPilot automation scripts are not installed yet.",
+      detail: "Open Support and install InnPilot automation scripts, then run Check setup.",
     };
   }
 
@@ -285,7 +285,7 @@ function setupGuidance(
       tone: "attention",
       title: "Gmail sign-in can be completed later",
       summary: "Setup saved. Gmail sign-in still needs to be completed.",
-      detail: "Reconnect Gmail when ready. FlowHost creates drafts only and never sends emails automatically.",
+      detail: "Reconnect Gmail when ready. InnPilot creates drafts only and never sends emails automatically.",
     };
   }
 
@@ -321,7 +321,7 @@ function setupGuidance(
       tone: "attention",
       title: "Python packages need installing",
       summary: "Setup saved. Python packages are not ready yet.",
-      detail: "Open Support and install the Python packages needed by FlowHost automations.",
+      detail: "Open Support and install the Python packages needed by InnPilot automations.",
     };
   }
 
@@ -391,9 +391,9 @@ function scriptGuidance(item: PreflightItem) {
       return "Collect or configure the scan-copy and document-reading scripts, then run Check setup.";
     case "invoiceWorkflowScript":
     case "gmailDraftScript":
-      return "Open Support and install FlowHost automation scripts, then run Check setup.";
+      return "Open Support and install InnPilot automation scripts, then run Check setup.";
     case "contractProcessingScript":
-      return "Open Support and install FlowHost automation scripts, then run Check setup.";
+      return "Open Support and install InnPilot automation scripts, then run Check setup.";
     default:
       return staffMessage(item.message, item.status, item.key);
   }
