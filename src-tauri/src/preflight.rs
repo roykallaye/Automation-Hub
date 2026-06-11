@@ -74,6 +74,7 @@ struct WorkflowPreflight {
 
 pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
     let mut items = vec![
+        automation_root_check(&config.automation.automation_root_folder),
         automation_config_check(&config.automation.automation_config_path),
         python_check(&config.automation.python_executable),
         script_check(
@@ -175,6 +176,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
         dependency_unknown("cmdExe", "cmd.exe"),
         dependency_unknown("powershellExe", "powershell.exe"),
         dependency_unknown("explorerExe", "explorer.exe"),
+        python_package_check(&config.automation.python_executable),
         dependency_unknown(
             "externalScriptDependencies",
             "PDF/OCR/Gmail dependencies used by external scripts",
@@ -495,6 +497,65 @@ fn automation_config_check(path: &str) -> PreflightItem {
     }
 }
 
+fn automation_root_check(path: &str) -> PreflightItem {
+    if path.trim().is_empty() {
+        return PreflightItem {
+            key: "automationRootFolder".to_string(),
+            label: "Automation scripts folder".to_string(),
+            path: None,
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message:
+                "Automation scripts folder is not configured. Ask setup support to update FlowHost."
+                    .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let root = Path::new(path);
+    if !root.exists() {
+        return PreflightItem {
+            key: "automationRootFolder".to_string(),
+            label: "Automation scripts folder".to_string(),
+            path: Some(path.to_string()),
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingFolder,
+            message:
+                "Automation scripts folder is missing. Ask setup support to install or select it."
+                    .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    if !root.is_dir() {
+        return PreflightItem {
+            key: "automationRootFolder".to_string(),
+            label: "Automation scripts folder".to_string(),
+            path: Some(path.to_string()),
+            item_type: "config".to_string(),
+            status: ReadinessStatus::MissingFolder,
+            message:
+                "Automation scripts path is not a folder. Ask setup support to update FlowHost."
+                    .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: "automationRootFolder".to_string(),
+        label: "Automation scripts folder".to_string(),
+        path: Some(path.to_string()),
+        item_type: "config".to_string(),
+        status: ReadinessStatus::Ready,
+        message: "Automation scripts folder found.".to_string(),
+        readable: Some(true),
+        writable: None,
+    }
+}
+
 fn profile_check(display_name: &str) -> PreflightItem {
     if display_name.trim().is_empty() {
         PreflightItem {
@@ -559,6 +620,69 @@ fn python_check(python_executable: &str) -> PreflightItem {
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
             message: "Python is missing or not available on PATH. Ask setup support to install or configure Python."
+                .to_string(),
+            readable: None,
+            writable: None,
+        },
+    }
+}
+
+fn python_package_check(python_executable: &str) -> PreflightItem {
+    if python_executable.trim().is_empty() {
+        return PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: None,
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Python packages can be checked after Python is configured.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let output = std::process::Command::new(python_executable)
+        .args([
+            "-c",
+            "import importlib.util, sys; required=['fitz','googleapiclient','google_auth_oauthlib']; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)",
+        ])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "Required Python packages are available.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        Ok(output) => {
+            let missing = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            PreflightItem {
+                key: "pythonPackages".to_string(),
+                label: "Python packages".to_string(),
+                path: Some(python_executable.to_string()),
+                item_type: "dependency".to_string(),
+                status: ReadinessStatus::MissingConfiguration,
+                message: if missing.is_empty() {
+                    "Required Python packages could not be checked. Ask setup support to install automation requirements.".to_string()
+                } else {
+                    format!("Python packages are missing: {missing}. Ask setup support to install automation requirements.")
+                },
+                readable: None,
+                writable: None,
+            }
+        }
+        Err(_) => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Python packages could not be checked because Python is not available."
                 .to_string(),
             readable: None,
             writable: None,
@@ -1181,6 +1305,9 @@ mod tests {
     use crate::config::{
         ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig, ScriptPaths,
     };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn missing_script_is_detected() {
@@ -1305,7 +1432,16 @@ mod tests {
             .items
             .iter()
             .find(|item| item.key == "gmailTokenAlignment")
-            .unwrap();
+            .unwrap_or_else(|| {
+                panic!(
+                    "gmailTokenAlignment missing. Items: {:?}",
+                    report
+                        .items
+                        .iter()
+                        .map(|item| (&item.key, &item.status, &item.message))
+                        .collect::<Vec<_>>()
+                )
+            });
         let gmail = report
             .workflows
             .iter()
@@ -1458,11 +1594,12 @@ mod tests {
 
     fn config_with_temp_paths() -> HubConfig {
         let root = std::env::temp_dir().join(format!(
-            "flowhost_preflight_test_{}",
+            "flowhost_preflight_test_{}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         let scripts = root.join("scripts");
         let input = root.join("invoice-input");
@@ -1504,6 +1641,7 @@ mod tests {
                 display_name: "Test Hotel".to_string(),
             },
             automation: crate::config::AutomationConfig {
+                automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: scripts
                     .join("config.local.json")
                     .to_string_lossy()
@@ -1542,6 +1680,35 @@ mod tests {
         };
         write_automation_config(&config, None, None, None);
         config
+    }
+
+    #[test]
+    fn missing_automation_root_folder_is_reported() {
+        let mut config = config_with_temp_paths();
+        config.automation.automation_root_folder = std::env::temp_dir()
+            .join("flowhost_missing_automation_root")
+            .join("automation")
+            .to_string_lossy()
+            .to_string();
+
+        let report = build_preflight_report(&config);
+        let item = report
+            .items
+            .iter()
+            .find(|item| item.key == "automationRootFolder")
+            .unwrap();
+
+        assert_eq!(item.status, ReadinessStatus::MissingFolder);
+        assert!(item
+            .message
+            .contains("Automation scripts folder is missing"));
+    }
+
+    #[test]
+    fn missing_python_executable_is_reported() {
+        let item = python_check("definitely_missing_python_for_flowhost_tests.exe");
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
     }
 
     fn write_automation_config(

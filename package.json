@@ -7,6 +7,8 @@
     "dev": "tauri dev",
     "dev:vite": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc && vite build",
+    "install:automation": "python -m pip install -r automation/requirements.txt",
+    "doctor:python": "python --version && python -m pip --version",
     "test:automation": "python -m unittest discover automation/tests",
     "test:rust": "cargo test --locked --manifest-path src-tauri/Cargo.toml",
     "doctor:windows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"function Show-Tool($name) { $cmd = Get-Command $name -ErrorAction SilentlyContinue; if ($cmd) { $cmd | ForEach-Object { Write-Host ($name + ': ' + $_.Source) } } else { Write-Host ($name + ': not found') } }; Write-Host '== Rust =='; rustc --version; cargo --version; Write-Host ''; Write-Host '== Rustup =='; rustup show; Write-Host ''; Write-Host '== Installed targets =='; rustup target list --installed; Write-Host ''; Write-Host '== Tool locations =='; Show-Tool cargo; Show-Tool rustc; Show-Tool link; Show-Tool cl; exit 0\"",

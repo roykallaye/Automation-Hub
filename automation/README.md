@@ -28,6 +28,24 @@ python -m pip install -r automation\requirements.txt
 
 The `.cmd` wrappers under `automation/` use `python` from `PATH`. If a hotel PC uses a virtual environment, activate it before running the wrappers or call the scripts with that environment's Python executable.
 
+For a controlled manual hotel dry-run, the recommended managed layout is:
+
+```text
+C:\FlowHost\automation
+C:\FlowHost.venv
+```
+
+Example setup:
+
+```powershell
+New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
+Copy-Item -Recurse -Force automation C:\FlowHost\automation
+python -m venv C:\FlowHost.venv
+C:\FlowHost.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+```
+
+Then set FlowHost app config `automation.automationRootFolder` to `C:\FlowHost\automation` and `automation.pythonExecutable` to `C:\FlowHost.venv\Scripts\python.exe`.
+
 ## Local Config
 
 Copy the example config to a local, uncommitted file:
@@ -54,6 +72,14 @@ FlowHost has its own app config file in the Tauri app data directory. That app c
 ```text
 automation\config.local.json
 ```
+
+FlowHost app config also has `automation.automationRootFolder`, which is the folder containing the versioned automation scripts:
+
+```text
+C:\FlowHost\automation
+```
+
+Explicit `scripts.*` paths remain authoritative for compatibility with legacy `.cmd` and `.ps1` workflows. New installs should point canonical Python script paths at files under `automation.automationRootFolder`.
 
 Keep overlapping FlowHost app config values and `automation\config.local.json` aligned. The most important one is Gmail:
 

@@ -28,6 +28,7 @@ pub(crate) struct ClientConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AutomationConfig {
+    pub(crate) automation_root_folder: String,
     pub(crate) automation_config_path: String,
     pub(crate) python_executable: String,
 }
@@ -203,13 +204,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
 pub(crate) fn default_config() -> HubConfig {
     let automation_root = default_automation_root();
     let automation_config_path = automation_root.join("config.local.json");
-    let invoice_script = automation_root.join("invoices").join("process_fatture.py");
-    let gmail_script = automation_root
-        .join("gmail_drafts")
-        .join("create_gmail_draft.py");
-    let contract_script = automation_root
-        .join("contracts")
-        .join("process_contratti.py");
+    let script_paths = canonical_script_paths(&automation_root);
 
     HubConfig {
         schema_version: CONFIG_VERSION,
@@ -217,18 +212,19 @@ pub(crate) fn default_config() -> HubConfig {
             display_name: "Life Hotel".to_string(),
         },
         automation: AutomationConfig {
+            automation_root_folder: automation_root.to_string_lossy().to_string(),
             automation_config_path: automation_config_path.to_string_lossy().to_string(),
             python_executable: "python".to_string(),
         },
         scripts: ScriptPaths {
-            invoice_workflow_script: invoice_script.to_string_lossy().to_string(),
-            gmail_draft_script: gmail_script.to_string_lossy().to_string(),
+            invoice_workflow_script: script_paths.invoice_workflow_script,
+            gmail_draft_script: script_paths.gmail_draft_script,
             copy_scansioni_script: r"C:\Users\back-office-life\Documents\copy_scansioni.cmd"
                 .to_string(),
             ocr_preprocessing_script:
                 r"C:\Users\back-office-life\Documents\CodexScripts\preprocess_scansioni_to_text.ps1"
                     .to_string(),
-            contract_processing_script: contract_script.to_string_lossy().to_string(),
+            contract_processing_script: script_paths.contract_processing_script,
         },
         folders: FolderPaths {
             invoice_input_folder: r"C:\Users\back-office-life\Desktop\Fatture\Input".to_string(),
@@ -260,9 +256,54 @@ pub(crate) fn default_config() -> HubConfig {
 }
 
 fn default_automation_root() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("automation")
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    default_automation_root_for_current_dir(&current_dir)
+}
+
+fn default_automation_root_for_current_dir(current_dir: &Path) -> PathBuf {
+    let repo_automation = current_dir.join("automation");
+    if looks_like_automation_root(&repo_automation) {
+        repo_automation
+    } else {
+        PathBuf::from(r"C:\FlowHost\automation")
+    }
+}
+
+pub(crate) fn canonical_script_paths(automation_root: &Path) -> ScriptPaths {
+    ScriptPaths {
+        invoice_workflow_script: automation_root
+            .join("invoices")
+            .join("process_fatture.py")
+            .to_string_lossy()
+            .to_string(),
+        gmail_draft_script: automation_root
+            .join("gmail_drafts")
+            .join("create_gmail_draft.py")
+            .to_string_lossy()
+            .to_string(),
+        copy_scansioni_script: r"C:\Users\back-office-life\Documents\copy_scansioni.cmd"
+            .to_string(),
+        ocr_preprocessing_script:
+            r"C:\Users\back-office-life\Documents\CodexScripts\preprocess_scansioni_to_text.ps1"
+                .to_string(),
+        contract_processing_script: automation_root
+            .join("contracts")
+            .join("process_contratti.py")
+            .to_string_lossy()
+            .to_string(),
+    }
+}
+
+fn looks_like_automation_root(path: &Path) -> bool {
+    path.join("invoices").join("process_fatture.py").is_file()
+        && path
+            .join("gmail_drafts")
+            .join("create_gmail_draft.py")
+            .is_file()
+        && path
+            .join("contracts")
+            .join("process_contratti.py")
+            .is_file()
 }
 
 #[cfg(test)]
@@ -283,6 +324,10 @@ mod tests {
             .automation
             .automation_config_path
             .contains("config.local.json"));
+        assert!(config
+            .automation
+            .automation_root_folder
+            .contains("automation"));
         assert_eq!(config.automation.python_executable, "python");
         assert!(config.safety.require_confirmation_for_file_moves);
         assert!(config.safety.redact_logs);
@@ -321,5 +366,58 @@ mod tests {
             .contains("config.local.json"));
         assert_eq!(config.folders.invoice_output_folder, "C:\\old\\ready");
         assert_eq!(config.gmail.token_path, "C:\\old\\gmail_token.json");
+    }
+
+    #[test]
+    fn repo_automation_root_is_used_when_canonical_scripts_exist() {
+        let root = std::env::temp_dir().join("flowhost_repo_root_for_config_test");
+        let automation = root.join("automation");
+        fs::create_dir_all(automation.join("invoices")).unwrap();
+        fs::create_dir_all(automation.join("gmail_drafts")).unwrap();
+        fs::create_dir_all(automation.join("contracts")).unwrap();
+        fs::write(automation.join("invoices").join("process_fatture.py"), b"").unwrap();
+        fs::write(
+            automation
+                .join("gmail_drafts")
+                .join("create_gmail_draft.py"),
+            b"",
+        )
+        .unwrap();
+        fs::write(
+            automation.join("contracts").join("process_contratti.py"),
+            b"",
+        )
+        .unwrap();
+
+        assert_eq!(default_automation_root_for_current_dir(&root), automation);
+    }
+
+    #[test]
+    fn managed_automation_root_is_used_when_repo_scripts_are_missing() {
+        let root = std::env::temp_dir().join("flowhost_missing_repo_root_for_config_test");
+
+        assert_eq!(
+            default_automation_root_for_current_dir(&root),
+            PathBuf::from(r"C:\FlowHost\automation")
+        );
+    }
+
+    #[test]
+    fn canonical_paths_are_derived_from_automation_root() {
+        let root = PathBuf::from(r"C:\FlowHost\automation");
+        let scripts = canonical_script_paths(&root);
+
+        assert_eq!(
+            scripts.invoice_workflow_script,
+            r"C:\FlowHost\automation\invoices\process_fatture.py"
+        );
+        assert_eq!(
+            scripts.gmail_draft_script,
+            r"C:\FlowHost\automation\gmail_drafts\create_gmail_draft.py"
+        );
+        assert_eq!(
+            scripts.contract_processing_script,
+            r"C:\FlowHost\automation\contracts\process_contratti.py"
+        );
     }
 }

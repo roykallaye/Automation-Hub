@@ -645,6 +645,7 @@ mod tests {
                 display_name: "Fake Hotel".to_string(),
             },
             automation: AutomationConfig {
+                automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: root
                     .join("automation")
                     .join("config.local.json")

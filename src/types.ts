@@ -108,6 +108,7 @@ export type HubConfig = {
     displayName: string;
   };
   automation: {
+    automationRootFolder: string;
     automationConfigPath: string;
     pythonExecutable: string;
   };

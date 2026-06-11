@@ -19,6 +19,7 @@ export function buildConfigPreview(draft: SetupDraft) {
         displayName: draft.hotelDisplayName,
       },
       automation: {
+        automationRootFolder: "C:\\FlowHost\\automation",
         automationConfigPath: joinWorkspace(draft.workspaceBase, "automation", "config.local.json"),
         pythonExecutable: "python",
       },

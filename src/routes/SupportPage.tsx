@@ -21,6 +21,7 @@ export function SupportPage({
   const config = configStatus?.config;
   const paths = config
     ? [
+        ["Automation scripts folder", config.automation.automationRootFolder],
         ["Automation setup file", config.automation.automationConfigPath],
         ["Python", config.automation.pythonExecutable],
         ["Invoice script", config.scripts.invoiceWorkflowScript],
@@ -125,6 +126,26 @@ export function SupportPage({
               {!configStatus && (
                 <div className="rounded-md bg-white/55 p-4 text-sm font-medium text-slate-700">
                   No setup check is available.
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+            <h2 className="text-xl font-semibold text-slate-950">Dependency checks</h2>
+            <div className="mt-4 space-y-2">
+              {configStatus?.preflight.dependencies.map((item) => (
+                <div
+                  key={item.key}
+                  className="flex items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2"
+                >
+                  <span className="text-xs font-semibold text-slate-700">{item.label}</span>
+                  <ReadinessBadge status={item.status} />
+                </div>
+              ))}
+              {!configStatus && (
+                <div className="rounded-md bg-white/55 p-4 text-sm font-medium text-slate-700">
+                  Dependency checks are unavailable.
                 </div>
               )}
             </div>

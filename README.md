@@ -52,6 +52,18 @@ npm run test:automation
 
 Those Python tests also use temporary fake data only.
 
+Install Python packages for the canonical automation scripts into the active Python environment:
+
+```powershell
+npm run install:automation
+```
+
+Print basic Python diagnostics:
+
+```powershell
+npm run doctor:python
+```
+
 Print local Windows toolchain diagnostics:
 
 ```powershell
@@ -120,6 +132,7 @@ inside the Tauri app data directory for the installed app. The app shows the exa
 The config contains:
 
 - `client.displayName`
+- `automation.automationRootFolder`
 - `automation.automationConfigPath`
 - `automation.pythonExecutable`
 - `scripts.invoiceWorkflowScript`
@@ -141,13 +154,28 @@ The config contains:
 - `safety.requireConfirmationForFileMoves`
 - `safety.redactLogs`
 
-Fresh default config prefers the canonical Python scripts under `automation/`, for example:
+Fresh default config prefers the canonical Python scripts under a managed automation scripts folder. In development, FlowHost uses the repo `automation/` folder when the canonical scripts are present. Outside the repo, the short-term managed location is:
 
 ```text
-automation\invoices\process_fatture.py
+C:\FlowHost\automation
 ```
 
-Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. On a new PC, create a local automation config from `automation\config.example.json`, then set `automation.automationConfigPath` in FlowHost's app config to that local file.
+For example:
+
+```text
+C:\FlowHost\automation\invoices\process_fatture.py
+```
+
+Existing generated configs that still point at old manager-PC `.cmd` wrappers continue to work if those paths exist. Explicit script paths remain authoritative; `automation.automationRootFolder` is the support-facing folder used for defaults and diagnostics.
+
+On a managed dry-run PC, copy the canonical `automation/` tree to `C:\FlowHost\automation`, create a Python virtual environment such as `C:\FlowHost.venv`, install `automation\requirements.txt`, and set:
+
+```text
+automation.automationRootFolder = C:\FlowHost\automation
+automation.pythonExecutable = C:\FlowHost.venv\Scripts\python.exe
+```
+
+Guided setup writes `automation\config.local.json` under the selected FlowHost workspace. That setup file is separate from the managed scripts folder.
 
 ### Guided Setup
 
@@ -237,6 +265,38 @@ docs\FAKE_WORKSPACE_REHEARSAL.md
 14. Close FlowHost and delete the fake workspace when finished.
 
 FlowHost passes app-controlled `--json-report` paths to the canonical Python scripts that support structured reports. Legacy `.cmd` and `.ps1` wrappers are left unchanged for compatibility.
+
+## Managed Automation Deployment
+
+FlowHost does not bundle Python yet and does not freeze the automation scripts into executables yet.
+
+Current supported locations:
+
+- Development: repo-local `automation/`
+- Controlled hotel dry-run: `C:\FlowHost\automation`
+- Future production: app-managed automation folder copied or bundled by the installer
+
+Manual dry-run deployment checklist:
+
+```powershell
+New-Item -ItemType Directory -Force C:\FlowHost | Out-Null
+Copy-Item -Recurse -Force automation C:\FlowHost\automation
+python -m venv C:\FlowHost.venv
+C:\FlowHost.venv\Scripts\python.exe -m pip install -r C:\FlowHost\automation\requirements.txt
+C:\FlowHost.venv\Scripts\python.exe --version
+```
+
+Then set FlowHost app config:
+
+```text
+automation.automationRootFolder = C:\FlowHost\automation
+automation.pythonExecutable = C:\FlowHost.venv\Scripts\python.exe
+scripts.invoiceWorkflowScript = C:\FlowHost\automation\invoices\process_fatture.py
+scripts.gmailDraftScript = C:\FlowHost\automation\gmail_drafts\create_gmail_draft.py
+scripts.contractProcessingScript = C:\FlowHost\automation\contracts\process_contratti.py
+```
+
+`copy_scansioni.cmd` and `preprocess_scansioni_to_text.ps1` are still separate legacy/import scripts until they are collected and converted into canonical automation workers.
 
 ## Resetting Config
 

@@ -343,6 +343,8 @@ impl GeneratedSetup {
 
         let current = config::default_config();
         let automation_config_path = automation_config_folder.join("config.local.json");
+        let automation_root = PathBuf::from(&current.automation.automation_root_folder);
+        let canonical_scripts = config::canonical_script_paths(&automation_root);
 
         let app_config = HubConfig {
             schema_version: current.schema_version,
@@ -350,15 +352,16 @@ impl GeneratedSetup {
                 display_name: non_empty_or(&draft.hotel_display_name, "FlowHost Hotel"),
             },
             automation: AutomationConfig {
+                automation_root_folder: current.automation.automation_root_folder,
                 automation_config_path: automation_config_path.to_string_lossy().to_string(),
                 python_executable: current.automation.python_executable,
             },
             scripts: ScriptPaths {
-                invoice_workflow_script: current.scripts.invoice_workflow_script,
-                gmail_draft_script: current.scripts.gmail_draft_script,
+                invoice_workflow_script: canonical_scripts.invoice_workflow_script,
+                gmail_draft_script: canonical_scripts.gmail_draft_script,
                 copy_scansioni_script: current.scripts.copy_scansioni_script,
                 ocr_preprocessing_script: current.scripts.ocr_preprocessing_script,
-                contract_processing_script: current.scripts.contract_processing_script,
+                contract_processing_script: canonical_scripts.contract_processing_script,
             },
             folders: FolderPaths {
                 invoice_input_folder: invoice_input.to_string_lossy().to_string(),
@@ -763,6 +766,11 @@ mod tests {
                 .join("config.local.json")
                 .to_string_lossy()
         );
+        assert!(generated
+            .app_config
+            .automation
+            .automation_root_folder
+            .contains("automation"));
         assert_eq!(
             generated.automation_config["paths"]["invoiceInputDir"]
                 .as_str()

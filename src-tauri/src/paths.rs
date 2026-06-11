@@ -101,6 +101,7 @@ mod tests {
                 display_name: "Test Hotel".to_string(),
             },
             automation: crate::config::AutomationConfig {
+                automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: scripts
                     .join("config.local.json")
                     .to_string_lossy()
