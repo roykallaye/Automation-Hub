@@ -536,6 +536,109 @@ mod tests {
         assert!(stored.contains("[redacted sensitive detail]"));
     }
 
+    #[test]
+    fn fake_standardized_report_appends_activity_record() {
+        let root = temp_dir("append_fake_report");
+        let report_path = root
+            .join("app-data")
+            .join("activity")
+            .join("reports")
+            .join("fake_gmail_report.json");
+        fs::create_dir_all(report_path.parent().unwrap()).unwrap();
+        fs::write(
+            &report_path,
+            serde_json::json!({
+                "workflow": "gmail_drafts",
+                "mode": "dry_run",
+                "startedAt": "2026-01-01T10:00:00+01:00",
+                "finishedAt": "2026-01-01T10:00:01+01:00",
+                "status": "success",
+                "summary": {
+                    "found": 1,
+                    "processed": 1,
+                    "planned": 1,
+                    "created": 0,
+                    "moved": 0,
+                    "failed": 0,
+                    "warnings": 0
+                },
+                "items": [{"recipientEmail": "fixture@example.invalid"}],
+                "warnings": [],
+                "errors": [],
+                "outputs": {
+                    "reportPath": report_path.to_string_lossy(),
+                    "logPath": null
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let summary = RunSummary {
+            automation_name: "Reconnect Gmail".to_string(),
+            command_name: "reconnect_gmail".to_string(),
+            start_time: "2026-01-01T10:00:00+01:00".to_string(),
+            end_time: "2026-01-01T10:00:01+01:00".to_string(),
+            duration_ms: 1000,
+            exit_code: 0,
+            status: "success".to_string(),
+            steps: Vec::new(),
+            last_output_lines: vec!["harmless fake output".to_string()],
+        };
+        let activity = activity_from_run(
+            &summary,
+            &[StepReport {
+                path: report_path.clone(),
+            }],
+        )
+        .unwrap();
+        let history_path = root.join("activity_history.jsonl");
+        append_activity_record(&history_path, &activity, MAX_HISTORY_RECORDS).unwrap();
+
+        let records = read_activity_history(&history_path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, ActivityStatus::Success);
+        assert_eq!(records[0].mode, ActivityMode::DryRun);
+        assert_eq!(records[0].summary["planned"], 1);
+        assert_eq!(
+            records[0].report_path.as_deref(),
+            Some(report_path.to_string_lossy().as_ref())
+        );
+        assert!(!serde_json::to_string(&records[0])
+            .unwrap()
+            .contains("fixture@example.invalid"));
+    }
+
+    #[test]
+    fn failed_run_without_report_creates_minimal_activity_record() {
+        let summary = fake_run_summary();
+
+        let activity = activity_from_run(&summary, &[]).unwrap();
+
+        assert_eq!(activity.status, ActivityStatus::Failed);
+        assert_eq!(activity.mode, ActivityMode::Unknown);
+        assert_eq!(activity.summary["failed"], 1);
+        assert!(activity.report_path.is_none());
+        assert!(activity.warnings.is_empty());
+        assert!(activity.errors.is_empty());
+    }
+
+    #[test]
+    fn generated_report_path_stays_inside_activity_reports_folder() {
+        let root = temp_dir("report_path");
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let report_path =
+            report_path_for_step(&reports_dir, "process_invoices_and_drafts", "Fake Script");
+
+        assert!(report_path.starts_with(&reports_dir));
+        assert!(report_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .contains("process_invoices_and_drafts"));
+    }
+
     fn fake_record(index: usize) -> ActivityRecord {
         ActivityRecord {
             id: format!("record-{index}"),
@@ -572,14 +675,18 @@ mod tests {
     }
 
     fn temp_path(name: &str) -> PathBuf {
+        temp_dir(name).join(name)
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "flowhost_activity_test_{}",
+            "flowhost_activity_test_{name}_{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
         fs::create_dir_all(&root).unwrap();
-        root.join(name)
+        root
     }
 }

@@ -42,6 +42,16 @@ Run Rust tests for config/preflight behavior:
 npm run test:rust
 ```
 
+The Rust suite also includes fake end-to-end validation for setup, workflow report injection, and Activity history persistence. These tests build temporary fake workspaces and fake script paths only; they do not run hotel scripts, call Gmail, create drafts, or touch real hotel folders.
+
+Run automation script fixture tests:
+
+```powershell
+npm run test:automation
+```
+
+Those Python tests also use temporary fake data only.
+
 Print local Windows toolchain diagnostics:
 
 ```powershell

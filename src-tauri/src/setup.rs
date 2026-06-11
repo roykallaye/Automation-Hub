@@ -731,6 +731,57 @@ mod tests {
     }
 
     #[test]
+    fn fake_workspace_setup_generates_expected_folder_and_config_paths() {
+        let root = temp_root("fake_workspace_e2e");
+        let generated = GeneratedSetup::from_draft(&draft_for_root(&root)).unwrap();
+        let labels = generated
+            .folder_specs
+            .iter()
+            .map(|spec| spec.label)
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "Invoices/Input",
+            "Invoices/ReadyToSend",
+            "Invoices/Archive",
+            "Invoices/Logs",
+            "Gmail/Token",
+            "Gmail/Credentials",
+            "Scans/IncomingCache",
+            "Scans/TextOutput",
+            "Contracts/<year>/Signed",
+            "Contracts/Logs",
+            "Support/Diagnostics",
+            "automation",
+        ] {
+            assert!(labels.contains(&expected));
+        }
+
+        assert_eq!(
+            generated.app_config.automation.automation_config_path,
+            root.join("automation")
+                .join("config.local.json")
+                .to_string_lossy()
+        );
+        assert_eq!(
+            generated.automation_config["paths"]["invoiceInputDir"]
+                .as_str()
+                .unwrap(),
+            root.join("Invoices").join("Input").to_string_lossy()
+        );
+        assert_eq!(
+            generated.automation_config["paths"]["contractDestinationDir"]
+                .as_str()
+                .unwrap(),
+            root.join("Contracts")
+                .join("2026")
+                .join("Signed")
+                .to_string_lossy()
+        );
+        assert!(generated.app_config.safety.dry_run_default);
+    }
+
+    #[test]
     fn atomic_write_creates_backup_if_config_exists() {
         let root = temp_root("backup");
         fs::create_dir_all(&root).unwrap();

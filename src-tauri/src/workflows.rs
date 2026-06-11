@@ -497,6 +497,15 @@ fn push_tail(output_tail: &mut VecDeque<String>, line: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{
+        AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig,
+        ScriptPaths,
+    };
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn high_impact_workflow_without_confirmation_is_rejected() {
@@ -516,5 +525,172 @@ mod tests {
     #[test]
     fn unknown_command_is_not_rejected_by_confirmation_guard() {
         assert!(ensure_confirmation("unknown_command", false).is_ok());
+    }
+
+    #[test]
+    fn canonical_python_steps_receive_app_controlled_json_report_paths() {
+        let root = temp_root("canonical_reports");
+        let config = config_with_fake_workspace(&root);
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let (_title, steps) =
+            command_steps("process_invoices_and_drafts", &config, Some(&reports_dir)).unwrap();
+
+        assert_eq!(steps.len(), 2);
+        for step in steps {
+            let report_path = step
+                .report_path
+                .expect("canonical step should have report path");
+            assert!(report_path.starts_with(&reports_dir));
+            assert!(step.args.contains(&"--json-report".to_string()));
+            assert!(step
+                .args
+                .iter()
+                .any(|arg| arg == &report_path.to_string_lossy()));
+            assert!(step.args.contains(&"--config".to_string()));
+            assert!(step.args.contains(&"--dry-run".to_string()));
+        }
+    }
+
+    #[test]
+    fn legacy_wrappers_do_not_receive_json_report_flags() {
+        let root = temp_root("legacy_reports");
+        let mut config = config_with_fake_workspace(&root);
+        config.scripts.contract_processing_script = root
+            .join("scripts")
+            .join("run_process_contratti.cmd")
+            .to_string_lossy()
+            .to_string();
+        fs::write(&config.scripts.contract_processing_script, b"echo fake").unwrap();
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let (_title, steps) =
+            command_steps("process_signed_contracts", &config, Some(&reports_dir)).unwrap();
+        let contract_step = steps
+            .iter()
+            .find(|step| step.name == "Process signed contracts")
+            .unwrap();
+
+        assert!(contract_step.report_path.is_none());
+        assert!(!contract_step.args.contains(&"--json-report".to_string()));
+    }
+
+    #[test]
+    fn fake_canonical_contract_step_uses_report_path_without_execute_flag() {
+        let root = temp_root("contract_dry_run");
+        let config = config_with_fake_workspace(&root);
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let (_title, steps) =
+            command_steps("process_signed_contracts", &config, Some(&reports_dir)).unwrap();
+        let contract_step = steps
+            .iter()
+            .find(|step| step.name == "Process signed contracts")
+            .unwrap();
+
+        assert!(contract_step
+            .report_path
+            .as_ref()
+            .unwrap()
+            .starts_with(&reports_dir));
+        assert!(contract_step.args.contains(&"--json-report".to_string()));
+        assert!(!contract_step.args.contains(&"--execute".to_string()));
+    }
+
+    fn config_with_fake_workspace(root: &Path) -> HubConfig {
+        let scripts = root.join("scripts");
+        let invoice_input = root.join("Invoices").join("Input");
+        let invoice_output = root.join("Invoices").join("ReadyToSend");
+        let invoice_archive = root.join("Invoices").join("Archive");
+        let invoice_logs = root.join("Invoices").join("Logs");
+        let gmail_token_dir = root.join("Gmail").join("Token");
+        let scans_cache = root.join("Scans").join("IncomingCache");
+        let ocr_text = root.join("Scans").join("TextOutput");
+        let contracts = root.join("Contracts").join("2026").join("Signed");
+        let contract_logs = root.join("Contracts").join("Logs");
+
+        for dir in [
+            &scripts,
+            &invoice_input,
+            &invoice_output,
+            &invoice_archive,
+            &invoice_logs,
+            &gmail_token_dir,
+            &scans_cache,
+            &ocr_text,
+            &contracts,
+            &contract_logs,
+        ] {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        let invoice_script = scripts.join("process_fatture.py");
+        let gmail_script = scripts.join("create_gmail_draft.py");
+        let copy_script = scripts.join("copy_scansioni.cmd");
+        let ocr_script = scripts.join("preprocess_scansioni_to_text.ps1");
+        let contract_script = scripts.join("process_contratti.py");
+        for file in [
+            &invoice_script,
+            &gmail_script,
+            &copy_script,
+            &ocr_script,
+            &contract_script,
+        ] {
+            fs::write(file, b"fake script fixture").unwrap();
+        }
+
+        HubConfig {
+            schema_version: 2,
+            client: ClientConfig {
+                display_name: "Fake Hotel".to_string(),
+            },
+            automation: AutomationConfig {
+                automation_config_path: root
+                    .join("automation")
+                    .join("config.local.json")
+                    .to_string_lossy()
+                    .to_string(),
+                python_executable: "python".to_string(),
+            },
+            scripts: ScriptPaths {
+                invoice_workflow_script: invoice_script.to_string_lossy().to_string(),
+                gmail_draft_script: gmail_script.to_string_lossy().to_string(),
+                copy_scansioni_script: copy_script.to_string_lossy().to_string(),
+                ocr_preprocessing_script: ocr_script.to_string_lossy().to_string(),
+                contract_processing_script: contract_script.to_string_lossy().to_string(),
+            },
+            folders: FolderPaths {
+                invoice_input_folder: invoice_input.to_string_lossy().to_string(),
+                invoice_output_folder: invoice_output.to_string_lossy().to_string(),
+                invoice_archive_folder: invoice_archive.to_string_lossy().to_string(),
+                invoice_log_folder: invoice_logs.to_string_lossy().to_string(),
+                scansioni_network_share: scans_cache.to_string_lossy().to_string(),
+                scansioni_local_cache_folder: scans_cache.to_string_lossy().to_string(),
+                ocr_text_output_folder: ocr_text.to_string_lossy().to_string(),
+                contracts_output_folder: contracts.to_string_lossy().to_string(),
+                contract_log_folder: contract_logs.to_string_lossy().to_string(),
+            },
+            gmail: GmailConfig {
+                token_path: gmail_token_dir
+                    .join("gmail_token.json")
+                    .to_string_lossy()
+                    .to_string(),
+            },
+            safety: SafetyConfig {
+                dry_run_default: true,
+                require_confirmation_for_file_moves: true,
+                redact_logs: true,
+            },
+        }
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "flowhost_workflow_e2e_{name}_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
     }
 }
