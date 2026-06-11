@@ -1,4 +1,4 @@
-import { FileText, FolderOpen } from "lucide-react";
+import { FileText, FolderOpen, ShieldCheck } from "lucide-react";
 
 import { DeveloperDetails } from "../components/DeveloperDetails";
 import { PageHeader } from "../components/PageHeader";
@@ -76,6 +76,29 @@ export function SupportPage({
         </section>
 
         <aside className="space-y-5">
+          <section className="rounded-lg border border-teal-100 bg-teal-50/80 p-5 shadow-glass backdrop-blur-xl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">Safe local rehearsal</h2>
+                <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
+                  Use a fake workspace and Safe mode for runtime smoke tests. FlowHost creates Gmail drafts only and never sends emails automatically.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-md bg-white/60 p-3 text-sm font-semibold text-slate-800">
+              Safe mode is {config?.safety.dryRunDefault ? "on" : "off"}
+            </div>
+            <ol className="mt-4 space-y-2 text-sm font-medium leading-6 text-slate-700">
+              <li>1. Open Setup and choose a fake workspace folder.</li>
+              <li>2. Create folders, save setup, then check setup.</li>
+              <li>3. Use fake files only and keep Gmail credentials unset unless testing validation.</li>
+              <li>4. Run only dry-run automations and confirm Activity receives a summary.</li>
+            </ol>
+          </section>
+
           <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
             <h2 className="text-xl font-semibold text-slate-950">Preflight checks</h2>
             <div className="mt-4 space-y-2">

@@ -194,6 +194,44 @@ If `safety.dryRunDefault` is enabled in the FlowHost app config, FlowHost also p
 
 If an older generated config only contains a `paths` object, FlowHost migrates it to the new schema on startup.
 
+## Safe Local Runtime Rehearsal
+
+Use this checklist before testing FlowHost on a real hotel PC. This rehearsal must use fake data only.
+
+1. Start the app:
+
+   ```powershell
+   npm run tauri dev
+   ```
+
+2. Open `Setup`.
+3. Start guided setup and choose a fake workspace, for example:
+
+   ```text
+   C:\Users\<you>\Desktop\FlowHost-Test-Workspace
+   ```
+
+4. Keep `Safe mode` enabled.
+5. Do not select real hotel folders, network shares, guest PDFs, employee contracts, credentials, or tokens.
+6. Use fake Gmail credential/token paths if you are only checking validation. Do not use real Gmail OAuth files for this rehearsal.
+7. Create folders from the guided setup.
+8. Save setup.
+9. Run `Check setup`.
+10. Add fake test files only if needed:
+
+    ```text
+    FlowHost-Test-Workspace\Invoices\Input\fake-invoice.pdf
+    FlowHost-Test-Workspace\Scans\IncomingCache\Sharp MFP fake.pdf
+    FlowHost-Test-Workspace\Scans\TextOutput\Sharp MFP fake.txt
+    ```
+
+11. Run a dry-run automation from `Automations`.
+12. Confirm the Activity page receives a structured history entry marked `Safe mode`.
+13. Confirm no real Gmail authentication, sending, moving, deleting, or hotel-folder access occurred.
+14. Close FlowHost and delete the fake workspace when finished.
+
+FlowHost passes app-controlled `--json-report` paths to the canonical Python scripts that support structured reports. Legacy `.cmd` and `.ps1` wrappers are left unchanged for compatibility.
+
 ## Resetting Config
 
 To reset configuration, close FlowHost, delete the generated `config.json`, and start the app again. FlowHost will recreate defaults.
