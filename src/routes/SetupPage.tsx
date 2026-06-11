@@ -12,17 +12,20 @@ import type {
   PreflightItem,
   WorkflowPreflight,
 } from "../types";
+import type { NextAction } from "../nextAction";
 
 export function SetupPage({
   configStatus,
   modules,
   loading,
+  nextAction,
   onRefresh,
   onGoToAutomations,
 }: {
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
   loading: boolean;
+  nextAction: NextAction;
   onRefresh: () => void;
   onGoToAutomations: () => void;
 }) {
@@ -77,9 +80,9 @@ export function SetupPage({
                 <Sparkles className="h-6 w-6" />
               </div>
               <div>
-                <h2 className="text-2xl font-semibold text-slate-950">Guided setup</h2>
+                <h2 className="text-2xl font-semibold text-slate-950">{guidance.title}</h2>
                 <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-                  Set up hotel details, folders, Gmail drafts, invoice rules, contracts, and safety.
+                  {guidance.detail}
                 </p>
                 <p
                   className={[
@@ -95,7 +98,11 @@ export function SetupPage({
               className="shrink-0 rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
               onClick={() => setShowWizard(true)}
             >
-              Start guided setup
+              {nextAction.targetPage === "setup"
+                ? nextAction.buttonLabel
+                : setupReady
+                  ? "Review setup"
+                  : "Continue setup"}
             </button>
           </div>
         </section>
@@ -130,30 +137,28 @@ export function SetupPage({
       )}
 
       {!showWizard && (
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="mb-4">
-            <h2 className="text-xl font-semibold text-slate-950">Readiness by area</h2>
-            <p className="mt-1 text-sm font-medium text-slate-600">
-              One area can need setup while another is ready to use.
-            </p>
+        <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+            Show readiness by area
+          </summary>
+          <div className="mt-4">
+            <ModuleReadinessGrid modules={modules} />
           </div>
-          <ModuleReadinessGrid modules={modules} />
-        </section>
+        </details>
       )}
 
-      <SetupStatusPanel
-        configStatus={configStatus}
-        loading={loading}
-        onRefresh={onRefresh}
-      />
-
-      <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
-        <h2 className="text-xl font-semibold text-slate-950">Setup editing</h2>
-        <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
-          FlowHost can show setup readiness here. Editing and first-time setup will be added in the
-          next phase.
-        </p>
-      </section>
+      <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          Advanced setup details
+        </summary>
+        <div className="mt-4">
+          <SetupStatusPanel
+            configStatus={configStatus}
+            loading={loading}
+            onRefresh={onRefresh}
+          />
+        </div>
+      </details>
     </div>
   );
 }

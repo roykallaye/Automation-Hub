@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { AppPage, RunStatus } from "../types";
+import type { NextAction } from "../nextAction";
 import { Navigation } from "./Navigation";
 import { StatusPill } from "./StatusBadges";
 
@@ -10,6 +11,7 @@ export function AppShell({
   displayName,
   status,
   statusLabel,
+  nextAction,
   onPageChange,
 }: {
   children: ReactNode;
@@ -17,6 +19,7 @@ export function AppShell({
   displayName: string;
   status: RunStatus;
   statusLabel: string;
+  nextAction: NextAction;
   onPageChange: (page: AppPage) => void;
 }) {
   return (
@@ -38,11 +41,50 @@ export function AppShell({
           <StatusPill status={status} label={statusLabel} />
         </header>
 
+        <GuidanceBanner nextAction={nextAction} onPageChange={onPageChange} />
+
         <div className="grid flex-1 gap-5 lg:grid-cols-[210px_1fr]">
-          <Navigation currentPage={currentPage} onPageChange={onPageChange} />
+          <Navigation
+            currentPage={currentPage}
+            nextAction={nextAction}
+            onPageChange={onPageChange}
+          />
           <div className="min-w-0">{children}</div>
         </div>
       </section>
     </main>
+  );
+}
+
+function GuidanceBanner({
+  nextAction,
+  onPageChange,
+}: {
+  nextAction: NextAction;
+  onPageChange: (page: AppPage) => void;
+}) {
+  const styles =
+    nextAction.tone === "success"
+      ? "border-emerald-200 bg-emerald-50/85 text-emerald-950"
+      : nextAction.tone === "blocked"
+        ? "border-rose-200 bg-rose-50/85 text-rose-950"
+        : nextAction.tone === "attention"
+          ? "border-amber-200 bg-amber-50/85 text-amber-950"
+          : "border-white/65 bg-white/60 text-slate-950";
+  return (
+    <section className={`rounded-xl border p-4 shadow-glass backdrop-blur-xl ${styles}`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm font-bold">{nextAction.title}</p>
+          <p className="mt-1 text-sm font-medium opacity-80">{nextAction.shortMessage}</p>
+        </div>
+        <button
+          className="shrink-0 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+          onClick={() => onPageChange(nextAction.targetPage)}
+        >
+          {nextAction.buttonLabel}
+        </button>
+      </div>
+    </section>
   );
 }

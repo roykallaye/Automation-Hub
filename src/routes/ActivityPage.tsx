@@ -2,6 +2,7 @@ import { DetailsPanel } from "../components/DetailsPanel";
 import { LiveOutputPanel } from "../components/LiveOutputPanel";
 import { PageHeader } from "../components/PageHeader";
 import type { ActivityRecord, ActivityStatus, AppConfigStatus, LatestLog, RunSummary } from "../types";
+import type { NextAction } from "../nextAction";
 
 export function ActivityPage({
   configStatus,
@@ -9,6 +10,7 @@ export function ActivityPage({
   activityHistory,
   liveOutput,
   lastSummary,
+  nextAction,
   onOpenPath,
   onOpenActivityReport,
   onRefresh,
@@ -18,6 +20,7 @@ export function ActivityPage({
   activityHistory: ActivityRecord[];
   liveOutput: string[];
   lastSummary: RunSummary | null;
+  nextAction: NextAction;
   onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
   onRefresh: () => void;
@@ -35,6 +38,15 @@ export function ActivityPage({
 
       <div className="grid gap-5 xl:grid-cols-[1fr_390px]">
         <section className="space-y-5">
+          {nextAction.targetPage === "activity" && (
+            <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
+              <p className="text-sm font-semibold text-amber-950">{nextAction.title}</p>
+              <p className="mt-1 text-sm font-medium text-amber-800">
+                {nextAction.shortMessage}
+              </p>
+            </section>
+          )}
+
           <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>

@@ -9,6 +9,7 @@ import { AppShell } from "./components/AppShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
+import { deriveNextAction } from "./nextAction";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AutomationsPage } from "./routes/AutomationsPage";
 import { HomePage } from "./routes/HomePage";
@@ -80,6 +81,18 @@ function App() {
 
   const displayName = configStatus?.config.client.displayName || "FlowHost";
   const modules = useMemo(() => deriveModuleReadiness(configStatus), [configStatus]);
+  const nextAction = useMemo(
+    () =>
+      deriveNextAction({
+        loading: loadingConfig,
+        configStatus,
+        modules,
+        lastSummary,
+        activityHistory,
+        runningCommand,
+      }),
+    [activityHistory, configStatus, lastSummary, loadingConfig, modules, runningCommand],
+  );
 
   async function refreshConfigStatus() {
     try {
@@ -209,6 +222,7 @@ function App() {
       displayName={displayName}
       status={runningCommand ? "warning" : status}
       statusLabel={runningLabel ?? notice}
+      nextAction={nextAction}
       onPageChange={setCurrentPage}
     >
       {currentPage === "home" && (
@@ -217,6 +231,8 @@ function App() {
           modules={modules}
           loading={loadingConfig}
           lastSummary={lastSummary}
+          nextAction={nextAction}
+          onNavigate={setCurrentPage}
           runningCommand={runningCommand}
           workflowFor={workflowFor}
           actionDisabledReason={actionDisabledReason}
@@ -229,11 +245,13 @@ function App() {
         <AutomationsPage
           configStatus={configStatus}
           modules={modules}
+          nextAction={nextAction}
           runningCommand={runningCommand}
           workflowFor={workflowFor}
           actionDisabledReason={actionDisabledReason}
           onRun={startAction}
           onOpenPath={openPath}
+          onNavigate={setCurrentPage}
         />
       )}
 
@@ -242,6 +260,7 @@ function App() {
           configStatus={configStatus}
           modules={modules}
           loading={loadingConfig}
+          nextAction={nextAction}
           onRefresh={refreshAll}
           onGoToAutomations={() => setCurrentPage("automations")}
         />
@@ -252,6 +271,7 @@ function App() {
           configStatus={configStatus}
           latestLogs={latestLogs}
           activityHistory={activityHistory}
+          nextAction={nextAction}
           liveOutput={liveOutput}
           lastSummary={lastSummary}
           onOpenPath={openPath}

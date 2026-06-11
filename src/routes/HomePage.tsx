@@ -5,18 +5,22 @@ import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { StatusPill } from "../components/StatusBadges";
 import { AutomationCard, GmailAccessPanel } from "../components/WorkflowCard";
 import type {
+  AppPage,
   AppConfigStatus,
   AutomationAction,
   ModuleReadiness,
   RunSummary,
   WorkflowPreflight,
 } from "../types";
+import type { NextAction } from "../nextAction";
 
 export function HomePage({
   configStatus,
   modules,
   loading,
   lastSummary,
+  nextAction,
+  onNavigate,
   runningCommand,
   workflowFor,
   actionDisabledReason,
@@ -27,6 +31,8 @@ export function HomePage({
   modules: ModuleReadiness[];
   loading: boolean;
   lastSummary: RunSummary | null;
+  nextAction: NextAction;
+  onNavigate: (page: AppPage) => void;
   runningCommand: string | null;
   workflowFor: (action: AutomationAction) => WorkflowPreflight | undefined;
   actionDisabledReason: (action: AutomationAction) => string | null;
@@ -38,9 +44,7 @@ export function HomePage({
     ["invoices", "gmailDrafts"].includes(module.id),
   );
   const hasMainSetupIssue =
-    loading ||
-    !configStatus ||
-    primaryModules.some((module) => module.status !== "ready");
+    loading || !configStatus || primaryModules.some((module) => module.status !== "ready");
 
   return (
     <div className="space-y-5">
@@ -51,35 +55,27 @@ export function HomePage({
               <Sparkles className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-teal-800">Daily overview</p>
+              <p className="text-sm font-semibold text-teal-800">Today</p>
               <h2 className="mt-1 text-3xl font-semibold text-slate-950">
-                {hasMainSetupIssue ? "Main setup needs attention" : "Ready for today&apos;s office work"}
+                {nextAction.title}
               </h2>
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-                Prepare drafts, organize signed contracts, and keep scan folders tidy.
+                {nextAction.shortMessage}
               </p>
             </div>
           </div>
-          <div className="rounded-lg bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm">
-            Gmail drafts only
-          </div>
+          <button
+            className="rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            onClick={() => onNavigate(nextAction.targetPage)}
+          >
+            {nextAction.buttonLabel}
+          </button>
         </div>
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
         <section className="space-y-5">
           <AttentionBanner modules={modules} configStatus={configStatus} loading={loading} />
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">Setup by area</h2>
-                <p className="mt-1 text-sm font-medium text-slate-600">
-                  Ready areas can be used even if another area needs setup.
-                </p>
-              </div>
-            </div>
-            <ModuleReadinessGrid modules={modules.slice(0, 5)} compact />
-          </section>
           <div className="grid gap-5 xl:grid-cols-2">
             <AutomationCard
               title="Invoices"
@@ -141,6 +137,15 @@ export function HomePage({
             moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
             onRun={() => onRun(gmailReconnectAction)}
           />
+
+          <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+              Show setup by area
+            </summary>
+            <div className="mt-4">
+              <ModuleReadinessGrid modules={modules.slice(0, 5)} compact />
+            </div>
+          </details>
         </section>
 
         <LastRunCard summary={lastSummary} />
