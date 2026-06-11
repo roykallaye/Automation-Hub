@@ -1,18 +1,20 @@
 import { FolderOpen, Sparkles } from "lucide-react";
 
 import { contractAction, gmailReconnectAction, invoiceAction } from "../actions";
+import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { StatusPill } from "../components/StatusBadges";
 import { AutomationCard, GmailAccessPanel } from "../components/WorkflowCard";
-import { staffMessage } from "../messages";
 import type {
   AppConfigStatus,
   AutomationAction,
+  ModuleReadiness,
   RunSummary,
   WorkflowPreflight,
 } from "../types";
 
 export function HomePage({
   configStatus,
+  modules,
   loading,
   lastSummary,
   runningCommand,
@@ -22,6 +24,7 @@ export function HomePage({
   onOpenPath,
 }: {
   configStatus: AppConfigStatus | null;
+  modules: ModuleReadiness[];
   loading: boolean;
   lastSummary: RunSummary | null;
   runningCommand: string | null;
@@ -31,11 +34,13 @@ export function HomePage({
   onOpenPath: (path?: string | null) => void;
 }) {
   const folders = configStatus?.config.folders;
-  const hasSetupIssue =
+  const primaryModules = modules.filter((module) =>
+    ["invoices", "gmailDrafts"].includes(module.id),
+  );
+  const hasMainSetupIssue =
     loading ||
     !configStatus ||
-    configStatus.preflight.items.some((item) => item.status === "warning") ||
-    configStatus.preflight.workflows.some((workflow) => workflow.commandName && !workflow.canRun);
+    primaryModules.some((module) => module.status !== "ready");
 
   return (
     <div className="space-y-5">
@@ -48,7 +53,7 @@ export function HomePage({
             <div>
               <p className="text-sm font-semibold text-teal-800">Daily overview</p>
               <h2 className="mt-1 text-3xl font-semibold text-slate-950">
-                {hasSetupIssue ? "Setup needs attention" : "Ready for today&apos;s office work"}
+                {hasMainSetupIssue ? "Main setup needs attention" : "Ready for today&apos;s office work"}
               </h2>
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
                 Prepare drafts, organize signed contracts, and keep scan folders tidy.
@@ -63,13 +68,25 @@ export function HomePage({
 
       <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
         <section className="space-y-5">
-          <AttentionBanner configStatus={configStatus} loading={loading} />
+          <AttentionBanner modules={modules} configStatus={configStatus} loading={loading} />
+          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">Setup by area</h2>
+                <p className="mt-1 text-sm font-medium text-slate-600">
+                  Ready areas can be used even if another area needs setup.
+                </p>
+              </div>
+            </div>
+            <ModuleReadinessGrid modules={modules.slice(0, 5)} compact />
+          </section>
           <div className="grid gap-5 xl:grid-cols-2">
             <AutomationCard
               title="Invoices"
               action={invoiceAction}
               description="Prepare PDFs and Gmail drafts for review."
               buttonLabel="Prepare invoice drafts"
+              moduleReadiness={modules.find((module) => module.id === "invoices")}
               workflow={workflowFor(invoiceAction)}
               runningCommand={runningCommand}
               disabledReason={actionDisabledReason(invoiceAction)}
@@ -93,6 +110,7 @@ export function HomePage({
               action={contractAction}
               description="Organize signed contract documents."
               buttonLabel="Process signed contracts"
+              moduleReadiness={modules.find((module) => module.id === "contracts")}
               workflow={workflowFor(contractAction)}
               runningCommand={runningCommand}
               disabledReason={actionDisabledReason(contractAction)}
@@ -120,6 +138,7 @@ export function HomePage({
             disabled={Boolean(runningCommand)}
             isRunning={runningCommand === gmailReconnectAction.commandName}
             buttonLabel="Check Gmail sign-in"
+            moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
             onRun={() => onRun(gmailReconnectAction)}
           />
         </section>
@@ -131,9 +150,11 @@ export function HomePage({
 }
 
 function AttentionBanner({
+  modules,
   configStatus,
   loading,
 }: {
+  modules: ModuleReadiness[];
   configStatus: AppConfigStatus | null;
   loading: boolean;
 }) {
@@ -155,12 +176,14 @@ function AttentionBanner({
     );
   }
 
-  const warning = configStatus.preflight.items.find((item) => item.status === "warning");
-  const blockedWorkflow = configStatus.preflight.workflows.find(
-    (workflow) => workflow.commandName && !workflow.canRun,
+  const primaryIssue = modules.find(
+    (module) => ["invoices", "gmailDrafts"].includes(module.id) && module.status !== "ready",
+  );
+  const secondaryIssue = modules.find(
+    (module) => !["invoices", "gmailDrafts"].includes(module.id) && module.status !== "ready",
   );
 
-  if (!warning && !blockedWorkflow) {
+  if (!primaryIssue && !secondaryIssue) {
     return (
       <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-glass">
         <p className="text-sm font-semibold text-emerald-900">Everything is ready.</p>
@@ -168,14 +191,22 @@ function AttentionBanner({
     );
   }
 
-  const source = warning ?? blockedWorkflow;
+  if (!primaryIssue && secondaryIssue) {
+    return (
+      <section className="rounded-xl border border-white/65 bg-white/60 p-4 shadow-glass">
+        <p className="text-sm font-semibold text-slate-900">Main work is ready</p>
+        <p className="mt-1 text-sm font-medium text-slate-600">
+          {secondaryIssue.title} can be set up later: {secondaryIssue.nextAction}
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
-      <p className="text-sm font-semibold text-amber-950">Setup needs attention</p>
+      <p className="text-sm font-semibold text-amber-950">Main setup needs attention</p>
       <p className="mt-1 text-sm font-medium text-amber-800">
-        {source
-          ? staffMessage(source.message, source.status, source.key)
-          : "Ask setup support to check FlowHost."}
+        {primaryIssue ? primaryIssue.nextAction : "Ask setup support to check FlowHost."}
       </p>
     </section>
   );

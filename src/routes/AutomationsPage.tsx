@@ -6,6 +6,7 @@ import {
   invoiceAction,
   maintenanceActions,
 } from "../actions";
+import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { PageHeader } from "../components/PageHeader";
 import {
   ActionButton,
@@ -15,11 +16,13 @@ import {
 import type {
   AppConfigStatus,
   AutomationAction,
+  ModuleReadiness,
   WorkflowPreflight,
 } from "../types";
 
 export function AutomationsPage({
   configStatus,
+  modules,
   runningCommand,
   workflowFor,
   actionDisabledReason,
@@ -27,6 +30,7 @@ export function AutomationsPage({
   onOpenPath,
 }: {
   configStatus: AppConfigStatus | null;
+  modules: ModuleReadiness[];
   runningCommand: string | null;
   workflowFor: (action: AutomationAction) => WorkflowPreflight | undefined;
   actionDisabledReason: (action: AutomationAction) => string | null;
@@ -39,12 +43,23 @@ export function AutomationsPage({
     <div className="space-y-5">
       <PageHeader title="Automations" eyebrow="Run hotel workflows" />
 
+      <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold text-slate-950">Ready areas</h2>
+          <p className="mt-1 text-sm font-medium text-slate-600">
+            Use ready areas now. Setup missing areas when they are needed.
+          </p>
+        </div>
+        <ModuleReadinessGrid modules={modules} compact />
+      </section>
+
       <div className="grid gap-5 xl:grid-cols-2">
         <AutomationCard
           title="Invoices"
           action={invoiceAction}
           description="Prepare PDFs and create Gmail drafts for review."
           buttonLabel="Prepare invoice drafts"
+          moduleReadiness={modules.find((module) => module.id === "invoices")}
           workflow={workflowFor(invoiceAction)}
           runningCommand={runningCommand}
           disabledReason={actionDisabledReason(invoiceAction)}
@@ -68,6 +83,7 @@ export function AutomationsPage({
           action={contractAction}
           description="Read, sort, and organize signed contract documents."
           buttonLabel="Process signed contracts"
+          moduleReadiness={modules.find((module) => module.id === "contracts")}
           workflow={workflowFor(contractAction)}
           runningCommand={runningCommand}
           disabledReason={actionDisabledReason(contractAction)}
@@ -95,6 +111,7 @@ export function AutomationsPage({
         disabled={Boolean(runningCommand)}
         isRunning={runningCommand === gmailReconnectAction.commandName}
         buttonLabel="Check Gmail sign-in"
+        moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
         onRun={() => onRun(gmailReconnectAction)}
       />
 

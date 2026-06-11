@@ -8,6 +8,7 @@ import {
 import { AppShell } from "./components/AppShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { staffMessage } from "./messages";
+import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AutomationsPage } from "./routes/AutomationsPage";
 import { HomePage } from "./routes/HomePage";
@@ -74,6 +75,7 @@ function App() {
   }, [actions, runningCommand]);
 
   const displayName = configStatus?.config.client.displayName || "FlowHost";
+  const modules = useMemo(() => deriveModuleReadiness(configStatus), [configStatus]);
 
   async function refreshConfigStatus() {
     try {
@@ -166,6 +168,8 @@ function App() {
     const workflow = workflowFor(action);
     if (!workflow) return "Workflow status is not available.";
     if (!workflow.canRun) {
+      const module = moduleForCommand(modules, action.commandName);
+      if (module && module.status !== "ready") return module.nextAction;
       return staffMessage(workflow.message, workflow.status, workflow.key);
     }
     return null;
@@ -182,6 +186,7 @@ function App() {
       {currentPage === "home" && (
         <HomePage
           configStatus={configStatus}
+          modules={modules}
           loading={loadingConfig}
           lastSummary={lastSummary}
           runningCommand={runningCommand}
@@ -195,6 +200,7 @@ function App() {
       {currentPage === "automations" && (
         <AutomationsPage
           configStatus={configStatus}
+          modules={modules}
           runningCommand={runningCommand}
           workflowFor={workflowFor}
           actionDisabledReason={actionDisabledReason}
@@ -206,6 +212,7 @@ function App() {
       {currentPage === "setup" && (
         <SetupPage
           configStatus={configStatus}
+          modules={modules}
           loading={loadingConfig}
           onRefresh={refreshAll}
           onGoToAutomations={() => setCurrentPage("automations")}

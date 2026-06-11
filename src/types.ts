@@ -15,6 +15,32 @@ export type ReadinessStatus =
 
 export type WorkflowStatus = ReadinessStatus;
 
+export type ModuleReadinessStatus =
+  | "ready"
+  | "needs_attention"
+  | "not_configured"
+  | "blocked"
+  | "not_checked";
+
+export type ModuleReadinessId =
+  | "invoices"
+  | "gmailDrafts"
+  | "scanCopy"
+  | "ocr"
+  | "contracts"
+  | "support";
+
+export type ModuleReadiness = {
+  id: ModuleReadinessId;
+  title: string;
+  status: ModuleReadinessStatus;
+  shortReason: string;
+  nextAction: string;
+  relatedWorkflowCommandNames: string[];
+  blockingProblems: string[];
+  warnings: string[];
+};
+
 export type RunStep = {
   name: string;
   exit_code: number;

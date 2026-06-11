@@ -1,6 +1,7 @@
 import { KeyRound, Loader2, type LucideIcon } from "lucide-react";
 
-import type { AutomationAction, WorkflowPreflight } from "../types";
+import { moduleStatusLabel } from "../moduleReadiness";
+import type { AutomationAction, ModuleReadiness, WorkflowPreflight } from "../types";
 import { ReadinessBadge } from "./StatusBadges";
 
 export function GmailAccessPanel({
@@ -10,6 +11,7 @@ export function GmailAccessPanel({
   disabledReason,
   isRunning,
   buttonLabel = "Check Gmail sign-in",
+  moduleReadiness,
   onRun,
 }: {
   action: AutomationAction;
@@ -18,6 +20,7 @@ export function GmailAccessPanel({
   disabledReason: string | null;
   isRunning: boolean;
   buttonLabel?: string;
+  moduleReadiness?: ModuleReadiness;
   onRun: () => void;
 }) {
   const Icon = isRunning ? Loader2 : action.icon;
@@ -31,7 +34,11 @@ export function GmailAccessPanel({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-semibold text-slate-950">Gmail sign-in</h2>
-            {workflow && <ReadinessBadge status={workflow.status} />}
+            {moduleReadiness ? (
+              <ModuleBadge module={moduleReadiness} />
+            ) : (
+              workflow && <ReadinessBadge status={workflow.status} />
+            )}
           </div>
           <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
             {disabledReason ??
@@ -63,6 +70,7 @@ export function AutomationCard({
   onOpenPath,
   description,
   buttonLabel,
+  moduleReadiness,
 }: {
   title: string;
   action: AutomationAction;
@@ -78,6 +86,7 @@ export function AutomationCard({
   onOpenPath: (path?: string | null) => void;
   description?: string;
   buttonLabel?: string;
+  moduleReadiness?: ModuleReadiness;
 }) {
   const Icon = action.icon;
   return (
@@ -94,7 +103,9 @@ export function AutomationCard({
             )}
           </div>
         </div>
-        {workflow ? (
+        {moduleReadiness ? (
+          <ModuleBadge module={moduleReadiness} />
+        ) : workflow ? (
           <ReadinessBadge status={workflow.status} />
         ) : (
           <ReadinessBadge status="notChecked" />
@@ -130,6 +141,25 @@ export function AutomationCard({
         </p>
       )}
     </section>
+  );
+}
+
+function ModuleBadge({ module }: { module: ModuleReadiness }) {
+  return (
+    <span
+      className={[
+        "inline-flex shrink-0 rounded-md px-2 py-1 text-[11px] font-bold ring-1",
+        module.status === "ready"
+          ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+          : module.status === "blocked"
+            ? "bg-rose-50 text-rose-800 ring-rose-200"
+            : module.status === "not_checked"
+              ? "bg-slate-50 text-slate-700 ring-slate-200"
+              : "bg-amber-50 text-amber-800 ring-amber-200",
+      ].join(" ")}
+    >
+      {moduleStatusLabel(module.status)}
+    </span>
   );
 }
 

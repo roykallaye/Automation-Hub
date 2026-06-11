@@ -2,18 +2,26 @@ import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
+import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupStatusPanel } from "../components/SetupStatusPanel";
 import { SetupWizard } from "../components/SetupWizard/SetupWizard";
 import { staffMessage } from "../messages";
-import type { AppConfigStatus, PreflightItem, WorkflowPreflight } from "../types";
+import type {
+  AppConfigStatus,
+  ModuleReadiness,
+  PreflightItem,
+  WorkflowPreflight,
+} from "../types";
 
 export function SetupPage({
   configStatus,
+  modules,
   loading,
   onRefresh,
   onGoToAutomations,
 }: {
   configStatus: AppConfigStatus | null;
+  modules: ModuleReadiness[];
   loading: boolean;
   onRefresh: () => void;
   onGoToAutomations: () => void;
@@ -118,6 +126,18 @@ export function SetupPage({
           <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
             {guidance.detail}
           </p>
+        </section>
+      )}
+
+      {!showWizard && (
+        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold text-slate-950">Readiness by area</h2>
+            <p className="mt-1 text-sm font-medium text-slate-600">
+              One area can need setup while another is ready to use.
+            </p>
+          </div>
+          <ModuleReadinessGrid modules={modules} />
         </section>
       )}
 
