@@ -1,10 +1,10 @@
-use crate::{config, preflight, redaction::redact_line};
+use crate::{activity, config, preflight, redaction::redact_line};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc,
     thread,
@@ -28,15 +28,15 @@ pub(crate) struct StepResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RunSummary {
-    automation_name: String,
-    command_name: String,
-    start_time: String,
-    end_time: String,
-    duration_ms: u128,
-    exit_code: i32,
-    status: String,
-    steps: Vec<StepResult>,
-    last_output_lines: Vec<String>,
+    pub(crate) automation_name: String,
+    pub(crate) command_name: String,
+    pub(crate) start_time: String,
+    pub(crate) end_time: String,
+    pub(crate) duration_ms: u128,
+    pub(crate) exit_code: i32,
+    pub(crate) status: String,
+    pub(crate) steps: Vec<StepResult>,
+    pub(crate) last_output_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +45,7 @@ struct CommandStep {
     program: String,
     args: Vec<String>,
     success_codes: Vec<i32>,
+    report_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,11 +67,13 @@ pub(crate) async fn run_command_inner(
 ) -> Result<RunSummary, String> {
     let config = config::ensure_config(app)?;
     preflight::ensure_workflow_can_run(command_name, &config)?;
-    let (automation_name, steps) = command_steps(command_name, &config)?;
+    let reports_dir = activity::activity_reports_dir(app)?;
+    let (automation_name, steps) = command_steps(command_name, &config, Some(&reports_dir))?;
     let start = Local::now();
     let timer = Instant::now();
     let mut output_tail = VecDeque::with_capacity(100);
     let mut step_results = Vec::new();
+    let mut step_reports = Vec::new();
     let mut final_exit_code = 0;
     let mut had_warning = false;
 
@@ -109,6 +112,10 @@ pub(crate) async fn run_command_inner(
             exit_code,
         });
 
+        if let Some(report_path) = step.report_path.clone() {
+            step_reports.push(activity::StepReport { path: report_path });
+        }
+
         if !step.success_codes.contains(&exit_code) {
             final_exit_code = exit_code;
             emit_line(
@@ -128,7 +135,7 @@ pub(crate) async fn run_command_inner(
 
     let all_steps_succeeded = step_results
         .iter()
-        .zip(command_steps(command_name, &config)?.1.iter())
+        .zip(command_steps(command_name, &config, None)?.1.iter())
         .all(|(result, step)| step.success_codes.contains(&result.exit_code));
     let status = if all_steps_succeeded {
         if had_warning {
@@ -154,6 +161,7 @@ pub(crate) async fn run_command_inner(
 
     app.emit("command-finished", &summary)
         .map_err(|error| error.to_string())?;
+    let _ = activity::append_run_activity(app, &summary, &step_reports);
     Ok(summary)
 }
 
@@ -171,6 +179,7 @@ fn workflow_impact(command_name: &str) -> Option<WorkflowImpact> {
 fn command_steps(
     command_name: &str,
     config: &config::HubConfig,
+    reports_dir: Option<&Path>,
 ) -> Result<(&'static str, Vec<CommandStep>), String> {
     let scripts = &config.scripts;
     let cmd_success = vec![0];
@@ -184,6 +193,7 @@ fn command_steps(
         program: "cmd.exe".to_string(),
         args: vec!["/C".to_string(), "call".to_string(), path.to_string()],
         success_codes,
+        report_path: None,
     };
 
     let invoice = script_step(
@@ -193,6 +203,8 @@ fn command_steps(
         Some(&automation_config_path),
         config.safety.dry_run_default,
         false,
+        reports_dir,
+        command_name,
         cmd_success.clone(),
     );
     let gmail = script_step(
@@ -202,6 +214,8 @@ fn command_steps(
         Some(&automation_config_path),
         config.safety.dry_run_default,
         false,
+        reports_dir,
+        command_name,
         cmd_success.clone(),
     );
     let reset_gmail = CommandStep {
@@ -215,6 +229,7 @@ fn command_steps(
             ),
         ],
         success_codes: cmd_success.clone(),
+        report_path: None,
     };
     let copy_scansioni = cmd_file(
         "Copy scansioni cache",
@@ -228,6 +243,8 @@ fn command_steps(
         Some(&automation_config_path),
         false,
         false,
+        reports_dir,
+        command_name,
         cmd_success.clone(),
     );
     let contracts = script_step(
@@ -237,6 +254,8 @@ fn command_steps(
         Some(&automation_config_path),
         false,
         is_legacy_wrapper(&scripts.contract_processing_script),
+        reports_dir,
+        command_name,
         cmd_success.clone(),
     );
 
@@ -263,6 +282,8 @@ fn script_step(
     automation_config_path: Option<&str>,
     dry_run: bool,
     execute_contracts: bool,
+    reports_dir: Option<&Path>,
+    command_name: &str,
     success_codes: Vec<i32>,
 ) -> CommandStep {
     if is_python_script(path) {
@@ -277,11 +298,21 @@ fn script_step(
         if execute_contracts {
             args.push("--execute".to_string());
         }
+        let report_path = if supports_json_report(path) {
+            reports_dir.map(|dir| activity::report_path_for_step(dir, command_name, name))
+        } else {
+            None
+        };
+        if let Some(report_path) = &report_path {
+            args.push("--json-report".to_string());
+            args.push(report_path.to_string_lossy().to_string());
+        }
         return CommandStep {
             name,
             program: python_executable.to_string(),
             args,
             success_codes,
+            report_path,
         };
     }
 
@@ -297,6 +328,7 @@ fn script_step(
                 path.to_string(),
             ],
             success_codes,
+            report_path: None,
         };
     }
 
@@ -309,6 +341,7 @@ fn script_step(
         program: "cmd.exe".to_string(),
         args,
         success_codes,
+        report_path: None,
     }
 }
 
@@ -328,6 +361,13 @@ fn is_powershell_script(path: &str) -> bool {
 
 fn is_legacy_wrapper(path: &str) -> bool {
     !is_python_script(path)
+}
+
+fn supports_json_report(path: &str) -> bool {
+    matches!(
+        Path::new(path).file_name().and_then(|name| name.to_str()),
+        Some("process_fatture.py" | "create_gmail_draft.py" | "process_contratti.py")
+    )
 }
 
 fn run_step(

@@ -17,6 +17,7 @@ import { SupportPage } from "./routes/SupportPage";
 import type {
   AppPage,
   AppConfigStatus,
+  ActivityRecord,
   AutomationAction,
   CommandEvent,
   LatestLog,
@@ -31,6 +32,7 @@ function App() {
   const [liveOutput, setLiveOutput] = useState<string[]>([]);
   const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
   const [latestLogs, setLatestLogs] = useState<LatestLog[]>([]);
+  const [activityHistory, setActivityHistory] = useState<ActivityRecord[]>([]);
   const [status, setStatus] = useState<RunStatus>("idle");
   const [notice, setNotice] = useState<string>("Loading setup");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
@@ -39,6 +41,7 @@ function App() {
   useEffect(() => {
     void refreshConfigStatus();
     void refreshLatestLogs();
+    void refreshActivityHistory();
     void invoke<RunSummary | null>("get_last_run_summary").then((summary) => {
       if (summary) {
         setLastSummary(summary);
@@ -59,6 +62,7 @@ function App() {
       setNotice(event.payload.status === "error" ? "Run finished with errors" : "Run finished");
       void refreshConfigStatus();
       void refreshLatestLogs();
+      void refreshActivityHistory();
     });
 
     return () => {
@@ -102,9 +106,21 @@ function App() {
     }
   }
 
+  async function refreshActivityHistory() {
+    try {
+      const history = await invoke<ActivityRecord[]>("get_activity_history");
+      setActivityHistory(history);
+      return history;
+    } catch (error) {
+      setNotice(readError(error));
+      return [];
+    }
+  }
+
   async function refreshAll() {
     await refreshConfigStatus();
     await refreshLatestLogs();
+    await refreshActivityHistory();
   }
 
   async function openPath(path?: string | null) {
@@ -114,6 +130,18 @@ function App() {
     }
     try {
       await invoke("open_path", { path });
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
+  async function openActivityReport(path?: string | null) {
+    if (!path) {
+      setNotice("No activity report is available for this run.");
+      return;
+    }
+    try {
+      await invoke("open_activity_report", { path });
     } catch (error) {
       setNotice(readError(error));
     }
@@ -223,9 +251,11 @@ function App() {
         <ActivityPage
           configStatus={configStatus}
           latestLogs={latestLogs}
+          activityHistory={activityHistory}
           liveOutput={liveOutput}
           lastSummary={lastSummary}
           onOpenPath={openPath}
+          onOpenActivityReport={openActivityReport}
           onRefresh={refreshAll}
         />
       )}

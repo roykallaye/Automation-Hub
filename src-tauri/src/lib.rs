@@ -1,3 +1,4 @@
+mod activity;
 mod config;
 mod logs;
 mod paths;
@@ -36,10 +37,39 @@ pub fn run() {
             preview_setup,
             initialize_workspace,
             save_setup_config,
-            validate_setup
+            validate_setup,
+            get_activity_history,
+            get_activity_detail,
+            open_activity_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlowHost");
+}
+
+#[tauri::command]
+fn get_activity_history(app: AppHandle) -> Result<Vec<activity::ActivityRecord>, String> {
+    activity::get_activity_history(&app)
+}
+
+#[tauri::command]
+fn get_activity_detail(
+    app: AppHandle,
+    id: String,
+) -> Result<Option<activity::ActivityRecord>, String> {
+    activity::get_activity_detail(&app, &id)
+}
+
+#[tauri::command]
+fn open_activity_report(app: AppHandle, path: String) -> Result<(), String> {
+    if !activity::is_activity_report_path(&app, &path)? {
+        return Err("This activity report is not in the FlowHost activity folder.".to_string());
+    }
+
+    Command::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map_err(|error| format!("Could not open activity report: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]

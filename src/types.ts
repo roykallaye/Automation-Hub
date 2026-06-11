@@ -1,6 +1,13 @@
 import type { LucideIcon } from "lucide-react";
 
 export type RunStatus = "idle" | "success" | "warning" | "error";
+export type ActivityStatus =
+  | "success"
+  | "needs_attention"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+export type ActivityMode = "dry_run" | "execute" | "unknown";
 
 export type AppPage = "home" | "automations" | "setup" | "activity" | "support";
 
@@ -75,6 +82,25 @@ export type LatestLog = {
 };
 
 export type LogInfo = LatestLog;
+
+export type ActivityRecord = {
+  id: string;
+  workflowCommandName: string;
+  workflowTitle: string;
+  startedAt: string;
+  finishedAt: string;
+  status: ActivityStatus;
+  mode: ActivityMode;
+  summary: Record<string, number>;
+  warningsCount: number;
+  errorsCount: number;
+  warnings: string[];
+  errors: string[];
+  reportPath?: string | null;
+  logPath?: string | null;
+  createdAt: string;
+  technicalSnippet: string[];
+};
 
 export type HubConfig = {
   schemaVersion: number;
