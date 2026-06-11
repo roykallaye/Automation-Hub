@@ -8,11 +8,6 @@ import sys
 from datetime import datetime
 from email.message import EmailMessage
 
-from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from shared.config import (  # noqa: E402
@@ -56,6 +51,11 @@ def log(message: str) -> None:
 
 
 def get_service():
+    from googleapiclient.discovery import build
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+
     creds = None
 
     if TOKEN_FILE.exists():
@@ -96,6 +96,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create Gmail drafts for prepared invoice PDFs.")
     parser.add_argument("--dry-run", action="store_true", help="Report draft candidates without calling Gmail or moving files.")
     parser.add_argument("--config", type=Path, help="Optional FlowHost automation JSON config file.")
+    parser.add_argument("--json-report", type=Path, help="Optional path for the JSON report.")
     return parser.parse_args()
 
 
@@ -135,7 +136,10 @@ def configure_run(args: argparse.Namespace) -> None:
     ARCHIVE_RUN_DIR = ARCHIVE_DIR / RUN_TS
     LOG_FILE = LOG_DIR / f"create_gmail_draft_{RUN_TS}.log"
     REPORT_FILE = LOG_DIR / f"report_gmail_draft_{RUN_TS}.json"
+    if args.json_report:
+        REPORT_FILE = args.json_report
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
 def client_name_from_pdf(pdf: Path) -> str:

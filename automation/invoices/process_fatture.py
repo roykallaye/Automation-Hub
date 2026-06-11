@@ -7,8 +7,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import pymupdf
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from shared.config import (  # noqa: E402
@@ -40,6 +38,16 @@ COMMITTENTE_EMAIL_RULES = [
     ("dertour", "dtd-invoices@dertouristik.com"),
     ("luxhoba", "direzione@luxhoba.com"),
 ]
+
+
+def get_pymupdf():
+    try:
+        import pymupdf
+    except ImportError as error:
+        raise RuntimeError(
+            "PyMuPDF is required to process invoice PDFs. Install automation requirements first."
+        ) from error
+    return pymupdf
 
 
 def log(message: str) -> None:
@@ -253,6 +261,7 @@ def extract_fields(text: str) -> dict:
 
 
 def create_single_copy_pdf_and_text(input_pdf: Path, output_pdf: Path) -> str:
+    pymupdf = get_pymupdf()
     doc = pymupdf.open(input_pdf)
     page = doc[0]
 

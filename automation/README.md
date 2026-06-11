@@ -110,6 +110,32 @@ The contract script defaults to dry-run. It only moves and renames files when ru
 
 Do not run these commands against real hotel folders unless you intentionally want to inspect those local folders. For tests, use fake fixture folders and synthetic PDFs/text files.
 
+## Automation Tests
+
+The automation tests use Python `unittest` and temporary fake workspaces only. They do not call Gmail, do not create Gmail drafts, do not send emails, and do not use real hotel PDFs, contracts, credentials, tokens, logs, or reports.
+
+Run them from the repository root:
+
+```powershell
+npm run test:automation
+```
+
+Equivalent direct command:
+
+```powershell
+python -m unittest discover automation/tests
+```
+
+The tests cover:
+
+- invoice dry-run behavior with a generated fake PDF when PyMuPDF is installed
+- Gmail draft dry-run reporting without authentication or file moves
+- contract processing dry-run using fake scan PDF names and fake OCR text
+- missing config failures that leave temp fixture files untouched
+- credential/token file contents not appearing in dry-run output
+
+If PyMuPDF is not installed, the invoice PDF fixture test is skipped. Install `automation\requirements.txt` to run the full automation test suite.
+
 ## Files That Must Never Be Committed
 
 Never commit:
