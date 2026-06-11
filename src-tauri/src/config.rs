@@ -269,13 +269,28 @@ pub(crate) fn default_config() -> HubConfig {
 
 fn default_automation_root() -> PathBuf {
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    default_automation_root_for_current_dir(&current_dir)
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    default_automation_root_for_locations(exe_dir.as_deref(), &current_dir)
 }
 
+#[cfg(test)]
 fn default_automation_root_for_current_dir(current_dir: &Path) -> PathBuf {
-    let repo_automation = current_dir.join("automation");
-    if looks_like_automation_root(&repo_automation) {
-        repo_automation
+    default_automation_root_for_locations(None, current_dir)
+}
+
+fn default_automation_root_for_locations(exe_dir: Option<&Path>, current_dir: &Path) -> PathBuf {
+    if let Some(exe_dir) = exe_dir {
+        let installed_automation = exe_dir.join("automation");
+        if looks_like_automation_root(&installed_automation) {
+            return installed_automation;
+        }
+    }
+
+    let current_automation = current_dir.join("automation");
+    if looks_like_automation_root(&current_automation) {
+        current_automation
     } else {
         PathBuf::from(r"C:\FlowHost\automation")
     }
@@ -415,6 +430,21 @@ mod tests {
     }
 
     #[test]
+    fn installed_exe_automation_root_is_preferred_over_current_directory() {
+        let root = std::env::temp_dir().join("flowhost_installed_root_for_config_test");
+        let exe_dir = root.join("installed");
+        let current_dir = root.join("working");
+        let automation = exe_dir.join("automation");
+        create_canonical_script_markers(&automation);
+        create_canonical_script_markers(&current_dir.join("automation"));
+
+        assert_eq!(
+            default_automation_root_for_locations(Some(&exe_dir), &current_dir),
+            automation
+        );
+    }
+
+    #[test]
     fn canonical_paths_are_derived_from_automation_root() {
         let root = PathBuf::from(r"C:\FlowHost\automation");
         let scripts = canonical_script_paths(&root);
@@ -431,5 +461,14 @@ mod tests {
             scripts.contract_processing_script,
             r"C:\FlowHost\automation\contracts\process_contratti.py"
         );
+    }
+
+    fn create_canonical_script_markers(root: &Path) {
+        fs::create_dir_all(root.join("invoices")).unwrap();
+        fs::create_dir_all(root.join("gmail_drafts")).unwrap();
+        fs::create_dir_all(root.join("contracts")).unwrap();
+        fs::write(root.join("invoices").join("process_fatture.py"), b"").unwrap();
+        fs::write(root.join("gmail_drafts").join("create_gmail_draft.py"), b"").unwrap();
+        fs::write(root.join("contracts").join("process_contratti.py"), b"").unwrap();
     }
 }
