@@ -3,6 +3,11 @@ import { FolderOpen, Sparkles } from "lucide-react";
 import { contractAction, gmailReconnectAction, invoiceAction } from "../actions";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { StatusPill } from "../components/StatusBadges";
+import {
+  deliveryModeLabel,
+  deliveryModePromise,
+  deliveryModeReassurance,
+} from "../messages";
 import { AutomationCard, GmailAccessPanel } from "../components/WorkflowCard";
 import type {
   AppPage,
@@ -40,32 +45,34 @@ export function HomePage({
   onOpenPath: (path?: string | null) => void;
 }) {
   const folders = configStatus?.config.folders;
-  const primaryModules = modules.filter((module) =>
-    ["invoices", "gmailDrafts"].includes(module.id),
-  );
-  const hasMainSetupIssue =
-    loading || !configStatus || primaryModules.some((module) => module.status !== "ready");
+  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
+  const safeModeOn = configStatus?.config.safety.dryRunDefault ?? false;
 
   return (
     <div className="space-y-5">
       <section className="rounded-xl border border-white/65 bg-white/55 p-6 shadow-glass backdrop-blur-xl">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
               <Sparkles className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-teal-800">Today</p>
+              <p className="text-sm font-semibold text-brand-800">{timeOfDayGreeting()}</p>
               <h2 className="mt-1 text-3xl font-semibold text-slate-950">
                 {nextAction.title}
               </h2>
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
                 {nextAction.shortMessage}
               </p>
+              {safeModeOn && (
+                <p className="mt-3 inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200">
+                  Safe mode is on — runs do not change real files
+                </p>
+              )}
             </div>
           </div>
           <button
-            className="rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft"
             onClick={() => onNavigate(nextAction.targetPage)}
           >
             {nextAction.buttonLabel}
@@ -80,7 +87,9 @@ export function HomePage({
             <AutomationCard
               title="Invoices"
               action={invoiceAction}
-              description="Prepare PDFs and Gmail drafts for review."
+              description={deliveryModePromise(deliveryMode)}
+              modeChip={deliveryModeLabel(deliveryMode)}
+              reassurance={deliveryModeReassurance(deliveryMode)}
               buttonLabel="Prepare invoice files"
               moduleReadiness={modules.find((module) => module.id === "invoices")}
               workflow={workflowFor(invoiceAction)}
@@ -127,16 +136,18 @@ export function HomePage({
             />
           </div>
 
-          <GmailAccessPanel
-            action={gmailReconnectAction}
-            workflow={workflowFor(gmailReconnectAction)}
-            disabledReason={actionDisabledReason(gmailReconnectAction)}
-            disabled={Boolean(runningCommand)}
-            isRunning={runningCommand === gmailReconnectAction.commandName}
-            buttonLabel="Check Gmail sign-in"
-            moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
-            onRun={() => onRun(gmailReconnectAction)}
-          />
+          {deliveryMode !== "prepareOnly" && (
+            <GmailAccessPanel
+              action={gmailReconnectAction}
+              workflow={workflowFor(gmailReconnectAction)}
+              disabledReason={actionDisabledReason(gmailReconnectAction)}
+              disabled={Boolean(runningCommand)}
+              isRunning={runningCommand === gmailReconnectAction.commandName}
+              buttonLabel="Check Gmail sign-in"
+              moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
+              onRun={() => onRun(gmailReconnectAction)}
+            />
+          )}
 
           <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
             <summary className="cursor-pointer text-sm font-semibold text-slate-800">
@@ -181,11 +192,15 @@ function AttentionBanner({
     );
   }
 
+  const primaryIds =
+    configStatus.config.invoiceDeliveryMode === "prepareOnly"
+      ? ["invoices"]
+      : ["invoices", "gmailDrafts"];
   const primaryIssue = modules.find(
-    (module) => ["invoices", "gmailDrafts"].includes(module.id) && module.status !== "ready",
+    (module) => primaryIds.includes(module.id) && module.status !== "ready",
   );
   const secondaryIssue = modules.find(
-    (module) => !["invoices", "gmailDrafts"].includes(module.id) && module.status !== "ready",
+    (module) => !primaryIds.includes(module.id) && module.status !== "ready",
   );
 
   if (!primaryIssue && !secondaryIssue) {
@@ -224,7 +239,7 @@ function LastRunCard({ summary }: { summary: RunSummary | null }) {
       {summary ? (
         <div className="mt-4 space-y-4">
           <div>
-            <p className="text-sm font-semibold text-teal-800">{summary.automation_name}</p>
+            <p className="text-sm font-semibold text-brand-800">{summary.automation_name}</p>
             <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -242,6 +257,13 @@ function LastRunCard({ summary }: { summary: RunSummary | null }) {
       )}
     </aside>
   );
+}
+
+function timeOfDayGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

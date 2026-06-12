@@ -107,10 +107,21 @@ export type ActivityRecord = {
   technicalSnippet: string[];
 };
 
+export type ClientBranding = {
+  palette: string;
+  logoPath: string;
+  primaryColor: string;
+  accentColor: string;
+  backgroundStyle: string;
+  watermarkEnabled: boolean;
+  watermarkOpacity: number;
+};
+
 export type HubConfig = {
   schemaVersion: number;
   client: {
     displayName: string;
+    branding: ClientBranding;
   };
   invoiceDeliveryMode: InvoiceDeliveryMode;
   automation: {

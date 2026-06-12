@@ -9,6 +9,11 @@ import {
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { PageHeader } from "../components/PageHeader";
 import {
+  deliveryModeLabel,
+  deliveryModePromise,
+  deliveryModeReassurance,
+} from "../messages";
+import {
   ActionButton,
   AutomationCard,
   GmailAccessPanel,
@@ -44,6 +49,7 @@ export function AutomationsPage({
   onNavigate: (page: AppPage) => void;
 }) {
   const folders = configStatus?.config.folders;
+  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const primaryActions = [invoiceAction, contractAction];
   const readyPrimaryActions = primaryActions.filter((action) => !actionDisabledReason(action));
   const blockedPrimaryActions = primaryActions.filter((action) => Boolean(actionDisabledReason(action)));
@@ -52,17 +58,17 @@ export function AutomationsPage({
     <div className="space-y-5">
       <PageHeader title="Automations" eyebrow="Run hotel workflows" />
 
-      <section className="rounded-xl border border-teal-100 bg-teal-50/80 p-5 shadow-glass backdrop-blur-xl">
+      <section className="rounded-xl border border-brand-100 bg-brand-50/80 p-5 shadow-glass backdrop-blur-xl">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-bold text-teal-800">Recommended next</p>
+            <p className="text-sm font-bold text-brand-800">Recommended next</p>
             <h2 className="mt-1 text-2xl font-semibold text-slate-950">{nextAction.title}</h2>
             <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
               {nextAction.shortMessage}
             </p>
           </div>
           <button
-            className="shrink-0 rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+            className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
             onClick={() => onNavigate(nextAction.targetPage)}
           >
             {nextAction.buttonLabel}
@@ -75,7 +81,9 @@ export function AutomationsPage({
           <AutomationCard
             title="Invoices"
             action={invoiceAction}
-            description="Prepare PDFs and create Gmail drafts for review."
+            description={deliveryModePromise(deliveryMode)}
+            modeChip={deliveryModeLabel(deliveryMode)}
+            reassurance={deliveryModeReassurance(deliveryMode)}
             buttonLabel="Prepare invoice files"
             moduleReadiness={modules.find((module) => module.id === "invoices")}
             workflow={workflowFor(invoiceAction)}
@@ -165,7 +173,7 @@ export function AutomationsPage({
                   Copy and read scanned files when contracts need attention.
                 </p>
               </div>
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+              <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
                 <Clock3 className="h-5 w-5" />
               </div>
             </div>
@@ -221,7 +229,7 @@ function BlockedWorkflow({
         </p>
       </div>
       <button
-        className="rounded-md bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+        className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-ink-soft"
         onClick={() => onNavigate("setup")}
       >
         Fix in Setup

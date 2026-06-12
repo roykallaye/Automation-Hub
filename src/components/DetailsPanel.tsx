@@ -23,7 +23,7 @@ export function DetailsPanel({
     <aside className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
             <History className="h-5 w-5" />
           </div>
           <h2 className="text-xl font-semibold text-slate-950">Last run</h2>
@@ -39,7 +39,7 @@ export function DetailsPanel({
       {summary ? (
         <div className="space-y-5">
           <div>
-            <p className="text-sm font-medium text-teal-800">{summary.automation_name}</p>
+            <p className="text-sm font-medium text-brand-800">{summary.automation_name}</p>
             <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
           </div>
 
@@ -73,7 +73,7 @@ export function DetailsPanel({
             <summary className="cursor-pointer text-sm font-semibold text-slate-800">
               Technical details from last run
             </summary>
-            <pre className="mt-3 h-52 overflow-auto rounded-md bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
+            <pre className="mt-3 h-52 overflow-auto rounded-md bg-ink p-3 font-mono text-xs leading-5 text-slate-100">
               {summary.last_output_lines.length
                 ? summary.last_output_lines.join("\n")
                 : "No captured output."}
@@ -99,7 +99,7 @@ export function DetailsPanel({
               onClick={() => onOpenPath(log.path)}
             >
               <span className="font-semibold text-slate-700">{log.label}</span>
-              <FileText className="h-4 w-4 shrink-0 text-teal-700" />
+              <FileText className="h-4 w-4 shrink-0 text-brand-700" />
             </button>
           ))}
         </div>

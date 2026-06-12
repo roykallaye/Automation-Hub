@@ -271,7 +271,11 @@ pub(crate) fn save_setup_config(
         );
     }
 
-    let generated = GeneratedSetup::from_draft(&draft)?;
+    let mut generated = GeneratedSetup::from_draft(&draft)?;
+    // Saving setup must not reset the hotel's visual branding.
+    if let Ok(existing) = config::ensure_config(app) {
+        generated.app_config.client.branding = existing.client.branding;
+    }
     let app_config_path = app_config_path(app)?;
     let automation_config_path =
         PathBuf::from(&generated.app_config.automation.automation_config_path);
@@ -445,6 +449,7 @@ impl GeneratedSetup {
             schema_version: current.schema_version,
             client: ClientConfig {
                 display_name: non_empty_or(&draft.hotel_display_name, "Your Hotel"),
+                branding: crate::config::BrandingConfig::default(),
             },
             invoice_delivery_mode: draft.invoice_delivery_mode.clone(),
             automation: AutomationConfig {

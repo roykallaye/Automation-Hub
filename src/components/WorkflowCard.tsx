@@ -28,7 +28,7 @@ export function GmailAccessPanel({
   return (
     <section className="grid gap-4 rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl md:grid-cols-[1fr_auto] md:items-center">
       <div className="flex items-center gap-4">
-        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
           <KeyRound className="h-6 w-6" />
         </div>
         <div className="min-w-0">
@@ -47,7 +47,7 @@ export function GmailAccessPanel({
         </div>
       </div>
       <button
-        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
+        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-55"
         disabled={blocked}
         onClick={onRun}
         title={disabledReason ?? undefined}
@@ -71,6 +71,8 @@ export function AutomationCard({
   description,
   buttonLabel,
   moduleReadiness,
+  modeChip,
+  reassurance,
 }: {
   title: string;
   action: AutomationAction;
@@ -87,17 +89,26 @@ export function AutomationCard({
   description?: string;
   buttonLabel?: string;
   moduleReadiness?: ModuleReadiness;
+  modeChip?: string;
+  reassurance?: string;
 }) {
   const Icon = action.icon;
   return (
     <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
-            <Icon className="h-5 w-5" />
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
+            <Icon className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
+              {modeChip && (
+                <span className="inline-flex shrink-0 rounded-md bg-brand-50 px-2 py-1 text-[11px] font-bold text-brand-800 ring-1 ring-brand-200">
+                  {modeChip}
+                </span>
+              )}
+            </div>
             {description && (
               <p className="mt-1 text-sm font-medium leading-6 text-slate-600">{description}</p>
             )}
@@ -121,6 +132,9 @@ export function AutomationCard({
         onClick={() => onRun(action)}
         label={buttonLabel}
       />
+      {reassurance && (
+        <p className="mt-2 text-center text-xs font-semibold text-slate-500">{reassurance}</p>
+      )}
       <div className="mt-4 grid grid-cols-2 gap-2">
         {secondaryActions.map((secondary) => (
           <button
@@ -130,7 +144,7 @@ export function AutomationCard({
             onClick={() => onOpenPath(secondary.path)}
             title={secondary.path ? undefined : "Folder is not configured."}
           >
-            <secondary.icon className="h-4 w-4 text-teal-700" />
+            <secondary.icon className="h-4 w-4 text-brand-700" />
             <span>{secondary.label}</span>
           </button>
         ))}
@@ -187,7 +201,7 @@ export function ActionButton({
       className={[
         "inline-flex w-full items-center justify-center gap-3 rounded-md font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55",
         isPrimary
-          ? "min-h-16 bg-slate-950 px-5 text-base text-white hover:bg-slate-800"
+          ? "min-h-16 bg-ink px-5 text-base text-white hover:bg-ink-soft"
           : "min-h-16 border border-white/70 bg-white/65 px-4 text-sm text-slate-800 hover:bg-white",
       ].join(" ")}
       disabled={disabled}

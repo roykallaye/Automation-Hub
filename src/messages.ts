@@ -1,4 +1,30 @@
-import type { ReadinessStatus, WorkflowPreflight } from "./types";
+import type { InvoiceDeliveryMode, ReadinessStatus, WorkflowPreflight } from "./types";
+
+/** Short label for the configured invoice delivery mode. */
+export function deliveryModeLabel(mode?: InvoiceDeliveryMode | null) {
+  if (mode === "prepareOnly") return "Prepare files only";
+  if (mode === "sendAutomatically") return "Send automatically (not available)";
+  return "Create Gmail drafts";
+}
+
+/** One-line promise of what the invoice workflow will do in this mode. */
+export function deliveryModePromise(mode?: InvoiceDeliveryMode | null) {
+  if (mode === "prepareOnly") {
+    return "Prepares invoice files for you to send yourself. Gmail is skipped.";
+  }
+  if (mode === "sendAutomatically") {
+    return "Automatic sending is not available yet. Choose another delivery mode.";
+  }
+  return "Prepares invoice files and creates Gmail drafts for review.";
+}
+
+/** One-line reassurance of what will NOT happen in this mode. */
+export function deliveryModeReassurance(mode?: InvoiceDeliveryMode | null) {
+  if (mode === "prepareOnly") {
+    return "No drafts are created and no emails are sent.";
+  }
+  return "Drafts only — no emails are sent.";
+}
 
 export function readinessLabel(status: ReadinessStatus) {
   switch (status) {

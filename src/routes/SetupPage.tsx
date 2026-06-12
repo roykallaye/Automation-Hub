@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
+import { BrandingPanel } from "../components/BrandingPanel";
 import { PageHeader } from "../components/PageHeader";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupStatusPanel } from "../components/SetupStatusPanel";
@@ -69,29 +70,11 @@ export function SetupPage({
       </PageHeader>
 
       {showWizard ? (
-        <>
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <h2 className="text-lg font-semibold text-slate-950">Guided setup checklist</h2>
-            <div className="mt-4 grid gap-2 md:grid-cols-5">
-              {[
-                "Hotel details entered",
-                "Workspace selected",
-                "Folders created",
-                "Setup saved",
-                "Setup checked",
-              ].map((item) => (
-                <div key={item} className="rounded-md bg-white/65 px-3 py-2 text-sm font-semibold text-slate-700">
-                  {item}
-                </div>
-              ))}
-            </div>
-          </section>
-          <SetupWizard
-            config={configStatus?.config}
-            onClose={() => setShowWizard(false)}
-            onSetupSaved={onRefresh}
-          />
-        </>
+        <SetupWizard
+          config={configStatus?.config}
+          onClose={() => setShowWizard(false)}
+          onSetupSaved={onRefresh}
+        />
       ) : (
         <section
           className={[
@@ -103,7 +86,7 @@ export function SetupPage({
         >
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
                 <Sparkles className="h-6 w-6" />
               </div>
               <div>
@@ -122,7 +105,7 @@ export function SetupPage({
               </div>
             </div>
             <button
-              className="shrink-0 rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+              className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
               onClick={() => setShowWizard(true)}
             >
               {nextAction.targetPage === "setup"
@@ -145,7 +128,7 @@ export function SetupPage({
               </p>
             </div>
             <button
-              className="shrink-0 rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
               onClick={onGoToAutomations}
             >
               Go to Automations
@@ -165,7 +148,7 @@ export function SetupPage({
             </div>
             {scriptsNeedSupport && (
               <button
-                className="shrink-0 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                className="shrink-0 rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-ink-soft"
                 onClick={onGoToSupport}
               >
                 Open Support
@@ -174,6 +157,8 @@ export function SetupPage({
           </div>
         </section>
       )}
+
+      {!showWizard && <BrandingPanel configStatus={configStatus} onSaved={onRefresh} />}
 
       {!showWizard && (
         <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">

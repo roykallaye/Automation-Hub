@@ -30,6 +30,7 @@ export function SupportPage({
   const [installResult, setInstallResult] = useState<ManagedAutomationInstallResult | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [copiedPythonCommand, setCopiedPythonCommand] = useState(false);
+  const [copiedSupportBundle, setCopiedSupportBundle] = useState(false);
   const config = configStatus?.config;
   const automationRoot = config?.automation.automationRootFolder;
   const pythonItem = configStatus?.preflight.items.find((item) => item.key === "pythonExecutable");
@@ -106,8 +107,60 @@ export function SupportPage({
 
         <aside className="space-y-5">
           <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+            <h2 className="text-xl font-semibold text-slate-950">Quick actions</h2>
+            <div className="mt-4 grid gap-2">
+              {[
+                ["Open invoice input folder", config?.folders.invoiceInputFolder],
+                ["Open ready invoices folder", config?.folders.invoiceOutputFolder],
+                ["Open signed contracts folder", config?.folders.contractsOutputFolder],
+              ].map(([label, path]) => (
+                <button
+                  key={label}
+                  className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md border border-white/70 bg-white/65 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!path}
+                  onClick={() => onOpenPath(path)}
+                >
+                  <FolderOpen className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+              <button
+                className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md border border-white/70 bg-white/65 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!configStatus}
+                onClick={async () => {
+                  if (!configStatus) return;
+                  const bundle = {
+                    configPath: configStatus.configPath,
+                    checkedAt: configStatus.preflight.checkedAt,
+                    items: configStatus.preflight.items.map((item) => ({
+                      key: item.key,
+                      status: item.status,
+                      message: item.message,
+                    })),
+                    workflows: configStatus.preflight.workflows.map((workflow) => ({
+                      key: workflow.key,
+                      status: workflow.status,
+                      canRun: workflow.canRun,
+                      message: workflow.message,
+                    })),
+                  };
+                  try {
+                    await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
+                    setCopiedSupportBundle(true);
+                  } catch {
+                    setCopiedSupportBundle(false);
+                  }
+                }}
+              >
+                <Clipboard className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
+                {copiedSupportBundle ? "Copied support details" : "Copy support details"}
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
             <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-brand-800 ring-1 ring-brand-100">
                 <PackageCheck className="h-5 w-5" />
               </div>
               <div>
@@ -124,7 +177,7 @@ export function SupportPage({
               {automationRoot || "Automation scripts folder is not configured."}
             </p>
             <button
-              className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
               disabled={installing}
               onClick={async () => {
                 const confirmed = window.confirm(
@@ -233,16 +286,16 @@ export function SupportPage({
                     }
                   }}
                 >
-                  <Clipboard className="h-4 w-4 text-teal-700" />
+                  <Clipboard className="h-4 w-4 text-brand-700" />
                   {copiedPythonCommand ? "Copied" : "Copy command"}
                 </button>
               </div>
             )}
           </section>
 
-          <section className="rounded-lg border border-teal-100 bg-teal-50/80 p-5 shadow-glass backdrop-blur-xl">
+          <section className="rounded-lg border border-brand-100 bg-brand-50/80 p-5 shadow-glass backdrop-blur-xl">
             <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-teal-800 ring-1 ring-teal-100">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-brand-800 ring-1 ring-brand-100">
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div>
@@ -252,8 +305,8 @@ export function SupportPage({
                 </p>
               </div>
             </div>
-            <div className="mt-4 rounded-md border border-teal-100 bg-white/70 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">
+            <div className="mt-4 rounded-md border border-brand-100 bg-white/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-800">
                 Rehearsal guide
               </p>
               <p className="mt-1 font-mono text-xs text-slate-700">
@@ -325,7 +378,7 @@ export function SupportPage({
                   onClick={() => onOpenPath(log.path)}
                 >
                   <span className="font-semibold text-slate-700">{log.label}</span>
-                  <FileText className="h-4 w-4 shrink-0 text-teal-700" />
+                  <FileText className="h-4 w-4 shrink-0 text-brand-700" />
                 </button>
               ))}
             </div>
@@ -343,7 +396,7 @@ export function SupportPage({
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-white/70 bg-white/65 px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
               onClick={() => onOpenPath(config.folders.invoiceLogFolder)}
             >
-              <FolderOpen className="h-5 w-5 text-teal-700" />
+              <FolderOpen className="h-5 w-5 text-brand-700" />
               Open support log folder
             </button>
           )}

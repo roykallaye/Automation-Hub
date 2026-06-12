@@ -2,10 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  InnPilot design tokens.
+
+  Color tokens are RGB triplets so Tailwind can apply alpha (rgb(var(--x) / a)).
+  Client branding overrides these at runtime via applyBrandingToDocument()
+  in src/branding.ts — components must reference brand-* / ink utilities,
+  never hardcoded palette colors, for hotel theming to work.
+*/
 :root {
+  /* Brand accent scale (default: InnPilot deep teal) */
+  --brand-50: 240 253 250;
+  --brand-100: 204 251 241;
+  --brand-200: 153 246 228;
+  --brand-300: 94 234 212;
+  --brand-700: 15 118 110;
+  --brand-800: 17 94 89;
+  --brand-900: 19 78 74;
+  --brand-950: 4 47 46;
+
+  /* Primary action ("ink") surface */
+  --ink: 2 6 23;
+  --ink-soft: 30 41 59;
+
+  /* App background wash */
+  --app-bg: #eef2f4;
+  --app-bg-from: #f8fafc;
+  --app-bg-via: #e5eeee;
+  --app-bg-to: #f4efe8;
+
+  /* Branded watermark */
+  --watermark-opacity: 0.06;
+
+  /* Motion */
+  --motion-fast: 150ms;
+  --motion-base: 240ms;
+
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
   color: #0f172a;
-  background: #eef2f4;
+  background: var(--app-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -26,5 +61,49 @@ button {
 }
 
 pre {
-  scrollbar-color: rgba(20, 184, 166, 0.8) rgba(15, 23, 42, 0.4);
+  scrollbar-color: rgb(var(--brand-700) / 0.8) rgba(15, 23, 42, 0.4);
+}
+
+/* Accessible, consistent keyboard focus */
+:focus-visible {
+  outline: 2px solid rgb(var(--brand-700));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subtle entrance used for page changes and panels. */
+@keyframes rise-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise-fade var(--motion-base) cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Branded watermark: decorative only, never blocks content. */
+.brand-watermark {
+  position: fixed;
+  right: 2.25rem;
+  bottom: 1.75rem;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+  opacity: var(--watermark-opacity);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

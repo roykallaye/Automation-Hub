@@ -14,7 +14,7 @@ export function SetupStep({
   return (
     <section className="rounded-xl border border-white/65 bg-white/60 p-5 shadow-glass backdrop-blur-xl sm:p-6">
       <div className="mb-6 flex items-start gap-4">
-        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-800 ring-1 ring-teal-100">
+        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
           {icon}
         </div>
         <div>
@@ -42,7 +42,7 @@ export function FieldLabel({
         {label}
         {help && (
           <span
-            className="inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            className="inline-grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-xs font-bold text-brand-800 ring-1 ring-brand-100"
             title={help}
             aria-label={help}
           >
@@ -56,7 +56,7 @@ export function FieldLabel({
 }
 
 export const inputClassName =
-  "w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
+  "w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200";
 
 export const textareaClassName =
-  "min-h-28 w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-teal-200 focus:ring-teal-200";
+  "min-h-28 w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200";

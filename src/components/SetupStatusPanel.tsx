@@ -37,7 +37,7 @@ export function SetupStatusPanel({
           className="inline-flex items-center gap-2 rounded-md border border-white/70 bg-white/65 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
         >
-          <RefreshCw className="h-4 w-4 text-teal-700" />
+          <RefreshCw className="h-4 w-4 text-brand-700" />
           Refresh
         </button>
       </div>

@@ -469,14 +469,14 @@ export function SetupWizard({
           </button>
           {isLast ? (
             <button
-              className="rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
               onClick={onClose}
             >
               Return to setup
             </button>
           ) : (
             <button
-              className="rounded-md bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
               onClick={() => setStepIndex((current) => Math.min(steps.length - 1, current + 1))}
             >
               {isFirst ? "Start setup" : "Next"}
@@ -578,7 +578,10 @@ function ProfileStep({
       helper="These names appear in InnPilot and in draft email text."
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldLabel label="Hotel display name">
+        <FieldLabel
+          label="Hotel display name"
+          help="Shown inside InnPilot and used in prepared email text."
+        >
           <input
             className={inputClassName}
             value={draft.hotelDisplayName}
@@ -586,7 +589,10 @@ function ProfileStep({
             placeholder="Your Hotel"
           />
         </FieldLabel>
-        <FieldLabel label="Email signature name">
+        <FieldLabel
+          label="Email signature name"
+          help="The closing name used in draft email text, e.g. 'Your Hotel Team'."
+        >
           <input
             className={inputClassName}
             value={draft.emailSignatureName}
@@ -692,7 +698,7 @@ function GmailStep({
         />
       </div>
       {draft.invoiceDeliveryMode === "prepareOnly" && (
-        <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+        <p className="mt-4 rounded-md bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-900">
           Gmail setup is optional in this mode. InnPilot will prepare invoice files only.
         </p>
       )}
@@ -702,7 +708,10 @@ function GmailStep({
         </p>
       )}
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldLabel label="Draft subject">
+        <FieldLabel
+          label="Draft subject"
+          help="The subject line used for prepared invoice emails."
+        >
           <input
             className={inputClassName}
             value={draft.gmailSubject}
@@ -710,7 +719,10 @@ function GmailStep({
             placeholder="Invoices - Your Hotel"
           />
         </FieldLabel>
-        <FieldLabel label="CC email">
+        <FieldLabel
+          label="CC email"
+          help="Optional address copied on every prepared invoice email."
+        >
           <input
             className={inputClassName}
             value={draft.ccEmail}
@@ -745,7 +757,7 @@ function GmailStep({
         </div>
       </details>
       {draft.invoiceDeliveryMode === "gmailDrafts" && (
-        <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+        <p className="mt-4 rounded-md bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-900">
           Google sign-in may be needed later. No emails are sent automatically.
         </p>
       )}
@@ -883,7 +895,10 @@ function ContractsStep({
       helper="Choose where scanned files and signed contracts belong."
     >
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldLabel label="Contract year">
+        <FieldLabel
+          label="Contract year"
+          help="Signed contracts are organized under this year's folder."
+        >
           <input
             className={inputClassName}
             value={draft.contractYear}
@@ -1054,11 +1069,19 @@ function ReviewStep({
         />
       </div>
 
-      <details className="mt-5 max-w-full rounded-md bg-slate-950/95 p-4">
-        <summary className="cursor-pointer text-sm font-semibold text-teal-200">
-          Show advanced preview
+      <details className="mt-5 max-w-full rounded-md bg-ink/95 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-brand-200">
+          Technical details for support
         </summary>
-        <pre className="mt-4 max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
+        <button
+          className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/20"
+          type="button"
+          onClick={() => void navigator.clipboard?.writeText(JSON.stringify(preview, null, 2))}
+        >
+          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+          Copy details
+        </button>
+        <pre className="mt-3 max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
           {JSON.stringify(preview, null, 2)}
         </pre>
       </details>
@@ -1139,7 +1162,7 @@ function SetupActionPanel({
           ["4", "Check setup"],
         ].map(([number, label]) => (
           <li key={label} className="rounded-md bg-white/65 px-3 py-2">
-            <span className="mr-2 text-teal-700">{number}.</span>
+            <span className="mr-2 text-brand-700">{number}.</span>
             {label}
           </li>
         ))}
@@ -1204,7 +1227,7 @@ function SetupActionPanel({
                 <Copy className="h-3.5 w-3.5" />
                 Copy details
               </button>
-              <pre className="mt-3 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
+              <pre className="mt-3 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-ink p-3 font-mono text-xs leading-5 text-slate-100">
                 {JSON.stringify(setupResult.details, null, 2)}
               </pre>
             </details>
@@ -1318,7 +1341,7 @@ function ListEditor({
         <div className="flex items-center gap-2">
           <p className="text-sm font-semibold text-slate-800">{label}</p>
           <span
-            className="inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            className="inline-grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-xs font-bold text-brand-800 ring-1 ring-brand-100"
             title={help}
             aria-label={help}
           >
@@ -1384,7 +1407,7 @@ function DeliveryModeCard({
       className={[
         "rounded-lg border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60",
         selected
-          ? "border-teal-300 bg-teal-50 text-teal-950 ring-2 ring-teal-100"
+          ? "border-brand-300 bg-brand-50 text-brand-950 ring-2 ring-brand-100"
           : "border-white/70 bg-white/65 text-slate-800 hover:bg-white",
       ].join(" ")}
       type="button"
@@ -1445,7 +1468,7 @@ function ToggleCard({
         <span className="block text-sm font-semibold text-slate-950">{title}</span>
         {help && (
           <span
-            className="ml-2 inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            className="ml-2 inline-grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-xs font-bold text-brand-800 ring-1 ring-brand-100"
             title={help}
             aria-label={help}
           >
@@ -1455,7 +1478,7 @@ function ToggleCard({
         <span className="mt-1 block text-sm font-medium leading-6 text-slate-600">{text}</span>
       </span>
       <input
-        className="h-5 w-5 accent-teal-700"
+        className="h-5 w-5 accent-brand-700"
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}

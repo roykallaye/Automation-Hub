@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -)",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\rkall\\\\Desktop\\\\Docs\\\\Work\\\\Personal\\\\Automation-Hub\"; cargo fmt --manifest-path src-tauri/Cargo.toml; cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; echo \"fmt-check-exit: $LASTEXITCODE\")",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\rkall\\\\Desktop\\\\Docs\\\\Work\\\\Personal\\\\Automation-Hub\"; npm run build 2>&1 | Select-Object -Last 3; cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; echo \"fmt: $LASTEXITCODE\"; npm run test:rust 2>&1 | Select-String \"test result\" | Select-Object -First 2)"
+    ]
+  }
+}

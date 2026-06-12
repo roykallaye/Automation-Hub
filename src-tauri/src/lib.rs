@@ -1,5 +1,6 @@
 mod activity;
 mod automation_install;
+mod branding;
 mod config;
 mod logs;
 mod paths;
@@ -43,7 +44,9 @@ pub fn run() {
             install_managed_automation_scripts,
             get_activity_history,
             get_activity_detail,
-            open_activity_report
+            open_activity_report,
+            save_client_branding,
+            read_branding_logo
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -82,6 +85,19 @@ fn get_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, Strin
         config_path.to_string_lossy().to_string(),
         config,
     ))
+}
+
+#[tauri::command]
+fn save_client_branding(
+    app: AppHandle,
+    draft: branding::ClientBrandingDraft,
+) -> Result<preflight::AppConfigStatus, String> {
+    branding::save_client_branding(&app, draft)
+}
+
+#[tauri::command]
+fn read_branding_logo(app: AppHandle) -> Result<Option<String>, String> {
+    branding::read_branding_logo(&app)
 }
 
 #[tauri::command]

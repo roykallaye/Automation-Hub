@@ -100,6 +100,7 @@ mod tests {
             schema_version: 2,
             client: ClientConfig {
                 display_name: "Test Hotel".to_string(),
+                branding: crate::config::BrandingConfig::default(),
             },
             invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
             automation: crate::config::AutomationConfig {

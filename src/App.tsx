@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   automationActions,
 } from "./actions";
+import { applyBrandingToDocument } from "./branding";
 import { AppShell } from "./components/AppShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { staffMessage } from "./messages";
@@ -39,6 +40,27 @@ function App() {
   const [notice, setNotice] = useState<string>("Loading setup");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
   const [currentPage, setCurrentPage] = useState<AppPage>("home");
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+
+  const branding = configStatus?.config.client.branding;
+  useEffect(() => {
+    applyBrandingToDocument(branding);
+    let cancelled = false;
+    if (branding?.logoPath) {
+      invoke<string | null>("read_branding_logo")
+        .then((dataUrl) => {
+          if (!cancelled) setLogoDataUrl(dataUrl);
+        })
+        .catch(() => {
+          if (!cancelled) setLogoDataUrl(null);
+        });
+    } else {
+      setLogoDataUrl(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [branding]);
 
   useEffect(() => {
     void refreshConfigStatus();
@@ -229,6 +251,7 @@ function App() {
     <AppShell
       currentPage={currentPage}
       displayName={displayName}
+      logoDataUrl={logoDataUrl}
       status={runningCommand ? "warning" : status}
       statusLabel={runningLabel ?? notice}
       nextAction={nextAction}
@@ -304,6 +327,8 @@ function App() {
       {pendingAction && (
         <ConfirmationModal
           action={pendingAction}
+          deliveryMode={configStatus?.config.invoiceDeliveryMode}
+          safeModeOn={configStatus?.config.safety.dryRunDefault}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => runAction(pendingAction, true)}
         />

@@ -28,7 +28,7 @@ export function StepProgress({
               className={[
                 "flex min-w-fit items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold xl:min-w-0",
                 active
-                  ? "bg-slate-950 text-white"
+                  ? "bg-ink text-white"
                   : complete
                     ? "bg-emerald-50 text-emerald-900"
                     : "bg-white/55 text-slate-600",
@@ -38,7 +38,7 @@ export function StepProgress({
                 className={[
                   "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs",
                   active
-                    ? "bg-teal-200 text-slate-950"
+                    ? "bg-brand-200 text-slate-950"
                     : complete
                       ? "bg-emerald-200 text-emerald-950"
                       : "bg-slate-100 text-slate-600",

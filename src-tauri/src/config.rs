@@ -32,6 +32,96 @@ pub(crate) enum InvoiceDeliveryMode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClientConfig {
     pub(crate) display_name: String,
+    #[serde(default)]
+    pub(crate) branding: BrandingConfig,
+}
+
+/// Per-hotel visual identity. The logo stays local: only its path is stored.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct BrandingConfig {
+    /// One of the built-in palette ids (e.g. "innpilotDefault", "luxuryGold").
+    pub(crate) palette: String,
+    /// Absolute path to a local logo image. Empty means no logo configured.
+    pub(crate) logo_path: String,
+    /// Optional hex override for the brand accent (empty = use palette).
+    pub(crate) primary_color: String,
+    /// Optional hex override for the primary action color (empty = use palette).
+    pub(crate) accent_color: String,
+    /// Background wash style: "soft" (default), "plain", or "warm".
+    pub(crate) background_style: String,
+    pub(crate) watermark_enabled: bool,
+    /// Watermark opacity in percent, clamped to 0..=30 when saved.
+    pub(crate) watermark_opacity: u8,
+}
+
+pub(crate) const MAX_WATERMARK_OPACITY_PERCENT: u8 = 30;
+
+impl Default for BrandingConfig {
+    fn default() -> Self {
+        Self {
+            palette: "innpilotDefault".to_string(),
+            logo_path: String::new(),
+            primary_color: String::new(),
+            accent_color: String::new(),
+            background_style: "soft".to_string(),
+            watermark_enabled: true,
+            watermark_opacity: 6,
+        }
+    }
+}
+
+impl BrandingConfig {
+    pub(crate) fn sanitized(&self) -> Self {
+        let mut branding = self.clone();
+        branding.palette = sanitize_palette(&branding.palette);
+        branding.primary_color = sanitize_hex_color(&branding.primary_color);
+        branding.accent_color = sanitize_hex_color(&branding.accent_color);
+        branding.background_style = sanitize_background_style(&branding.background_style);
+        branding.watermark_opacity = branding
+            .watermark_opacity
+            .min(MAX_WATERMARK_OPACITY_PERCENT);
+        branding.logo_path = branding.logo_path.trim().to_string();
+        branding
+    }
+}
+
+const KNOWN_PALETTES: [&str; 6] = [
+    "innpilotDefault",
+    "coastalHotel",
+    "luxuryGold",
+    "alpineSpa",
+    "modernMinimal",
+    "mediterranean",
+];
+
+fn sanitize_palette(palette: &str) -> String {
+    let trimmed = palette.trim();
+    if KNOWN_PALETTES.contains(&trimmed) {
+        trimmed.to_string()
+    } else {
+        "innpilotDefault".to_string()
+    }
+}
+
+fn sanitize_hex_color(color: &str) -> String {
+    let trimmed = color.trim();
+    let is_hex = trimmed.len() == 7
+        && trimmed.starts_with('#')
+        && trimmed[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if is_hex {
+        trimmed.to_lowercase()
+    } else {
+        String::new()
+    }
+}
+
+fn sanitize_background_style(style: &str) -> String {
+    match style.trim() {
+        "plain" => "plain".to_string(),
+        "warm" => "warm".to_string(),
+        _ => "soft".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -195,6 +285,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
         schema_version: CONFIG_VERSION,
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
+            branding: crate::config::BrandingConfig::default(),
         },
         invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
         automation: default_config().automation,
@@ -254,6 +345,7 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
         schema_version: CONFIG_VERSION,
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
+            branding: crate::config::BrandingConfig::default(),
         },
         invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
         automation: AutomationConfig {
@@ -427,6 +519,87 @@ mod tests {
             config.invoice_delivery_mode,
             InvoiceDeliveryMode::GmailDrafts
         );
+    }
+
+    #[test]
+    fn default_config_includes_default_branding() {
+        let config = default_config();
+
+        assert_eq!(config.client.branding.palette, "innpilotDefault");
+        assert!(config.client.branding.logo_path.is_empty());
+        assert!(config.client.branding.watermark_enabled);
+        assert_eq!(config.client.branding.watermark_opacity, 6);
+        assert_eq!(config.client.branding.background_style, "soft");
+    }
+
+    #[test]
+    fn config_without_branding_is_migrated_with_defaults() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, should_rewrite) = parse_config_with_migration(partial).unwrap();
+
+        assert!(should_rewrite);
+        assert_eq!(config.client.display_name, "Test Hotel");
+        assert_eq!(config.client.branding, BrandingConfig::default());
+    }
+
+    #[test]
+    fn config_with_branding_keeps_saved_values() {
+        let saved = r#"{
+          "schemaVersion": 2,
+          "client": {
+            "displayName": "Test Hotel",
+            "branding": {
+              "palette": "luxuryGold",
+              "logoPath": "C:\\Hotel\\logo.png",
+              "watermarkEnabled": false,
+              "watermarkOpacity": 12
+            }
+          }
+        }"#;
+
+        let (config, _) = parse_config_with_migration(saved).unwrap();
+
+        assert_eq!(config.client.branding.palette, "luxuryGold");
+        assert_eq!(config.client.branding.logo_path, r"C:\Hotel\logo.png");
+        assert!(!config.client.branding.watermark_enabled);
+        assert_eq!(config.client.branding.watermark_opacity, 12);
+    }
+
+    #[test]
+    fn branding_serializes_with_camel_case_keys() {
+        let json = serde_json::to_value(BrandingConfig::default()).unwrap();
+
+        assert!(json.get("logoPath").is_some());
+        assert!(json.get("watermarkEnabled").is_some());
+        assert!(json.get("watermarkOpacity").is_some());
+        assert!(json.get("backgroundStyle").is_some());
+        assert!(json.get("primaryColor").is_some());
+        assert!(json.get("accentColor").is_some());
+    }
+
+    #[test]
+    fn branding_sanitize_clamps_and_validates() {
+        let branding = BrandingConfig {
+            palette: "notARealPalette".to_string(),
+            logo_path: "  C:\\Hotel\\logo.png  ".to_string(),
+            primary_color: "#ZZZZZZ".to_string(),
+            accent_color: "#1A2B3C".to_string(),
+            background_style: "neon".to_string(),
+            watermark_enabled: true,
+            watermark_opacity: 90,
+        }
+        .sanitized();
+
+        assert_eq!(branding.palette, "innpilotDefault");
+        assert_eq!(branding.logo_path, r"C:\Hotel\logo.png");
+        assert_eq!(branding.primary_color, "");
+        assert_eq!(branding.accent_color, "#1a2b3c");
+        assert_eq!(branding.background_style, "soft");
+        assert_eq!(branding.watermark_opacity, MAX_WATERMARK_OPACITY_PERCENT);
     }
 
     #[test]

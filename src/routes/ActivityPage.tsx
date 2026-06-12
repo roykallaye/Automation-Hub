@@ -1,7 +1,17 @@
+import { Clipboard } from "lucide-react";
+import { useState } from "react";
+
 import { DetailsPanel } from "../components/DetailsPanel";
 import { LiveOutputPanel } from "../components/LiveOutputPanel";
 import { PageHeader } from "../components/PageHeader";
-import type { ActivityRecord, ActivityStatus, AppConfigStatus, LatestLog, RunSummary } from "../types";
+import type {
+  ActivityRecord,
+  ActivityStatus,
+  AppConfigStatus,
+  InvoiceDeliveryMode,
+  LatestLog,
+  RunSummary,
+} from "../types";
 import type { NextAction } from "../nextAction";
 
 export function ActivityPage({
@@ -63,6 +73,7 @@ export function ActivityPage({
                   <ActivityCard
                     key={record.id}
                     record={record}
+                    deliveryMode={configStatus?.config.invoiceDeliveryMode}
                     onOpenPath={onOpenPath}
                     onOpenActivityReport={onOpenActivityReport}
                   />
@@ -70,9 +81,10 @@ export function ActivityPage({
               </div>
             ) : (
               <div className="rounded-lg border border-white/70 bg-white/60 p-5">
-                <h3 className="text-lg font-semibold text-slate-950">No activity yet</h3>
+                <h3 className="text-lg font-semibold text-slate-950">No runs yet</h3>
                 <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
-                  Run an automation to see results here.
+                  Finish Setup, then run a safe dry-run. Results appear here with what was
+                  found, what changed, and what was skipped.
                 </p>
               </div>
             )}
@@ -102,22 +114,28 @@ export function ActivityPage({
 
 function ActivityCard({
   record,
+  deliveryMode,
   onOpenPath,
   onOpenActivityReport,
 }: {
   record: ActivityRecord;
+  deliveryMode?: InvoiceDeliveryMode;
   onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
 }) {
   const summary = record.summary;
+  const [copied, setCopied] = useState(false);
+  const isInvoiceRun = record.workflowCommandName === "process_invoices_and_drafts";
+  const touchesGmail = isInvoiceRun || record.workflowCommandName === "reconnect_gmail";
   return (
     <article className="rounded-lg border border-white/70 bg-white/60 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-teal-800">{modeLabel(record.mode)}</p>
+          <p className="text-sm font-semibold text-brand-800">{modeLabel(record.mode)}</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-950">{record.workflowTitle}</h3>
           <p className="mt-1 text-sm font-medium text-slate-600">
             Finished {formatDate(record.finishedAt)}
+            {formatRunDuration(record.startedAt, record.finishedAt)}
           </p>
         </div>
         <ActivityBadge status={record.status} />
@@ -131,7 +149,19 @@ function ActivityCard({
         <Metric label="Issues" value={(summary.failed ?? 0) + (summary.warnings ?? 0)} />
       </div>
 
-      {(record.warnings.length > 0 || record.errors.length > 0 || record.reportPath || record.logPath) && (
+      {touchesGmail && (
+        <p className="mt-3 text-xs font-semibold text-slate-500">
+          {isInvoiceRun && deliveryMode === "prepareOnly"
+            ? "Gmail skipped — Prepare files only mode. No emails were sent."
+            : "No emails were sent automatically."}
+        </p>
+      )}
+
+      {(record.warnings.length > 0 ||
+        record.errors.length > 0 ||
+        record.reportPath ||
+        record.logPath ||
+        record.technicalSnippet.length > 0) && (
         <details className="mt-4">
           <summary className="cursor-pointer text-sm font-semibold text-slate-800">
             Details
@@ -160,12 +190,38 @@ function ActivityCard({
                   Open log
                 </button>
               )}
+              {record.technicalSnippet.length > 0 && (
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(record.technicalSnippet.join("\n"));
+                      setCopied(true);
+                    } catch {
+                      setCopied(false);
+                    }
+                  }}
+                >
+                  <Clipboard className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
+                  {copied ? "Copied" : "Copy technical details"}
+                </button>
+              )}
             </div>
           </div>
         </details>
       )}
     </article>
   );
+}
+
+function formatRunDuration(startedAt: string, finishedAt: string) {
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 1) return " · under a second";
+  if (seconds < 60) return ` · ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return ` · ${minutes}m ${seconds % 60}s`;
 }
 
 function ActivityBadge({ status }: { status: ActivityStatus }) {

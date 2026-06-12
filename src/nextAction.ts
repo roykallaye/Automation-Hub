@@ -101,7 +101,10 @@ export function deriveNextAction({
   const contracts = moduleById(modules, "contracts");
   const ocr = moduleById(modules, "ocr");
 
-  const primaryIssue = [invoices, gmail].find((module) => module && module.status !== "ready");
+  // In "Prepare files only" mode Gmail is skipped, so it must not block the hotel.
+  const gmailIsPrimary = configStatus.config.invoiceDeliveryMode !== "prepareOnly";
+  const primaryModules = gmailIsPrimary ? [invoices, gmail] : [invoices];
+  const primaryIssue = primaryModules.find((module) => module && module.status !== "ready");
   if (primaryIssue) {
     return {
       id: `finish-${primaryIssue.id}`,
