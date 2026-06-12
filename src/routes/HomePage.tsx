@@ -81,7 +81,7 @@ export function HomePage({
               title="Invoices"
               action={invoiceAction}
               description="Prepare PDFs and Gmail drafts for review."
-              buttonLabel="Prepare invoice drafts"
+              buttonLabel="Prepare invoice files"
               moduleReadiness={modules.find((module) => module.id === "invoices")}
               workflow={workflowFor(invoiceAction)}
               runningCommand={runningCommand}
@@ -237,7 +237,7 @@ function LastRunCard({ summary }: { summary: RunSummary | null }) {
         </div>
       ) : (
         <div className="mt-4 rounded-lg bg-white/60 p-4 text-sm font-medium leading-6 text-slate-700">
-          No run yet. Start with invoice drafts or signed contracts when setup is ready.
+          No run yet. Start with invoice files or signed contracts when setup is ready.
         </div>
       )}
     </aside>

@@ -232,6 +232,10 @@ Guided setup is intentionally separate from automation runs:
 
 Guided setup does not process invoices, does not create Gmail drafts, does not send emails, and does not move/delete hotel files. Workflows are still run manually from the Automations page after setup is ready.
 
+Invoice delivery mode controls whether InnPilot prepares invoice files only or also creates Gmail drafts. Existing configs without this field behave like the previous mode: `gmailDrafts`. New guided setup defaults to the recommended draft mode, but setup support can choose `prepareOnly` when the hotel wants to send emails manually. `sendAutomatically` is a future/blocked mode and does not request Gmail send scope.
+
+Invoice filename patterns, scanner filename prefixes, and contract marker text can each contain multiple values. InnPilot matches invoices or scans when any configured value matches, while still accepting older single-value config fields.
+
 Recommended local setup:
 
 ```powershell

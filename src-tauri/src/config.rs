@@ -12,11 +12,20 @@ const CONFIG_VERSION: u32 = 2;
 pub(crate) struct HubConfig {
     pub(crate) schema_version: u32,
     pub(crate) client: ClientConfig,
+    pub(crate) invoice_delivery_mode: InvoiceDeliveryMode,
     pub(crate) automation: AutomationConfig,
     pub(crate) scripts: ScriptPaths,
     pub(crate) folders: FolderPaths,
     pub(crate) gmail: GmailConfig,
     pub(crate) safety: SafetyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum InvoiceDeliveryMode {
+    PrepareOnly,
+    GmailDrafts,
+    SendAutomatically,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -187,6 +196,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
         },
+        invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
         automation: default_config().automation,
         scripts: ScriptPaths {
             invoice_workflow_script: paths.invoice_process_command,
@@ -245,6 +255,7 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
         },
+        invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
         automation: AutomationConfig {
             automation_root_folder: automation_root.to_string_lossy().to_string(),
             automation_config_path: automation_config_path.to_string_lossy().to_string(),
@@ -358,6 +369,10 @@ mod tests {
 
         assert_eq!(config.schema_version, CONFIG_VERSION);
         assert_eq!(config.client.display_name, "Your Hotel");
+        assert_eq!(
+            config.invoice_delivery_mode,
+            InvoiceDeliveryMode::GmailDrafts
+        );
         assert!(config
             .scripts
             .invoice_workflow_script
@@ -408,6 +423,26 @@ mod tests {
             .contains("config.local.json"));
         assert_eq!(config.folders.invoice_output_folder, "C:\\old\\ready");
         assert_eq!(config.gmail.token_path, "C:\\old\\gmail_token.json");
+        assert_eq!(
+            config.invoice_delivery_mode,
+            InvoiceDeliveryMode::GmailDrafts
+        );
+    }
+
+    #[test]
+    fn missing_invoice_delivery_mode_defaults_to_gmail_drafts() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, should_rewrite) = parse_config_with_migration(partial).unwrap();
+
+        assert!(should_rewrite);
+        assert_eq!(
+            config.invoice_delivery_mode,
+            InvoiceDeliveryMode::GmailDrafts
+        );
     }
 
     #[test]

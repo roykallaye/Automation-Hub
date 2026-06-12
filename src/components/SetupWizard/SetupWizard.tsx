@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   Building2,
   CheckCircle2,
+  Copy,
   FileCheck2,
   FolderTree,
   Mail,
@@ -28,6 +29,8 @@ import {
   createRuleId,
   createSetupDraft,
   defaultPathsForWorkspace,
+  managedPythonExecutable,
+  repairConcatenatedAbsolutePath,
   type RecipientRuleDraft,
   type SetupDraft,
   workspaceFolders,
@@ -61,6 +64,14 @@ type PathFieldKey =
   | "ocrTextOutputFolder"
   | "signedContractsOutputFolder";
 
+type SetupAction = "preview" | "initialize" | "save" | "validate";
+
+type SetupCleanupResult = {
+  removed: string[];
+  skipped: string[];
+  failed: string[];
+};
+
 export function SetupWizard({
   config,
   onClose,
@@ -74,6 +85,8 @@ export function SetupWizard({
   const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
   const [setupResult, setSetupResult] = useState<SetupActionResult | null>(null);
   const [setupAction, setSetupAction] = useState<string | null>(null);
+  const [completedActions, setCompletedActions] = useState<SetupAction[]>([]);
+  const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>([]);
   const preview = useMemo(() => buildConfigPreview(draft), [draft]);
   const currentStep = steps[stepIndex];
   const isFirst = stepIndex === 0;
@@ -81,33 +94,36 @@ export function SetupWizard({
 
   function update<K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+    setCompletedActions([]);
+    setSetupResult(null);
   }
 
   function updateWorkspaceBase(nextWorkspace: string) {
+    const repairedWorkspace = repairConcatenatedAbsolutePath(nextWorkspace);
     setDraft((current) => {
       const oldDefaults = defaultPathsForWorkspace(current.workspaceBase, current.contractYear);
-      const nextDefaults = defaultPathsForWorkspace(nextWorkspace, current.contractYear);
+      const nextDefaults = defaultPathsForWorkspace(repairedWorkspace, current.contractYear);
       const defaultManagedFields: (keyof ReturnType<typeof defaultPathsForWorkspace>)[] = [
+        "sharedScanFolder",
         "gmailCredentialsFile",
         "gmailTokenFile",
         "ocrTextOutputFolder",
         "signedContractsOutputFolder",
       ];
-      const hasCustomValues = defaultManagedFields.some(
-        (field) => current[field] && current[field] !== oldDefaults[field],
-      );
-      const shouldRefreshDefaults =
-        !hasCustomValues ||
-        window.confirm(
-          "Update InnPilot's suggested Gmail, scan, and contract paths to match the new workspace folder?",
-        );
+      const refreshedDefaults = Object.fromEntries(
+        defaultManagedFields
+          .filter((field) => !current[field] || current[field] === oldDefaults[field])
+          .map((field) => [field, nextDefaults[field]]),
+      ) as Partial<SetupDraft>;
 
       return {
         ...current,
-        workspaceBase: nextWorkspace,
-        ...(shouldRefreshDefaults ? nextDefaults : {}),
+        workspaceBase: repairedWorkspace,
+        ...refreshedDefaults,
       };
     });
+    setCompletedActions([]);
+    setSetupResult(null);
   }
 
   async function chooseDirectory(field: PathFieldKey) {
@@ -121,7 +137,7 @@ export function SetupWizard({
     if (field === "workspaceBase") {
       updateWorkspaceBase(selectedPath);
     } else {
-      update(field, selectedPath);
+      update(field, repairConcatenatedAbsolutePath(selectedPath) as SetupDraft[typeof field]);
     }
   }
 
@@ -133,7 +149,7 @@ export function SetupWizard({
       filters: [{ name: "JSON files", extensions: ["json"] }],
     });
     const selectedPath = normalizeDialogSelection(selected);
-    if (selectedPath) update(field, selectedPath);
+    if (selectedPath) update(field, repairConcatenatedAbsolutePath(selectedPath) as SetupDraft[typeof field]);
   }
 
   async function chooseTokenFolder() {
@@ -143,7 +159,7 @@ export function SetupWizard({
       defaultPath: draft.gmailTokenFile || draft.workspaceBase,
     });
     const selectedPath = normalizeDialogSelection(selected);
-    if (selectedPath) update("gmailTokenFile", `${selectedPath.replace(/[\\/]+$/g, "")}\\gmail_token.json`);
+    if (selectedPath) update("gmailTokenFile", `${repairConcatenatedAbsolutePath(selectedPath).replace(/[\\/]+$/g, "")}\\gmail_token.json`);
   }
 
   function updateRule(id: string, patch: Partial<RecipientRuleDraft>) {
@@ -175,7 +191,45 @@ export function SetupWizard({
     }));
   }
 
-  async function runSetupAction(action: "preview" | "initialize" | "save" | "validate") {
+  function updateList<K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+    value: string,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].map((item, currentIndex) =>
+        currentIndex === index ? value : item,
+      ),
+    }));
+    setCompletedActions([]);
+    setSetupResult(null);
+  }
+
+  function addListItem<K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    value = "",
+  ) {
+    setDraft((current) => ({ ...current, [key]: [...current[key], value] }));
+    setCompletedActions([]);
+    setSetupResult(null);
+  }
+
+  function removeListItem<K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].length === 1
+        ? current[key]
+        : current[key].filter((_, currentIndex) => currentIndex !== index),
+    }));
+    setCompletedActions([]);
+    setSetupResult(null);
+  }
+
+  async function runSetupAction(action: SetupAction) {
     if (
       (action === "initialize" || action === "save") &&
       !window.confirm(
@@ -198,6 +252,7 @@ export function SetupWizard({
           message: `${result.folderPlan.length} folders checked. ${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"}.`,
           details: result,
         });
+        markActionComplete("preview");
       } else if (action === "initialize") {
         const result = await invoke<WorkspaceInitResult>("initialize_workspace", {
           draft,
@@ -208,14 +263,32 @@ export function SetupWizard({
           (folder) => folder.action === "alreadyExists",
         ).length;
         const failed = result.folders.filter((folder) => folder.action === "failed").length;
+        const invalidPathFailure = result.folders.some((folder) =>
+          folder.message.includes("os error 123") ||
+          folder.message.toLowerCase().includes("invalid path"),
+        );
         setSetupResult({
           kind: failed ? "warning" : "success",
-          title: failed ? "Needs attention" : "Created folders",
+          title: failed
+            ? invalidPathFailure
+              ? "Invalid folder path"
+              : "Needs attention"
+            : "Created folders",
           message: failed
-            ? `${failed} folder${failed === 1 ? "" : "s"} need attention. ${created} created, ${alreadyExists} already existed.`
+            ? invalidPathFailure
+              ? "InnPilot generated an invalid folder path. Please contact setup support."
+              : `${failed} folder${failed === 1 ? "" : "s"} need attention. ${created} created, ${alreadyExists} already existed.`
             : `${created} created, ${alreadyExists} already existed. Existing files were left unchanged.`,
           details: result,
         });
+        if (!failed) {
+          markActionComplete("initialize");
+          setCreatedFolderPaths(
+            result.folders
+              .filter((folder) => folder.action === "created")
+              .map((folder) => folder.path),
+          );
+        }
         await onSetupSaved();
       } else if (action === "save") {
         const result = await invoke<SaveSetupResult>("save_setup_config", {
@@ -234,6 +307,7 @@ export function SetupWizard({
             : `Setup saved. ${result.backups.length} backup${result.backups.length === 1 ? "" : "s"} created.`,
           details: result,
         });
+        markActionComplete("save");
         await onSetupSaved();
       } else {
         const result = await invoke<PreflightReport>("validate_setup");
@@ -248,17 +322,68 @@ export function SetupWizard({
             : "Setup is ready. Go to Automations when you want to run workflows.",
           details: result,
         });
+        if (!blocking) markActionComplete("validate");
         await onSetupSaved();
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const invalidPathMessage =
+        message.includes("os error 123") || message.toLowerCase().includes("invalid path")
+          ? "InnPilot generated an invalid folder path. Please contact setup support."
+          : message;
       setSetupResult({
         kind: "error",
         title: "Setup action could not finish",
+        message: invalidPathMessage,
+        details: invalidPathMessage === message ? undefined : { technicalError: message },
+      });
+    } finally {
+      setSetupAction(null);
+    }
+  }
+
+  async function cleanupCreatedFolders() {
+    if (!createdFolderPaths.length) return;
+    if (
+      !window.confirm(
+        "Remove empty folders created during this setup attempt? InnPilot will skip folders that contain files.",
+      )
+    ) {
+      return;
+    }
+
+    setSetupAction("cleanup");
+    setSetupResult(null);
+    try {
+      const result = await invoke<SetupCleanupResult>("remove_setup_created_empty_folders", {
+        workspaceBase: draft.workspaceBase,
+        paths: createdFolderPaths,
+        confirmed: true,
+      });
+      setSetupResult({
+        kind: result.failed.length ? "warning" : "success",
+        title: result.failed.length ? "Some folders were left unchanged" : "Empty folders removed",
+        message: `${result.removed.length} removed, ${result.skipped.length} skipped, ${result.failed.length} need attention.`,
+        details: result,
+      });
+      setCreatedFolderPaths([]);
+      setCompletedActions((current) => current.filter((action) => action !== "initialize"));
+      await onSetupSaved();
+    } catch (error) {
+      setSetupResult({
+        kind: "error",
+        title: "Cleanup could not finish",
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setSetupAction(null);
     }
+  }
+
+  function markActionComplete(action: SetupAction) {
+    setCompletedActions((current) =>
+      current.includes(action) ? current : [...current, action],
+    );
   }
 
   return (
@@ -293,6 +418,9 @@ export function SetupWizard({
             updateRule={updateRule}
             addRule={addRule}
             removeRule={removeRule}
+            updateList={updateList}
+            addListItem={addListItem}
+            removeListItem={removeListItem}
           />
         )}
         {currentStep.key === "contracts" && (
@@ -302,6 +430,9 @@ export function SetupWizard({
             onChooseSharedScanFolder={() => chooseDirectory("sharedScanFolder")}
             onChooseOcrTextFolder={() => chooseDirectory("ocrTextOutputFolder")}
             onChooseContractsOutputFolder={() => chooseDirectory("signedContractsOutputFolder")}
+            updateList={updateList}
+            addListItem={addListItem}
+            removeListItem={removeListItem}
           />
         )}
         {currentStep.key === "safety" && <SafetyStep draft={draft} update={update} />}
@@ -310,15 +441,21 @@ export function SetupWizard({
             draft={draft}
             preview={preview}
             busyAction={setupAction}
+            completedActions={completedActions}
             setupResult={setupResult}
             onSetupAction={runSetupAction}
+            onCleanupCreatedFolders={cleanupCreatedFolders}
+            createdFolderCount={createdFolderPaths.length}
           />
         )}
         {currentStep.key === "finish" && (
           <FinishStep
             busyAction={setupAction}
+            completedActions={completedActions}
             setupResult={setupResult}
             onSetupAction={runSetupAction}
+            onCleanupCreatedFolders={cleanupCreatedFolders}
+            createdFolderCount={createdFolderPaths.length}
           />
         )}
 
@@ -419,7 +556,7 @@ function WelcomeStep() {
       helper="A few guided steps prepare InnPilot for this hotel."
     >
       <div className="grid gap-3 md:grid-cols-3">
-        <InfoCard title="Drafts only" text="No emails are sent automatically." />
+        <InfoCard title="Email choice" text="Prepare files only or create Gmail drafts for review." />
         <InfoCard title="Confirm first" text="Important actions ask before they run." />
         <InfoCard title="Guided setup" text="Preview, create folders, then save when ready." />
       </div>
@@ -530,9 +667,40 @@ function GmailStep({
   return (
     <SetupStep
       icon={<Mail className="h-6 w-6" />}
-      title="Gmail drafts"
-      helper="InnPilot prepares drafts for review. No emails are sent automatically."
+      title="Invoice emails"
+      helper="Choose how InnPilot should help with invoice email delivery."
     >
+      <div className="grid gap-3 md:grid-cols-3">
+        <DeliveryModeCard
+          title="Prepare files only"
+          text="I will send emails myself."
+          selected={draft.invoiceDeliveryMode === "prepareOnly"}
+          onClick={() => update("invoiceDeliveryMode", "prepareOnly")}
+        />
+        <DeliveryModeCard
+          title="Create Gmail drafts"
+          text="Recommended. Emails are not sent automatically."
+          selected={draft.invoiceDeliveryMode === "gmailDrafts"}
+          onClick={() => update("invoiceDeliveryMode", "gmailDrafts")}
+        />
+        <DeliveryModeCard
+          title="Send automatically"
+          text="Future advanced option. Not available yet."
+          selected={draft.invoiceDeliveryMode === "sendAutomatically"}
+          disabled
+          onClick={() => update("invoiceDeliveryMode", "sendAutomatically")}
+        />
+      </div>
+      {draft.invoiceDeliveryMode === "prepareOnly" && (
+        <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+          Gmail setup is optional in this mode. InnPilot will prepare invoice files only.
+        </p>
+      )}
+      {draft.invoiceDeliveryMode === "sendAutomatically" && (
+        <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+          Automatic sending is not enabled yet. Choose Prepare files only or Create Gmail drafts.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         <FieldLabel label="Draft subject">
           <input
@@ -551,9 +719,9 @@ function GmailStep({
           />
         </FieldLabel>
       </div>
-      <details className="mt-5 rounded-md bg-white/55 p-4">
+      <details className="mt-5 rounded-md bg-white/55 p-4" open={draft.invoiceDeliveryMode === "gmailDrafts"}>
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Gmail file locations
+          Gmail file locations {draft.invoiceDeliveryMode === "prepareOnly" ? "(optional)" : ""}
         </summary>
         <div className="mt-4 grid gap-4">
           <PathField
@@ -576,9 +744,11 @@ function GmailStep({
           />
         </div>
       </details>
-      <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
-        Google sign-in may be needed later.
-      </p>
+      {draft.invoiceDeliveryMode === "gmailDrafts" && (
+        <p className="mt-4 rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+          Google sign-in may be needed later. No emails are sent automatically.
+        </p>
+      )}
     </SetupStep>
   );
 }
@@ -589,12 +759,28 @@ function InvoiceRulesStep({
   updateRule,
   addRule,
   removeRule,
+  updateList,
+  addListItem,
+  removeListItem,
 }: {
   draft: SetupDraft;
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
   updateRule: (id: string, patch: Partial<RecipientRuleDraft>) => void;
   addRule: () => void;
   removeRule: (id: string) => void;
+  updateList: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+    value: string,
+  ) => void;
+  addListItem: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    value?: string,
+  ) => void;
+  removeListItem: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+  ) => void;
 }) {
   return (
     <SetupStep
@@ -602,14 +788,16 @@ function InvoiceRulesStep({
       title="Invoice rules"
       helper="Match invoice text to the right draft recipient."
     >
-      <FieldLabel label="Invoice input pattern">
-        <input
-          className={inputClassName}
-          value={draft.invoiceInputPattern}
-          onChange={(event) => update("invoiceInputPattern", event.target.value)}
-          placeholder="Funzione Pubblica amministrazione*.pdf"
-        />
-      </FieldLabel>
+      <ListEditor
+        label="Invoice file name patterns"
+        help="InnPilot looks for invoice PDFs whose names match any of these patterns."
+        values={draft.invoiceInputPatterns}
+        placeholder="Funzione Pubblica amministrazione*.pdf"
+        addLabel="Add pattern"
+        onChange={(index, value) => updateList("invoiceInputPatterns", index, value)}
+        onAdd={() => addListItem("invoiceInputPatterns", "")}
+        onRemove={(index) => removeListItem("invoiceInputPatterns", index)}
+      />
 
       <div className="mt-5 space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -623,7 +811,10 @@ function InvoiceRulesStep({
         </div>
         {draft.recipientRules.map((rule, index) => (
           <div key={rule.id} className="grid gap-3 rounded-md bg-white/55 p-3 md:grid-cols-[1fr_1fr_auto]">
-            <FieldLabel label={`Match text ${index + 1}`}>
+            <FieldLabel
+              label={`Match text ${index + 1}`}
+              help="If this text appears in the invoice, InnPilot routes it to the matching email."
+            >
               <input
                 className={inputClassName}
                 value={rule.matchText}
@@ -631,7 +822,10 @@ function InvoiceRulesStep({
                 placeholder="company or invoice text"
               />
             </FieldLabel>
-            <FieldLabel label="Recipient email">
+            <FieldLabel
+              label="Recipient email"
+              help="The draft recipient for invoices matching this rule."
+            >
               <input
                 className={inputClassName}
                 value={rule.email}
@@ -659,12 +853,28 @@ function ContractsStep({
   onChooseSharedScanFolder,
   onChooseOcrTextFolder,
   onChooseContractsOutputFolder,
+  updateList,
+  addListItem,
+  removeListItem,
 }: {
   draft: SetupDraft;
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
   onChooseSharedScanFolder: () => void;
   onChooseOcrTextFolder: () => void;
   onChooseContractsOutputFolder: () => void;
+  updateList: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+    value: string,
+  ) => void;
+  addListItem: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    value?: string,
+  ) => void;
+  removeListItem: <K extends "invoiceInputPatterns" | "scannerFilenamePrefixes" | "contractMarkerTexts">(
+    key: K,
+    index: number,
+  ) => void;
 }) {
   return (
     <SetupStep
@@ -681,23 +891,29 @@ function ContractsStep({
             placeholder="2026"
           />
         </FieldLabel>
-        <FieldLabel label="Scanner filename prefix">
-          <input
-            className={inputClassName}
-            value={draft.scannerFilenamePrefix}
-            onChange={(event) => update("scannerFilenamePrefix", event.target.value)}
-            placeholder="Sharp MFP"
-          />
-        </FieldLabel>
       </div>
       <div className="mt-4 grid gap-4">
-        <FieldLabel label="Contract marker text">
-          <textarea
-            className={textareaClassName}
-            value={draft.contractMarkerText}
-            onChange={(event) => update("contractMarkerText", event.target.value)}
-          />
-        </FieldLabel>
+        <ListEditor
+          label="Scanner filename prefixes"
+          help="InnPilot checks scanned PDF names that begin with any of these labels."
+          values={draft.scannerFilenamePrefixes}
+          placeholder="Sharp MFP"
+          addLabel="Add scanner"
+          onChange={(index, value) => updateList("scannerFilenamePrefixes", index, value)}
+          onAdd={() => addListItem("scannerFilenamePrefixes", "")}
+          onRemove={(index) => removeListItem("scannerFilenamePrefixes", index)}
+        />
+        <ListEditor
+          label="Contract marker texts"
+          help="A scan is treated as a contract if its extracted text contains any of these phrases."
+          values={draft.contractMarkerTexts}
+          placeholder="Oggetto: Contratto di lavoro subordinato a tempo determinato"
+          addLabel="Add marker"
+          multiline
+          onChange={(index, value) => updateList("contractMarkerTexts", index, value)}
+          onAdd={() => addListItem("contractMarkerTexts", "")}
+          onRemove={(index) => removeListItem("contractMarkerTexts", index)}
+        />
         <PathField
           label="Shared scan folder"
           value={draft.sharedScanFolder}
@@ -739,21 +955,49 @@ function SafetyStep({
       helper="Keep first runs cautious and support output private."
     >
       <div className="grid gap-3">
+        <div className="rounded-lg border border-white/65 bg-white/65 p-4">
+          <FieldLabel
+            label="Python used by automations"
+            help="Setup support can point InnPilot to the managed Python installed for automation checks."
+          >
+            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+              <input
+                className={inputClassName}
+                value={draft.pythonExecutable}
+                onChange={(event) => update("pythonExecutable", event.target.value)}
+                placeholder={managedPythonExecutable()}
+              />
+              <button
+                className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                type="button"
+                onClick={() => update("pythonExecutable", managedPythonExecutable())}
+              >
+                Use managed Python
+              </button>
+            </div>
+            <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+              Recommended: {managedPythonExecutable()}
+            </p>
+          </FieldLabel>
+        </div>
         <ToggleCard
           title="Safe mode"
           text="Safe mode lets you test workflows without changing real files."
+          help="Keep this on for rehearsal and first checks. Dry runs do not move/delete files or create Gmail drafts."
           checked={draft.safeMode}
           onChange={(checked) => update("safeMode", checked)}
         />
         <ToggleCard
           title="Archive originals"
           text="Original invoices can be archived before they leave the input folder."
+          help="In real runs, successful original invoice PDFs are kept in an archive instead of being deleted."
           checked={draft.archiveOriginals}
           onChange={(checked) => update("archiveOriginals", checked)}
         />
         <ToggleCard
           title="Hide personal details in support output"
           text="Support output should avoid exposing guest or employee details where possible."
+          help="Keeps support messages more private when logs or reports are shown."
           checked={draft.redactLogs}
           onChange={(checked) => update("redactLogs", checked)}
         />
@@ -766,14 +1010,20 @@ function ReviewStep({
   draft,
   preview,
   busyAction,
+  completedActions,
   setupResult,
   onSetupAction,
+  onCleanupCreatedFolders,
+  createdFolderCount,
 }: {
   draft: SetupDraft;
   preview: ReturnType<typeof buildConfigPreview>;
   busyAction: string | null;
+  completedActions: SetupAction[];
   setupResult: SetupActionResult | null;
-  onSetupAction: (action: "preview" | "initialize" | "save" | "validate") => void;
+  onSetupAction: (action: SetupAction) => void;
+  onCleanupCreatedFolders: () => void;
+  createdFolderCount: number;
 }) {
   const filledRules = draft.recipientRules.filter(
     (rule) => rule.matchText.trim() || rule.email.trim(),
@@ -787,9 +1037,13 @@ function ReviewStep({
       <div className="grid gap-3 md:grid-cols-2">
         <SummaryCard title="Hotel" value={draft.hotelDisplayName || "Not set"} />
         <SummaryCard title="Workspace" value={draft.workspaceBase || "Not set"} />
-        <SummaryCard title="Gmail drafts" value="Drafts only. No automatic sending." />
-        <SummaryCard title="Invoice rules" value={`${filledRules.length} rule${filledRules.length === 1 ? "" : "s"}`} />
+        <SummaryCard title="Invoice delivery" value={deliveryModeSummary(draft.invoiceDeliveryMode)} />
+        <SummaryCard
+          title="Invoice rules"
+          value={`${filledRules.length} recipient rule${filledRules.length === 1 ? "" : "s"}, ${draft.invoiceInputPatterns.filter((pattern) => pattern.trim()).length} file pattern${draft.invoiceInputPatterns.filter((pattern) => pattern.trim()).length === 1 ? "" : "s"}`}
+        />
         <SummaryCard title="Contract year" value={draft.contractYear || "Not set"} />
+        <SummaryCard title="Python" value={draft.pythonExecutable || "Not set"} />
         <SummaryCard
           title="Safety"
           value={[
@@ -800,19 +1054,22 @@ function ReviewStep({
         />
       </div>
 
-      <details className="mt-5 rounded-md bg-slate-950/95 p-4">
+      <details className="mt-5 max-w-full rounded-md bg-slate-950/95 p-4">
         <summary className="cursor-pointer text-sm font-semibold text-teal-200">
           Show advanced preview
         </summary>
-        <pre className="mt-4 max-h-96 overflow-auto rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
+        <pre className="mt-4 max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
           {JSON.stringify(preview, null, 2)}
         </pre>
       </details>
 
       <SetupActionPanel
         busyAction={busyAction}
+        completedActions={completedActions}
         setupResult={setupResult}
         onSetupAction={onSetupAction}
+        onCleanupCreatedFolders={onCleanupCreatedFolders}
+        createdFolderCount={createdFolderCount}
       />
     </SetupStep>
   );
@@ -820,12 +1077,18 @@ function ReviewStep({
 
 function FinishStep({
   busyAction,
+  completedActions,
   setupResult,
   onSetupAction,
+  onCleanupCreatedFolders,
+  createdFolderCount,
 }: {
   busyAction: string | null;
+  completedActions: SetupAction[];
   setupResult: SetupActionResult | null;
-  onSetupAction: (action: "preview" | "initialize" | "save" | "validate") => void;
+  onSetupAction: (action: SetupAction) => void;
+  onCleanupCreatedFolders: () => void;
+  createdFolderCount: number;
 }) {
   return (
     <SetupStep
@@ -838,8 +1101,11 @@ function FinishStep({
       </div>
       <SetupActionPanel
         busyAction={busyAction}
+        completedActions={completedActions}
         setupResult={setupResult}
         onSetupAction={onSetupAction}
+        onCleanupCreatedFolders={onCleanupCreatedFolders}
+        createdFolderCount={createdFolderCount}
       />
     </SetupStep>
   );
@@ -847,15 +1113,37 @@ function FinishStep({
 
 function SetupActionPanel({
   busyAction,
+  completedActions,
   setupResult,
   onSetupAction,
+  onCleanupCreatedFolders,
+  createdFolderCount,
 }: {
   busyAction: string | null;
+  completedActions: SetupAction[];
   setupResult: SetupActionResult | null;
-  onSetupAction: (action: "preview" | "initialize" | "save" | "validate") => void;
+  onSetupAction: (action: SetupAction) => void;
+  onCleanupCreatedFolders: () => void;
+  createdFolderCount: number;
 }) {
+  const hasPreview = completedActions.includes("preview");
+  const hasInitialize = completedActions.includes("initialize");
+  const hasSave = completedActions.includes("save");
   return (
     <div className="mt-5 rounded-lg bg-white/60 p-4">
+      <ol className="mb-4 grid gap-2 text-sm font-semibold text-slate-700 md:grid-cols-4">
+        {[
+          ["1", "Preview setup"],
+          ["2", "Create folders"],
+          ["3", "Save setup"],
+          ["4", "Check setup"],
+        ].map(([number, label]) => (
+          <li key={label} className="rounded-md bg-white/65 px-3 py-2">
+            <span className="mr-2 text-teal-700">{number}.</span>
+            {label}
+          </li>
+        ))}
+      </ol>
       <div className="grid gap-3 md:grid-cols-4">
         <SetupActionButton
           label="Preview setup"
@@ -866,22 +1154,32 @@ function SetupActionPanel({
         <SetupActionButton
           label="Create folders"
           busy={busyAction === "initialize"}
-          disabled={Boolean(busyAction)}
+          disabled={Boolean(busyAction) || !hasPreview}
           onClick={() => onSetupAction("initialize")}
         />
         <SetupActionButton
           label="Save setup"
           busy={busyAction === "save"}
-          disabled={Boolean(busyAction)}
+          disabled={Boolean(busyAction) || !hasInitialize}
           onClick={() => onSetupAction("save")}
         />
         <SetupActionButton
           label="Check setup"
           busy={busyAction === "validate"}
-          disabled={Boolean(busyAction)}
+          disabled={Boolean(busyAction) || !hasSave}
           onClick={() => onSetupAction("validate")}
         />
       </div>
+      {createdFolderCount > 0 && (
+        <button
+          className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={Boolean(busyAction)}
+          onClick={onCleanupCreatedFolders}
+          type="button"
+        >
+          Remove empty folders created by this setup
+        </button>
+      )}
       {setupResult && (
         <div
           className={[
@@ -897,8 +1195,16 @@ function SetupActionPanel({
           <p className="mt-1 font-medium">{setupResult.message}</p>
           {setupResult.details !== undefined && (
             <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-bold">Show advanced details</summary>
-              <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
+              <summary className="cursor-pointer text-xs font-bold">Technical details for support</summary>
+              <button
+                className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/20"
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(JSON.stringify(setupResult.details, null, 2))}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy details
+              </button>
+              <pre className="mt-3 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
                 {JSON.stringify(setupResult.details, null, 2)}
               </pre>
             </details>
@@ -950,12 +1256,12 @@ function PathField({
 }) {
   const status = pathStatus(value);
   return (
-    <FieldLabel label={label}>
+    <FieldLabel label={label} help={hint}>
       <div className="grid gap-2 md:grid-cols-[1fr_auto]">
         <input
           className={inputClassName}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onChange(repairConcatenatedAbsolutePath(event.target.value))}
           placeholder={placeholder}
         />
         <button
@@ -982,6 +1288,112 @@ function PathField({
         <span className="text-xs font-medium leading-5 text-slate-600">{hint}</span>
       </div>
     </FieldLabel>
+  );
+}
+
+function ListEditor({
+  label,
+  help,
+  values,
+  placeholder,
+  addLabel,
+  multiline = false,
+  onChange,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  help: string;
+  values: string[];
+  placeholder: string;
+  addLabel: string;
+  multiline?: boolean;
+  onChange: (index: number, value: string) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-white/65 bg-white/55 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-slate-800">{label}</p>
+          <span
+            className="inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            title={help}
+            aria-label={help}
+          >
+            ?
+          </span>
+        </div>
+        <button
+          className="rounded-md border border-white/70 bg-white/65 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+          type="button"
+          onClick={onAdd}
+        >
+          {addLabel}
+        </button>
+      </div>
+      <div className="space-y-2">
+        {values.map((value, index) => (
+          <div key={index} className="grid gap-2 md:grid-cols-[1fr_auto]">
+            {multiline ? (
+              <textarea
+                className={textareaClassName}
+                value={value}
+                onChange={(event) => onChange(index, event.target.value)}
+                placeholder={placeholder}
+              />
+            ) : (
+              <input
+                className={inputClassName}
+                value={value}
+                onChange={(event) => onChange(index, event.target.value)}
+                placeholder={placeholder}
+              />
+            )}
+            <button
+              className="rounded-md border border-white/70 bg-white/65 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 md:self-start"
+              disabled={values.length === 1}
+              type="button"
+              onClick={() => onRemove(index)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DeliveryModeCard({
+  title,
+  text,
+  selected,
+  disabled = false,
+  onClick,
+}: {
+  title: string;
+  text: string;
+  selected: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={[
+        "rounded-lg border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60",
+        selected
+          ? "border-teal-300 bg-teal-50 text-teal-950 ring-2 ring-teal-100"
+          : "border-white/70 bg-white/65 text-slate-800 hover:bg-white",
+      ].join(" ")}
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <span className="block text-sm font-semibold">{title}</span>
+      <span className="mt-2 block text-sm font-medium leading-5 opacity-80">{text}</span>
+    </button>
   );
 }
 
@@ -1017,11 +1429,13 @@ function InfoCard({ title, text }: { title: string; text: string }) {
 function ToggleCard({
   title,
   text,
+  help,
   checked,
   onChange,
 }: {
   title: string;
   text: string;
+  help?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
@@ -1029,6 +1443,15 @@ function ToggleCard({
     <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-white/65 bg-white/65 p-4">
       <span>
         <span className="block text-sm font-semibold text-slate-950">{title}</span>
+        {help && (
+          <span
+            className="ml-2 inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            title={help}
+            aria-label={help}
+          >
+            ?
+          </span>
+        )}
         <span className="mt-1 block text-sm font-medium leading-6 text-slate-600">{text}</span>
       </span>
       <input
@@ -1048,4 +1471,10 @@ function SummaryCard({ title, value }: { title: string; value: string }) {
       <p className="mt-2 break-words text-sm font-semibold leading-6 text-slate-900">{value}</p>
     </div>
   );
+}
+
+function deliveryModeSummary(mode: SetupDraft["invoiceDeliveryMode"]) {
+  if (mode === "prepareOnly") return "Prepare files only. Emails are sent manually.";
+  if (mode === "sendAutomatically") return "Send automatically is not available yet.";
+  return "Create Gmail drafts. No automatic sending.";
 }

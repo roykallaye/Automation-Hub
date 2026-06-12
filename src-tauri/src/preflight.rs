@@ -1,4 +1,4 @@
-use crate::config::HubConfig;
+use crate::config::{HubConfig, InvoiceDeliveryMode};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -174,6 +174,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
         gmail_credentials_file_check(config),
         token_check("gmailTokenPath", "Gmail token", &config.gmail.token_path),
         token_parent_folder_check(&config.gmail.token_path),
+        invoice_delivery_mode_check(&config.invoice_delivery_mode),
         profile_check(&config.client.display_name),
     ];
     items.extend(automation_alignment_checks(config));
@@ -588,6 +589,43 @@ fn profile_check(display_name: &str) -> PreflightItem {
             readable: None,
             writable: None,
         }
+    }
+}
+
+fn invoice_delivery_mode_check(mode: &InvoiceDeliveryMode) -> PreflightItem {
+    match mode {
+        InvoiceDeliveryMode::PrepareOnly => PreflightItem {
+            key: "invoiceDeliveryMode".to_string(),
+            label: "Invoice delivery mode".to_string(),
+            path: None,
+            item_type: "config".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "InnPilot will prepare invoice files only. Gmail is not required.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        InvoiceDeliveryMode::GmailDrafts => PreflightItem {
+            key: "invoiceDeliveryMode".to_string(),
+            label: "Invoice delivery mode".to_string(),
+            path: None,
+            item_type: "config".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "InnPilot will create Gmail drafts. No emails are sent automatically."
+                .to_string(),
+            readable: None,
+            writable: None,
+        },
+        InvoiceDeliveryMode::SendAutomatically => PreflightItem {
+            key: "invoiceDeliveryMode".to_string(),
+            label: "Invoice delivery mode".to_string(),
+            path: None,
+            item_type: "config".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message: "Automatic email sending is not enabled yet. Choose Prepare files only or Create Gmail drafts."
+                .to_string(),
+            readable: None,
+            writable: None,
+        },
     }
 }
 
@@ -1181,7 +1219,7 @@ fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
             path: None,
             item_type: "credentials".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Choose the Gmail credentials file. Gmail sign-in can be completed after credentials are selected."
+            message: "Choose the Gmail credentials file, or switch invoice delivery to Prepare files only."
                 .to_string(),
             readable: None,
             writable: None,
@@ -1196,7 +1234,7 @@ fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
             path: Some(credentials_path.to_string()),
             item_type: "credentials".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Gmail credentials file not found. Choose the Gmail credentials file."
+            message: "Gmail credentials file not found. Choose the Gmail credentials file, or switch invoice delivery to Prepare files only."
                 .to_string(),
             readable: None,
             writable: None,
@@ -1308,23 +1346,31 @@ fn workflow_preflight(
     items: &[PreflightItem],
     _dependencies: &[PreflightItem],
 ) -> Vec<WorkflowPreflight> {
+    let invoice_uses_gmail = config.invoice_delivery_mode == InvoiceDeliveryMode::GmailDrafts;
     let invoice_needs_python = is_python_script(&config.scripts.invoice_workflow_script)
-        || is_python_script(&config.scripts.gmail_draft_script);
+        || (invoice_uses_gmail && is_python_script(&config.scripts.gmail_draft_script));
     let gmail_needs_python = is_python_script(&config.scripts.gmail_draft_script);
     let contracts_needs_python = is_python_script(&config.scripts.contract_processing_script);
-    let invoice_checks = with_python_config(
-        &[
-            "invoiceWorkflowScript",
-            "gmailDraftScript",
-            "invoiceInputFolder",
-            "invoiceOutputFolder",
-            "invoiceLogFolder",
-            "gmailCredentialsFile",
-            "gmailTokenFolder",
-            "gmailTokenAlignment",
-        ],
-        invoice_needs_python,
-    );
+    let invoice_base_checks = [
+        "invoiceWorkflowScript",
+        "invoiceInputFolder",
+        "invoiceOutputFolder",
+        "invoiceLogFolder",
+        "invoiceDeliveryMode",
+    ];
+    let invoice_gmail_checks = [
+        "gmailDraftScript",
+        "gmailCredentialsFile",
+        "gmailTokenFolder",
+        "gmailTokenAlignment",
+    ];
+    let invoice_checks = if invoice_uses_gmail {
+        let mut checks = invoice_base_checks.to_vec();
+        checks.extend(invoice_gmail_checks);
+        with_python_config(&checks, invoice_needs_python)
+    } else {
+        with_python_config(&invoice_base_checks, invoice_needs_python)
+    };
     let gmail_checks = with_python_config(
         &[
             "gmailDraftScript",
@@ -1512,7 +1558,8 @@ fn can_write_to_folder(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::config::{
-        ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig, ScriptPaths,
+        ClientConfig, FolderPaths, GmailConfig, HubConfig, InvoiceDeliveryMode, SafetyConfig,
+        ScriptPaths,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1695,6 +1742,53 @@ mod tests {
     }
 
     #[test]
+    fn prepare_only_invoice_mode_does_not_require_gmail_credentials() {
+        let mut config = config_with_temp_paths();
+        config.invoice_delivery_mode = InvoiceDeliveryMode::PrepareOnly;
+        write_automation_config(&config, None, Some(""), None);
+
+        let report = build_preflight_report(&config);
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+        let gmail = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "gmailDraftsWorkflow")
+            .unwrap();
+
+        assert!(invoice.can_run);
+        assert!(!invoice
+            .check_keys
+            .contains(&"gmailCredentialsFile".to_string()));
+        assert!(!gmail.can_run);
+    }
+
+    #[test]
+    fn send_automatically_invoice_mode_is_blocked() {
+        let mut config = config_with_temp_paths();
+        config.invoice_delivery_mode = InvoiceDeliveryMode::SendAutomatically;
+
+        let report = build_preflight_report(&config);
+        let mode = report
+            .items
+            .iter()
+            .find(|item| item.key == "invoiceDeliveryMode")
+            .unwrap();
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert_eq!(mode.status, ReadinessStatus::PermissionProblem);
+        assert!(!invoice.can_run);
+        assert!(mode.message.contains("not enabled yet"));
+    }
+
+    #[test]
     fn missing_gmail_credentials_file_is_reported() {
         let config = config_with_temp_paths();
         let missing_credentials = Path::new(&config.gmail.token_path)
@@ -1849,6 +1943,7 @@ mod tests {
             client: ClientConfig {
                 display_name: "Test Hotel".to_string(),
             },
+            invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
             automation: crate::config::AutomationConfig {
                 automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: scripts

@@ -31,7 +31,8 @@ fn normalize_for_compare(path: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig, ScriptPaths,
+        ClientConfig, FolderPaths, GmailConfig, HubConfig, InvoiceDeliveryMode, SafetyConfig,
+        ScriptPaths,
     };
     use std::{
         fs,
@@ -100,6 +101,7 @@ mod tests {
             client: ClientConfig {
                 display_name: "Test Hotel".to_string(),
             },
+            invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
             automation: crate::config::AutomationConfig {
                 automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: scripts

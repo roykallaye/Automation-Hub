@@ -37,6 +37,11 @@ export type ModuleReadinessId =
   | "contracts"
   | "support";
 
+export type InvoiceDeliveryMode =
+  | "prepareOnly"
+  | "gmailDrafts"
+  | "sendAutomatically";
+
 export type ModuleReadiness = {
   id: ModuleReadinessId;
   title: string;
@@ -107,6 +112,7 @@ export type HubConfig = {
   client: {
     displayName: string;
   };
+  invoiceDeliveryMode: InvoiceDeliveryMode;
   automation: {
     automationRootFolder: string;
     automationConfigPath: string;

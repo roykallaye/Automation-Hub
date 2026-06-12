@@ -260,10 +260,16 @@ fn command_steps(
     );
 
     match command_name {
-        "process_invoices_and_drafts" => Ok((
-            "Process Invoices & Create Gmail Drafts",
-            vec![invoice, gmail],
-        )),
+        "process_invoices_and_drafts" => {
+            if config.invoice_delivery_mode == config::InvoiceDeliveryMode::PrepareOnly {
+                Ok(("Prepare Invoice Files", vec![invoice]))
+            } else {
+                Ok((
+                    "Process Invoices & Create Gmail Drafts",
+                    vec![invoice, gmail],
+                ))
+            }
+        }
         "reconnect_gmail" => Ok(("Reconnect Gmail", vec![reset_gmail, gmail])),
         "copy_scansioni" => Ok(("Copy Scansioni", vec![copy_scansioni])),
         "ocr_preprocessing" => Ok(("Run OCR Preprocessing", vec![ocr])),
@@ -498,8 +504,8 @@ fn push_tail(output_tail: &mut VecDeque<String>, line: String) {
 mod tests {
     use super::*;
     use crate::config::{
-        AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig,
-        ScriptPaths,
+        AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig, InvoiceDeliveryMode,
+        SafetyConfig, ScriptPaths,
     };
     use std::{
         fs,
@@ -550,6 +556,23 @@ mod tests {
             assert!(step.args.contains(&"--config".to_string()));
             assert!(step.args.contains(&"--dry-run".to_string()));
         }
+    }
+
+    #[test]
+    fn prepare_only_invoice_mode_skips_gmail_draft_step() {
+        let root = temp_root("prepare_only_steps");
+        let mut config = config_with_fake_workspace(&root);
+        config.invoice_delivery_mode = config::InvoiceDeliveryMode::PrepareOnly;
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let (title, steps) =
+            command_steps("process_invoices_and_drafts", &config, Some(&reports_dir)).unwrap();
+
+        assert_eq!(title, "Prepare Invoice Files");
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].name, "Process invoice PDFs");
+        assert!(steps[0].args.contains(&"--dry-run".to_string()));
+        assert!(steps[0].args.contains(&"--json-report".to_string()));
     }
 
     #[test]
@@ -644,6 +667,7 @@ mod tests {
             client: ClientConfig {
                 display_name: "Fake Hotel".to_string(),
             },
+            invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
             automation: AutomationConfig {
                 automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: root

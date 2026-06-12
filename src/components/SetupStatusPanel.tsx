@@ -67,7 +67,7 @@ export function SetupStatusPanel({
           <ReadinessBadge status={configAlignment.status} />
         </div>
       )}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {workflows.map((workflow) => (
           <div key={workflow.key} className="rounded-md bg-white/60 p-3">
             <div className="mb-2 flex items-center justify-between gap-3">

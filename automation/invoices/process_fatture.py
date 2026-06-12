@@ -12,6 +12,7 @@ from shared.config import (  # noqa: E402
     ConfigError,
     config_bool,
     config_path,
+    config_str_list,
     config_str,
     load_config,
     recipient_rules,
@@ -26,8 +27,10 @@ OUTPUT_DIR = ROOT / "Output_ProntoInvio"
 ARCHIVE_DIR = ROOT / "Archivio"
 LOG_DIR = ROOT / "Log"
 INPUT_GLOB = "Funzione Pubblica amministrazione*.pdf"
+INPUT_GLOBS = [INPUT_GLOB]
 EMAIL_SIGNATURE_NAME = "Your Hotel"
 ARCHIVE_SUCCESSFUL_ORIGINALS = True
+DELIVERY_MODE = "gmailDrafts"
 
 RUN_TS = datetime.now().strftime("%Y-%m-%d_%H%M%S")
 ARCHIVE_RUN_DIR = ARCHIVE_DIR / RUN_TS
@@ -95,7 +98,7 @@ def parse_args() -> argparse.Namespace:
 
 def configure_run(args: argparse.Namespace) -> None:
     global INPUT_DIR, OUTPUT_DIR, ARCHIVE_DIR, LOG_DIR, ARCHIVE_RUN_DIR, LOG_FILE, REPORT_FILE
-    global COMMITTENTE_EMAIL_RULES, INPUT_GLOB, EMAIL_SIGNATURE_NAME, ARCHIVE_SUCCESSFUL_ORIGINALS
+    global COMMITTENTE_EMAIL_RULES, INPUT_GLOB, INPUT_GLOBS, EMAIL_SIGNATURE_NAME, ARCHIVE_SUCCESSFUL_ORIGINALS, DELIVERY_MODE
 
     config = {}
     config_base = None
@@ -107,7 +110,9 @@ def configure_run(args: argparse.Namespace) -> None:
     OUTPUT_DIR = config_path(config, "paths", "invoiceOutputDir", OUTPUT_DIR, config_base)
     ARCHIVE_DIR = config_path(config, "paths", "invoiceArchiveDir", ARCHIVE_DIR, config_base)
     LOG_DIR = config_path(config, "paths", "invoiceLogDir", LOG_DIR, config_base)
-    INPUT_GLOB = config_str(config, "invoice", "inputGlob", INPUT_GLOB)
+    INPUT_GLOBS = config_str_list(config, "invoice", "inputGlobs", "inputGlob", INPUT_GLOBS)
+    INPUT_GLOB = INPUT_GLOBS[0]
+    DELIVERY_MODE = config_str(config, "invoice", "deliveryMode", DELIVERY_MODE)
     EMAIL_SIGNATURE_NAME = config_str(
         config,
         "client",
@@ -352,6 +357,15 @@ def collect_groups_by_email(processed_files: list[dict]) -> dict:
     return groups
 
 
+def collect_input_pdfs() -> list[Path]:
+    matches: dict[str, Path] = {}
+    for pattern in INPUT_GLOBS:
+        for path in INPUT_DIR.glob(pattern):
+            key = str(path.resolve() if path.exists() else path)
+            matches.setdefault(key, path)
+    return sorted(matches.values(), key=lambda path: path.name.lower())
+
+
 def invoice_report_item(result: dict) -> dict:
     item = {
         "sourcePath": result.get("input_pdf") or result.get("input_pdf_original_deleted"),
@@ -387,14 +401,14 @@ def main(args: argparse.Namespace | None = None):
     configure_run(args)
     started_at = now_iso()
     dry_run = args.dry_run
-    input_pdfs = sorted(INPUT_DIR.glob(INPUT_GLOB))
+    input_pdfs = collect_input_pdfs()
 
     log("=== START process fatture ===")
     log(f"Mode: {'DRY RUN' if dry_run else 'EXECUTE'}")
     log(f"Input folder: {INPUT_DIR}")
     log(f"Output folder: {OUTPUT_DIR}")
     log(f"Archive folder: {ARCHIVE_DIR}")
-    log(f"Input PDFs found for '{INPUT_GLOB}': {len(input_pdfs)}")
+    log(f"Input PDFs found for {INPUT_GLOBS}: {len(input_pdfs)}")
 
     if not input_pdfs:
         report = {
@@ -423,13 +437,18 @@ def main(args: argparse.Namespace | None = None):
                 "inputFolder": str(INPUT_DIR),
                 "outputFolder": str(OUTPUT_DIR),
                 "archiveFolder": str(ARCHIVE_RUN_DIR),
+                "deliveryMode": DELIVERY_MODE,
+                "gmailSkippedByMode": DELIVERY_MODE == "prepareOnly",
                 "recipientGroups": {},
             },
         }
         write_report(REPORT_FILE, report)
 
         log("No new input invoices found. Output_ProntoInvio was left unchanged.")
-        log("Gmail draft skipped because no new invoices were processed.")
+        if DELIVERY_MODE == "prepareOnly":
+            log("Gmail draft step skipped because invoice delivery mode is prepareOnly.")
+        else:
+            log("Gmail draft skipped because no new invoices were processed.")
         log("=== SUMMARY ===")
         log("PDFs found: 0")
         log("Processed OK: 0")
@@ -679,6 +698,8 @@ def main(args: argparse.Namespace | None = None):
             "inputFolder": str(INPUT_DIR),
             "outputFolder": str(OUTPUT_DIR),
             "archiveFolder": str(ARCHIVE_RUN_DIR),
+            "deliveryMode": DELIVERY_MODE,
+            "gmailSkippedByMode": DELIVERY_MODE == "prepareOnly",
             "recipientGroups": groups_by_email,
         },
     }

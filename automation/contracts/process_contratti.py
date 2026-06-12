@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.config import (  # noqa: E402
     ConfigError,
     config_path,
+    config_str_list,
     config_str,
     config_value,
     load_config,
@@ -27,7 +28,9 @@ LOG_DIR = Path(r"C:\InnPilot\workspace\Contracts\Logs")
 OCR_TEXT_DIR = Path(r"C:\InnPilot\workspace\Scans\TextOutput")
 
 FILE_PREFIX = "Sharp MFP"
+FILE_PREFIXES = [FILE_PREFIX]
 CONTRACT_MARKER = "Oggetto: Contratto di lavoro subordinato a tempo determinato"
+CONTRACT_MARKERS = [CONTRACT_MARKER]
 
 
 def setup_logging(log_dir: Path) -> Path:
@@ -81,9 +84,10 @@ def normalize_for_search(text: str) -> str:
 
 def contains_contract_marker(text: str) -> bool:
     normalized_text = normalize_for_search(text)
-    normalized_marker = normalize_for_search(CONTRACT_MARKER)
-    if normalized_marker in normalized_text:
-        return True
+    for marker in CONTRACT_MARKERS:
+        normalized_marker = normalize_for_search(marker)
+        if normalized_marker and normalized_marker in normalized_text:
+            return True
 
     flexible_marker = re.compile(
         r"oggetto\s*:?\s*contratto\s+di\s+lavoro\s+subordinato\s+a\s+tempo\s+determinato",
@@ -142,7 +146,7 @@ def matching_pdfs(input_dir: Path) -> list[Path]:
             continue
         if path.suffix.lower() != ".pdf":
             continue
-        if not path.name.startswith(FILE_PREFIX):
+        if not any(path.name.startswith(prefix) for prefix in FILE_PREFIXES):
             continue
         files.append(path)
     return sorted(files, key=lambda item: item.name.lower())
@@ -506,7 +510,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def configure_args(args: argparse.Namespace) -> argparse.Namespace:
-    global FILE_PREFIX, CONTRACT_MARKER
+    global FILE_PREFIX, FILE_PREFIXES, CONTRACT_MARKER, CONTRACT_MARKERS
 
     config = {}
     config_base = None
@@ -545,8 +549,22 @@ def configure_args(args: argparse.Namespace) -> argparse.Namespace:
         OCR_TEXT_DIR,
         config_base,
     )
-    FILE_PREFIX = config_str(config, "contracts", "scannerFilePrefix", FILE_PREFIX)
-    CONTRACT_MARKER = config_str(config, "contracts", "contractMarker", CONTRACT_MARKER)
+    FILE_PREFIXES = config_str_list(
+        config,
+        "contracts",
+        "scannerFilePrefixes",
+        "scannerFilePrefix",
+        FILE_PREFIXES,
+    )
+    FILE_PREFIX = FILE_PREFIXES[0]
+    CONTRACT_MARKERS = config_str_list(
+        config,
+        "contracts",
+        "contractMarkers",
+        "contractMarker",
+        CONTRACT_MARKERS,
+    )
+    CONTRACT_MARKER = CONTRACT_MARKERS[0]
     return args
 
 

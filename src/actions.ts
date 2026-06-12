@@ -3,14 +3,14 @@ import { Copy, KeyRound, Play, ScanText, ShieldCheck } from "lucide-react";
 import type { AutomationAction } from "./types";
 
 export const invoiceAction: AutomationAction = {
-  label: "Process invoices & create Gmail drafts",
+  label: "Prepare invoice files",
   commandName: "process_invoices_and_drafts",
   workflowKey: "invoiceWorkflow",
   icon: Play,
   requiresConfirmation: true,
   confirmationTitle: "Process invoices?",
   confirmationMessage:
-    "InnPilot will process invoice files and create Gmail drafts. No emails will be sent automatically.",
+    "InnPilot will process invoice files. If Gmail drafts are enabled, no emails will be sent automatically.",
 };
 
 export const contractAction: AutomationAction = {

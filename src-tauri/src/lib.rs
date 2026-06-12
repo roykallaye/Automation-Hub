@@ -37,6 +37,7 @@ pub fn run() {
             validate_configuration,
             preview_setup,
             initialize_workspace,
+            remove_setup_created_empty_folders,
             save_setup_config,
             validate_setup,
             install_managed_automation_scripts,
@@ -100,6 +101,15 @@ fn initialize_workspace(
     confirmed: Option<bool>,
 ) -> Result<setup::WorkspaceInitResult, String> {
     setup::initialize_workspace(draft, confirmed.unwrap_or(false))
+}
+
+#[tauri::command]
+fn remove_setup_created_empty_folders(
+    workspace_base: String,
+    paths: Vec<String>,
+    confirmed: Option<bool>,
+) -> Result<setup::SetupCleanupResult, String> {
+    setup::remove_setup_created_empty_folders(workspace_base, paths, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]

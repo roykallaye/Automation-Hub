@@ -1,5 +1,5 @@
 import type { SetupDraft } from "./setupDraft";
-import { joinWorkspace } from "./setupDraft";
+import { joinWorkspace, resolveWorkspacePath } from "./setupDraft";
 
 export function buildConfigPreview(draft: SetupDraft) {
   const invoiceInput = joinWorkspace(draft.workspaceBase, "Invoices", "Input");
@@ -7,10 +7,25 @@ export function buildConfigPreview(draft: SetupDraft) {
   const invoiceArchive = joinWorkspace(draft.workspaceBase, "Invoices", "Archive");
   const invoiceLogs = joinWorkspace(draft.workspaceBase, "Invoices", "Logs");
   const scansCache = joinWorkspace(draft.workspaceBase, "Scans", "IncomingCache");
-  const scansText = draft.ocrTextOutputFolder || joinWorkspace(draft.workspaceBase, "Scans", "TextOutput");
-  const contractOutput =
-    draft.signedContractsOutputFolder ||
-    joinWorkspace(draft.workspaceBase, "Contracts", draft.contractYear || "2026", "Signed");
+  const sharedScanFolder = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.sharedScanFolder,
+    "Scans",
+    "IncomingCache",
+  );
+  const scansText = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.ocrTextOutputFolder,
+    "Scans",
+    "TextOutput",
+  );
+  const contractOutput = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.signedContractsOutputFolder,
+    "Contracts",
+    draft.contractYear || "2026",
+    "Signed",
+  );
   const contractLogs = joinWorkspace(draft.workspaceBase, "Contracts", "Logs");
 
   return {
@@ -18,17 +33,18 @@ export function buildConfigPreview(draft: SetupDraft) {
       client: {
         displayName: draft.hotelDisplayName,
       },
+      invoiceDeliveryMode: draft.invoiceDeliveryMode,
       automation: {
         automationRootFolder: "C:\\InnPilot\\automation",
         automationConfigPath: joinWorkspace(draft.workspaceBase, "automation", "config.local.json"),
-        pythonExecutable: "python",
+        pythonExecutable: draft.pythonExecutable,
       },
       folders: {
         invoiceInputFolder: invoiceInput,
         invoiceOutputFolder: invoiceOutput,
         invoiceArchiveFolder: invoiceArchive,
         invoiceLogFolder: invoiceLogs,
-        scansioniNetworkShare: draft.sharedScanFolder,
+        scansioniNetworkShare: sharedScanFolder,
         scansioniLocalCacheFolder: scansCache,
         ocrTextOutputFolder: scansText,
         contractsOutputFolder: contractOutput,
@@ -56,7 +72,7 @@ export function buildConfigPreview(draft: SetupDraft) {
         gmailCredentialsFile: draft.gmailCredentialsFile,
         gmailTokenFile: draft.gmailTokenFile,
         contractInputShortcut: "",
-        contractInputDir: draft.sharedScanFolder,
+        contractInputDir: sharedScanFolder,
         contractDestinationDir: contractOutput,
         contractOcrTextDir: scansText,
         contractLogDir: contractLogs,
@@ -66,7 +82,9 @@ export function buildConfigPreview(draft: SetupDraft) {
         ccEmail: draft.ccEmail,
       },
       invoice: {
-        inputGlob: draft.invoiceInputPattern,
+        deliveryMode: draft.invoiceDeliveryMode,
+        inputGlob: draft.invoiceInputPatterns[0] || "Funzione Pubblica amministrazione*.pdf",
+        inputGlobs: draft.invoiceInputPatterns.filter((pattern) => pattern.trim()),
         recipientRules: draft.recipientRules
           .filter((rule) => rule.matchText.trim() || rule.email.trim())
           .map((rule) => ({
@@ -75,8 +93,10 @@ export function buildConfigPreview(draft: SetupDraft) {
           })),
       },
       contracts: {
-        scannerFilePrefix: draft.scannerFilenamePrefix,
-        contractMarker: draft.contractMarkerText,
+        scannerFilePrefix: draft.scannerFilenamePrefixes[0] || "Sharp MFP",
+        scannerFilePrefixes: draft.scannerFilenamePrefixes.filter((prefix) => prefix.trim()),
+        contractMarker: draft.contractMarkerTexts[0] || "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+        contractMarkers: draft.contractMarkerTexts.filter((marker) => marker.trim()),
         year: draft.contractYear,
       },
       safety: {

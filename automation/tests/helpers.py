@@ -92,13 +92,22 @@ class InnPilotWorkspace:
             },
             "invoice": {
                 "inputGlob": "Funzione Pubblica amministrazione*.pdf",
+                "inputGlobs": [
+                    "Funzione Pubblica amministrazione*.pdf",
+                    "Booking*.pdf",
+                ],
                 "recipientRules": [
                     {"match": "eurotours", "email": "test@example.com"},
                 ],
             },
             "contracts": {
                 "scannerFilePrefix": "Sharp MFP",
+                "scannerFilePrefixes": ["Sharp MFP", "Canon"],
                 "contractMarker": "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+                "contractMarkers": [
+                    "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+                    "Contratto fixture alternativo",
+                ],
                 "year": "2026",
             },
             "safety": {

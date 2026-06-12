@@ -1,7 +1,7 @@
 use crate::{
     config::{
-        self, AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig, SafetyConfig,
-        ScriptPaths,
+        self, AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig,
+        InvoiceDeliveryMode, SafetyConfig, ScriptPaths,
     },
     preflight,
 };
@@ -19,15 +19,34 @@ pub(crate) struct SetupDraft {
     hotel_display_name: String,
     email_signature_name: String,
     workspace_base: String,
+    #[serde(default)]
+    python_executable: String,
+    #[serde(default = "default_invoice_delivery_mode")]
+    invoice_delivery_mode: InvoiceDeliveryMode,
     gmail_subject: String,
     cc_email: String,
     gmail_credentials_file: String,
     gmail_token_file: String,
-    invoice_input_pattern: String,
+    #[serde(
+        default,
+        alias = "invoiceInputPattern",
+        deserialize_with = "deserialize_string_list"
+    )]
+    invoice_input_patterns: Vec<String>,
     recipient_rules: Vec<RecipientRuleDraft>,
     contract_year: String,
-    scanner_filename_prefix: String,
-    contract_marker_text: String,
+    #[serde(
+        default,
+        alias = "scannerFilenamePrefix",
+        deserialize_with = "deserialize_string_list"
+    )]
+    scanner_filename_prefixes: Vec<String>,
+    #[serde(
+        default,
+        alias = "contractMarkerText",
+        deserialize_with = "deserialize_string_list"
+    )]
+    contract_marker_texts: Vec<String>,
     shared_scan_folder: String,
     ocr_text_output_folder: String,
     signed_contracts_output_folder: String,
@@ -78,6 +97,14 @@ pub(crate) enum FolderPlanStatus {
 pub(crate) struct WorkspaceInitResult {
     folders: Vec<FolderActionResult>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetupCleanupResult {
+    removed: Vec<String>,
+    skipped: Vec<String>,
+    failed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,6 +203,62 @@ pub(crate) fn initialize_workspace(
     })
 }
 
+pub(crate) fn remove_setup_created_empty_folders(
+    workspace_base: String,
+    paths: Vec<String>,
+    confirmed: bool,
+) -> Result<SetupCleanupResult, String> {
+    if !confirmed {
+        return Err(
+            "This setup action needs confirmation before InnPilot can remove empty folders."
+                .to_string(),
+        );
+    }
+
+    let workspace = clean_path(&workspace_base)?;
+    validate_workspace_base(&workspace)?;
+    let mut ordered_paths = paths
+        .into_iter()
+        .map(|path| PathBuf::from(path.trim()))
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect::<Vec<_>>();
+    ordered_paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+
+    let mut removed = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+
+    for path in ordered_paths {
+        let path_text = path.to_string_lossy().to_string();
+        if !path_starts_with(&path, &workspace) {
+            skipped.push(format!("{path_text} - outside the selected workspace"));
+            continue;
+        }
+        if !path.exists() {
+            skipped.push(format!("{path_text} - already missing"));
+            continue;
+        }
+        if !path.is_dir() {
+            skipped.push(format!("{path_text} - not a folder"));
+            continue;
+        }
+        if folder_has_entries(&path) {
+            skipped.push(format!("{path_text} - contains files or folders"));
+            continue;
+        }
+        match fs::remove_dir(&path) {
+            Ok(()) => removed.push(path_text),
+            Err(error) => failed.push(format!("{path_text} - {error}")),
+        }
+    }
+
+    Ok(SetupCleanupResult {
+        removed,
+        skipped,
+        failed,
+    })
+}
+
 pub(crate) fn save_setup_config(
     app: &AppHandle,
     draft: SetupDraft,
@@ -271,17 +354,28 @@ impl GeneratedSetup {
         let support_diagnostics = workspace_base.join("Support").join("Diagnostics");
         let automation_config_folder = workspace_base.join("automation");
 
-        let ocr_text_output =
-            optional_path_or_default(&draft.ocr_text_output_folder, default_scans_text.clone())?;
-        let signed_contracts_output = optional_path_or_default(
+        let ocr_text_output = setup_path_or_default(
+            &workspace_base,
+            &draft.ocr_text_output_folder,
+            default_scans_text.clone(),
+        )?;
+        let signed_contracts_output = setup_path_or_default(
+            &workspace_base,
             &draft.signed_contracts_output_folder,
             contracts_output_default.clone(),
         )?;
-        let gmail_token_file = optional_path_or_default(
+        let shared_scan_folder = setup_path_or_default(
+            &workspace_base,
+            &draft.shared_scan_folder,
+            scans_cache.clone(),
+        )?;
+        let gmail_token_file = setup_path_or_default(
+            &workspace_base,
             &draft.gmail_token_file,
             gmail_token_folder.join("gmail_token.json"),
         )?;
-        let gmail_credentials_file = optional_path_or_default(
+        let gmail_credentials_file = setup_path_or_default(
+            &workspace_base,
             &draft.gmail_credentials_file,
             gmail_credentials_folder.join("gmail_credentials.json"),
         )?;
@@ -317,11 +411,11 @@ impl GeneratedSetup {
             },
             FolderSpec {
                 label: "Scans/TextOutput",
-                path: default_scans_text,
+                path: ocr_text_output.clone(),
             },
             FolderSpec {
                 label: "Contracts/<year>/Signed",
-                path: contracts_output_default,
+                path: signed_contracts_output.clone(),
             },
             FolderSpec {
                 label: "Contracts/Logs",
@@ -338,10 +432,11 @@ impl GeneratedSetup {
         ];
 
         for spec in &folder_specs {
-            validate_child_path(&workspace_base, &spec.path)?;
+            validate_setup_folder_path(&workspace_base, &spec.path)?;
         }
 
         let current = config::default_config();
+        let python_executable = setup_python_executable(&draft.python_executable, &current);
         let automation_config_path = automation_config_folder.join("config.local.json");
         let automation_root = PathBuf::from(&current.automation.automation_root_folder);
         let canonical_scripts = config::canonical_script_paths(&automation_root);
@@ -351,10 +446,11 @@ impl GeneratedSetup {
             client: ClientConfig {
                 display_name: non_empty_or(&draft.hotel_display_name, "Your Hotel"),
             },
+            invoice_delivery_mode: draft.invoice_delivery_mode.clone(),
             automation: AutomationConfig {
                 automation_root_folder: current.automation.automation_root_folder,
                 automation_config_path: automation_config_path.to_string_lossy().to_string(),
-                python_executable: current.automation.python_executable,
+                python_executable,
             },
             scripts: ScriptPaths {
                 invoice_workflow_script: canonical_scripts.invoice_workflow_script,
@@ -368,7 +464,7 @@ impl GeneratedSetup {
                 invoice_output_folder: invoice_output.to_string_lossy().to_string(),
                 invoice_archive_folder: invoice_archive.to_string_lossy().to_string(),
                 invoice_log_folder: invoice_logs.to_string_lossy().to_string(),
-                scansioni_network_share: draft.shared_scan_folder.trim().to_string(),
+                scansioni_network_share: shared_scan_folder.to_string_lossy().to_string(),
                 scansioni_local_cache_folder: scans_cache.to_string_lossy().to_string(),
                 ocr_text_output_folder: ocr_text_output.to_string_lossy().to_string(),
                 contracts_output_folder: signed_contracts_output.to_string_lossy().to_string(),
@@ -396,6 +492,29 @@ impl GeneratedSetup {
             })
             .collect::<Vec<_>>();
 
+        let invoice_input_patterns = normalized_list_or_default(
+            &draft.invoice_input_patterns,
+            "Funzione Pubblica amministrazione*.pdf",
+        );
+        let scanner_filename_prefixes =
+            normalized_list_or_default(&draft.scanner_filename_prefixes, "Sharp MFP");
+        let contract_marker_texts = normalized_list_or_default(
+            &draft.contract_marker_texts,
+            "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+        );
+        let first_invoice_input_pattern = invoice_input_patterns
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Funzione Pubblica amministrazione*.pdf".to_string());
+        let first_scanner_filename_prefix = scanner_filename_prefixes
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Sharp MFP".to_string());
+        let first_contract_marker_text =
+            contract_marker_texts.first().cloned().unwrap_or_else(|| {
+                "Oggetto: Contratto di lavoro subordinato a tempo determinato".to_string()
+            });
+
         let automation_config = serde_json::json!({
             "client": {
                 "displayName": non_empty_or(&draft.hotel_display_name, "Your Hotel"),
@@ -409,7 +528,7 @@ impl GeneratedSetup {
                 "gmailCredentialsFile": gmail_credentials_file.to_string_lossy().to_string(),
                 "gmailTokenFile": app_config.gmail.token_path,
                 "contractInputShortcut": "",
-                "contractInputDir": draft.shared_scan_folder.trim(),
+                "contractInputDir": app_config.folders.scansioni_network_share,
                 "contractDestinationDir": app_config.folders.contracts_output_folder,
                 "contractOcrTextDir": app_config.folders.ocr_text_output_folder,
                 "contractLogDir": app_config.folders.contract_log_folder,
@@ -419,12 +538,16 @@ impl GeneratedSetup {
                 "ccEmail": draft.cc_email.trim(),
             },
             "invoice": {
-                "inputGlob": non_empty_or(&draft.invoice_input_pattern, "Funzione Pubblica amministrazione*.pdf"),
+                "deliveryMode": draft.invoice_delivery_mode,
+                "inputGlob": first_invoice_input_pattern,
+                "inputGlobs": invoice_input_patterns,
                 "recipientRules": recipient_rules,
             },
             "contracts": {
-                "scannerFilePrefix": draft.scanner_filename_prefix.trim(),
-                "contractMarker": draft.contract_marker_text.trim(),
+                "scannerFilePrefix": first_scanner_filename_prefix,
+                "scannerFilePrefixes": scanner_filename_prefixes,
+                "contractMarker": first_contract_marker_text,
+                "contractMarkers": contract_marker_texts,
                 "year": year,
             },
             "safety": {
@@ -569,15 +692,48 @@ fn clean_path(path: &str) -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("Choose a workspace folder before continuing.".to_string());
     }
-    Ok(PathBuf::from(trimmed))
+    Ok(PathBuf::from(repair_concatenated_absolute_path(trimmed)))
 }
 
-fn optional_path_or_default(value: &str, default: PathBuf) -> Result<PathBuf, String> {
-    if value.trim().is_empty() {
-        Ok(default)
-    } else {
-        Ok(PathBuf::from(value.trim()))
+fn setup_path_or_default(
+    workspace_base: &Path,
+    value: &str,
+    default: PathBuf,
+) -> Result<PathBuf, String> {
+    let repaired = repair_concatenated_absolute_path(value.trim());
+    let trimmed = repaired.as_str();
+    if trimmed.is_empty() {
+        return Ok(default);
     }
+
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() || looks_like_windows_absolute(trimmed) {
+        return Ok(path);
+    }
+
+    Ok(workspace_base.join(path))
+}
+
+fn repair_concatenated_absolute_path(value: &str) -> String {
+    let bytes = value.as_bytes();
+    for index in 1..bytes.len().saturating_sub(2) {
+        if bytes[index].is_ascii_alphabetic()
+            && bytes[index + 1] == b':'
+            && (bytes[index + 2] == b'\\' || bytes[index + 2] == b'/')
+        {
+            return value[index..].to_string();
+        }
+    }
+    value.to_string()
+}
+
+fn looks_like_windows_absolute(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (bytes.len() >= 3
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+        && bytes[0].is_ascii_alphabetic())
+        || value.starts_with(r"\\")
 }
 
 fn validate_workspace_base(path: &Path) -> Result<(), String> {
@@ -618,15 +774,32 @@ fn validate_workspace_base(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_child_path(workspace: &Path, child: &Path) -> Result<(), String> {
-    let workspace = normalize_path(workspace);
-    let child = normalize_path(child);
-    if !child.starts_with(&format!("{workspace}\\")) {
-        return Err(
-            "InnPilot workspace folders must stay inside the selected workspace.".to_string(),
-        );
+fn validate_setup_folder_path(workspace: &Path, child: &Path) -> Result<(), String> {
+    if !path_starts_with(child, workspace) {
+        validate_not_dangerous_path(child)?;
     }
     Ok(())
+}
+
+fn validate_not_dangerous_path(path: &Path) -> Result<(), String> {
+    let normalized = normalize_path(path);
+    let dangerous_exact = [
+        r"c:",
+        r"c:\",
+        r"c:\windows",
+        r"c:\program files",
+        r"c:\program files (x86)",
+    ];
+    if dangerous_exact.iter().any(|danger| normalized == *danger) {
+        return Err("Choose a normal setup folder, not a Windows system folder.".to_string());
+    }
+    Ok(())
+}
+
+fn path_starts_with(path: &Path, parent: &Path) -> bool {
+    let parent = normalize_path(parent);
+    let child = normalize_path(path);
+    child == parent || child.starts_with(&format!("{parent}\\"))
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -655,6 +828,56 @@ fn non_empty_or(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+fn normalized_list_or_default(values: &[String], fallback: &str) -> Vec<String> {
+    let mut normalized = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        normalized.push(fallback.to_string());
+    }
+    normalized
+}
+
+fn setup_python_executable(value: &str, current: &HubConfig) -> String {
+    let trimmed = value.trim();
+    if !trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    let managed = PathBuf::from(r"C:\InnPilot\.venv\Scripts\python.exe");
+    if managed.is_file() {
+        return managed.to_string_lossy().to_string();
+    }
+    current.automation.python_executable.clone()
+}
+
+fn default_invoice_delivery_mode() -> InvoiceDeliveryMode {
+    InvoiceDeliveryMode::GmailDrafts
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(Vec::new()),
+        serde_json::Value::String(value) => Ok(vec![value]),
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(|value| match value {
+                serde_json::Value::String(text) => Ok(text),
+                _ => Err(serde::de::Error::custom("expected a list of strings")),
+            })
+            .collect(),
+        _ => Err(serde::de::Error::custom(
+            "expected a string or list of strings",
+        )),
     }
 }
 
@@ -693,6 +916,136 @@ mod tests {
     }
 
     #[test]
+    fn relative_child_folder_fields_are_resolved_under_workspace() {
+        let root = temp_root("relative_children");
+        let mut draft = draft_for_root(&root);
+        draft.ocr_text_output_folder = "Scans\\CustomText".to_string();
+        draft.signed_contracts_output_folder = "Contracts\\2026\\CustomSigned".to_string();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.folders.ocr_text_output_folder,
+            root.join("Scans").join("CustomText").to_string_lossy()
+        );
+        assert_eq!(
+            generated.app_config.folders.contracts_output_folder,
+            root.join("Contracts")
+                .join("2026")
+                .join("CustomSigned")
+                .to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn absolute_child_folder_fields_are_preserved() {
+        let root = temp_root("absolute_children");
+        let mut draft = draft_for_root(&root);
+        let custom_text = temp_root("absolute_text");
+        let custom_contracts = temp_root("absolute_contracts");
+        draft.ocr_text_output_folder = custom_text.to_string_lossy().to_string();
+        draft.signed_contracts_output_folder = custom_contracts.to_string_lossy().to_string();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.folders.ocr_text_output_folder,
+            custom_text.to_string_lossy()
+        );
+        assert_eq!(
+            generated.app_config.folders.contracts_output_folder,
+            custom_contracts.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn workspace_is_not_concatenated_with_absolute_child_path() {
+        let root = temp_root("no_concat_workspace");
+        let mut draft = draft_for_root(&root);
+        let absolute = root
+            .join("Scans")
+            .join("TextOutput")
+            .to_string_lossy()
+            .to_string();
+        draft.ocr_text_output_folder = absolute.clone();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.folders.ocr_text_output_folder,
+            absolute
+        );
+        assert!(!generated
+            .app_config
+            .folders
+            .ocr_text_output_folder
+            .contains(r"C:\InnPilot\workspaceC:\"));
+    }
+
+    #[test]
+    fn concatenated_workspace_absolute_path_is_repaired_before_generation() {
+        let root = temp_root("repaired_workspace");
+        let mut draft = draft_for_root(&root);
+        draft.workspace_base = format!(r"C:\InnPilot\workspace{}", root.to_string_lossy());
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(generated.workspace_base, root);
+        assert!(!generated
+            .app_config
+            .folders
+            .invoice_input_folder
+            .contains(r"C:\InnPilot\workspaceC:\"));
+    }
+
+    #[test]
+    fn initialize_succeeds_in_fake_temp_workspace() {
+        let root = temp_root("initialize_fake_workspace");
+        let mut draft = draft_for_root(&root);
+        draft.ocr_text_output_folder = root
+            .join("Scans")
+            .join("TextOutput")
+            .to_string_lossy()
+            .to_string();
+
+        let result = initialize_workspace(draft, true).unwrap();
+
+        assert!(root.join("Scans").join("TextOutput").is_dir());
+        assert!(root.join("Contracts").join("2026").join("Signed").is_dir());
+        assert!(result
+            .folders
+            .iter()
+            .any(|folder| folder.path == root.join("Scans").join("TextOutput").to_string_lossy()));
+    }
+
+    #[test]
+    fn remove_setup_created_empty_folders_only_removes_empty_workspace_folders() {
+        let root = temp_root("cleanup");
+        let keep = root.join("Invoices").join("Input");
+        let remove = root.join("Support").join("Diagnostics");
+        fs::create_dir_all(&keep).unwrap();
+        fs::create_dir_all(&remove).unwrap();
+        fs::write(keep.join("keep.txt"), b"keep").unwrap();
+
+        let result = remove_setup_created_empty_folders(
+            root.to_string_lossy().to_string(),
+            vec![
+                keep.to_string_lossy().to_string(),
+                remove.to_string_lossy().to_string(),
+                temp_root("outside").to_string_lossy().to_string(),
+            ],
+            true,
+        )
+        .unwrap();
+
+        assert!(remove.starts_with(&root));
+        assert!(!remove.exists());
+        assert!(keep.exists());
+        assert_eq!(result.removed.len(), 1);
+        assert_eq!(result.skipped.len(), 2);
+    }
+
+    #[test]
     fn initialize_does_not_delete_existing_files() {
         let root = temp_root("existing");
         let input = root.join("Invoices").join("Input");
@@ -726,11 +1079,110 @@ mod tests {
 
         assert_eq!(generated.app_config.gmail.token_path, gmail_token);
         assert_eq!(
+            generated.app_config.invoice_delivery_mode,
+            InvoiceDeliveryMode::GmailDrafts
+        );
+        assert_eq!(
+            generated.automation_config["invoice"]["deliveryMode"]
+                .as_str()
+                .unwrap(),
+            "gmailDrafts"
+        );
+        assert_eq!(
             generated.app_config.folders.invoice_input_folder,
             generated.automation_config["paths"]["invoiceInputDir"]
                 .as_str()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn generated_automation_config_preserves_multiple_patterns_prefixes_and_markers() {
+        let root = temp_root("multi_lists");
+        let generated = GeneratedSetup::from_draft(&draft_for_root(&root)).unwrap();
+
+        assert_eq!(
+            generated.automation_config["invoice"]["inputGlobs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            generated.automation_config["contracts"]["scannerFilePrefixes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            generated.automation_config["contracts"]["contractMarkers"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            generated.automation_config["invoice"]["inputGlob"]
+                .as_str()
+                .unwrap(),
+            "*.pdf"
+        );
+        assert_eq!(
+            generated.automation_config["contracts"]["scannerFilePrefix"]
+                .as_str()
+                .unwrap(),
+            "Scanner"
+        );
+    }
+
+    #[test]
+    fn setup_uses_configured_python_executable() {
+        let root = temp_root("python_config");
+        let mut draft = draft_for_root(&root);
+        draft.python_executable = r"C:\InnPilot\.venv\Scripts\python.exe".to_string();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.automation.python_executable,
+            r"C:\InnPilot\.venv\Scripts\python.exe"
+        );
+    }
+
+    #[test]
+    fn legacy_single_string_setup_values_deserialize_to_lists() {
+        let value = serde_json::json!({
+            "hotelDisplayName": "Test",
+            "emailSignatureName": "Test",
+            "workspaceBase": temp_root("legacy_deserialize").to_string_lossy(),
+            "gmailSubject": "Invoices",
+            "ccEmail": "",
+            "invoiceDeliveryMode": "gmailDrafts",
+            "gmailCredentialsFile": "",
+            "gmailTokenFile": "",
+            "invoiceInputPattern": "*.pdf",
+            "recipientRules": [],
+            "contractYear": "2026",
+            "scannerFilenamePrefix": "Scanner",
+            "contractMarkerText": "Contract",
+            "sharedScanFolder": "",
+            "ocrTextOutputFolder": "",
+            "signedContractsOutputFolder": "",
+            "safeMode": true,
+            "archiveOriginals": true,
+            "redactLogs": true
+        });
+
+        let draft: SetupDraft = serde_json::from_value(value).unwrap();
+
+        assert_eq!(draft.invoice_input_patterns, vec!["*.pdf"]);
+        assert_eq!(
+            draft.invoice_delivery_mode,
+            InvoiceDeliveryMode::GmailDrafts
+        );
+        assert_eq!(draft.scanner_filename_prefixes, vec!["Scanner"]);
+        assert_eq!(draft.contract_marker_texts, vec!["Contract"]);
     }
 
     #[test]
@@ -810,6 +1262,8 @@ mod tests {
             hotel_display_name: "Test Hotel".to_string(),
             email_signature_name: "Test Hotel Team".to_string(),
             workspace_base: root.to_string_lossy().to_string(),
+            python_executable: r"C:\InnPilot\.venv\Scripts\python.exe".to_string(),
+            invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
             gmail_subject: "Invoices - Test Hotel".to_string(),
             cc_email: "backoffice@example.invalid".to_string(),
             gmail_credentials_file: root
@@ -824,15 +1278,15 @@ mod tests {
                 .join("gmail_token.json")
                 .to_string_lossy()
                 .to_string(),
-            invoice_input_pattern: "*.pdf".to_string(),
+            invoice_input_patterns: vec!["*.pdf".to_string(), "Booking*.pdf".to_string()],
             recipient_rules: vec![RecipientRuleDraft {
                 id: None,
                 match_text: "partner".to_string(),
                 email: "partner@example.invalid".to_string(),
             }],
             contract_year: "2026".to_string(),
-            scanner_filename_prefix: "Scanner".to_string(),
-            contract_marker_text: "Contract".to_string(),
+            scanner_filename_prefixes: vec!["Scanner".to_string(), "Reception Scanner".to_string()],
+            contract_marker_texts: vec!["Contract".to_string(), "Contratto".to_string()],
             shared_scan_folder: root.join("SharedScans").to_string_lossy().to_string(),
             ocr_text_output_folder: root
                 .join("Scans")

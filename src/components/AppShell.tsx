@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import type { AppPage, RunStatus } from "../types";
 import type { NextAction } from "../nextAction";
 import { Navigation } from "./Navigation";
-import { StatusPill } from "./StatusBadges";
 
 export function AppShell({
   children,
@@ -38,7 +37,6 @@ export function AppShell({
               Hotel operations, prepared with care.
             </p>
           </div>
-          <StatusPill status={status} label={statusLabel} />
         </header>
 
         <GuidanceBanner nextAction={nextAction} onPageChange={onPageChange} />

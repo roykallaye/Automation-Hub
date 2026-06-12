@@ -146,7 +146,7 @@ export function deriveNextAction({
     return {
       id: "daily-work-ready",
       title: "Daily automations are ready",
-      shortMessage: "Prepare invoice drafts or process signed contracts.",
+      shortMessage: "Prepare invoice files or process signed contracts.",
       targetPage: "automations",
       buttonLabel: "Open Automations",
       priority: 60,
@@ -158,7 +158,7 @@ export function deriveNextAction({
     return {
       id: "invoices-ready-ocr-later",
       title: "Invoice drafts are ready",
-      shortMessage: "You can prepare invoice drafts now. Document reading can be set up later.",
+      shortMessage: "You can prepare invoice files now. Document reading can be set up later.",
       targetPage: "automations",
       buttonLabel: "Prepare Drafts",
       priority: 55,

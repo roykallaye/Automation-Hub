@@ -98,6 +98,56 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(data["items"][0]["recipient_email"], "test@example.com")
             self.assertIn("test@example.com", data["details"]["recipientGroups"])
 
+    def test_dry_run_uses_multiple_invoice_input_patterns_without_duplicates(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"]["inputGlobs"] = ["Booking*.pdf", "*.pdf"]
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            invoice = workspace.invoice_input / "Booking fixture.pdf"
+            report = workspace.root / "invoice-multiple-patterns-report.json"
+            create_invoice_pdf(invoice)
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(invoice.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["planned"], 1)
+
+    def test_dry_run_prepare_only_reports_gmail_skipped_by_mode(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"]["deliveryMode"] = "prepareOnly"
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            invoice = workspace.invoice_input / "Funzione Pubblica amministrazione fixture.pdf"
+            report = workspace.root / "invoice-prepare-only-report.json"
+            create_invoice_pdf(invoice)
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(invoice.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["details"]["deliveryMode"], "prepareOnly")
+            self.assertTrue(data["details"]["gmailSkippedByMode"])
+
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with InnPilotWorkspace() as workspace:
             sentinel = workspace.invoice_input / "sentinel.txt"

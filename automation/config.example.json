@@ -21,7 +21,13 @@
     "ccEmail": "backoffice@example.invalid"
   },
   "invoice": {
+    "deliveryMode": "gmailDrafts",
     "inputGlob": "Funzione Pubblica amministrazione*.pdf",
+    "inputGlobs": [
+      "Funzione Pubblica amministrazione*.pdf",
+      "Ricevuta*.pdf",
+      "Booking*.pdf"
+    ],
     "recipientRules": [
       {
         "match": "example partner",
@@ -31,7 +37,15 @@
   },
   "contracts": {
     "scannerFilePrefix": "Sharp MFP",
+    "scannerFilePrefixes": [
+      "Sharp MFP",
+      "Canon",
+      "Reception Scanner"
+    ],
     "contractMarker": "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+    "contractMarkers": [
+      "Oggetto: Contratto di lavoro subordinato a tempo determinato"
+    ],
     "year": "2026"
   },
   "safety": {

@@ -69,11 +69,29 @@ export function SetupPage({
       </PageHeader>
 
       {showWizard ? (
-        <SetupWizard
-          config={configStatus?.config}
-          onClose={() => setShowWizard(false)}
-          onSetupSaved={onRefresh}
-        />
+        <>
+          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+            <h2 className="text-lg font-semibold text-slate-950">Guided setup checklist</h2>
+            <div className="mt-4 grid gap-2 md:grid-cols-5">
+              {[
+                "Hotel details entered",
+                "Workspace selected",
+                "Folders created",
+                "Setup saved",
+                "Setup checked",
+              ].map((item) => (
+                <div key={item} className="rounded-md bg-white/65 px-3 py-2 text-sm font-semibold text-slate-700">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </section>
+          <SetupWizard
+            config={configStatus?.config}
+            onClose={() => setShowWizard(false)}
+            onSetupSaved={onRefresh}
+          />
+        </>
       ) : (
         <section
           className={[
@@ -168,9 +186,9 @@ export function SetupPage({
         </details>
       )}
 
-      <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+      {!showWizard && <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Advanced setup details
+          Technical details for support
         </summary>
         <div className="mt-4">
           <SetupStatusPanel
@@ -179,7 +197,7 @@ export function SetupPage({
             onRefresh={onRefresh}
           />
         </div>
-      </details>
+      </details>}
     </div>
   );
 }
@@ -286,6 +304,15 @@ function setupGuidance(
       title: "Gmail sign-in can be completed later",
       summary: "Setup saved. Gmail sign-in still needs to be completed.",
       detail: "Reconnect Gmail when ready. InnPilot creates drafts only and never sends emails automatically.",
+    };
+  }
+
+  if (item.key === "gmailCredentialsFile") {
+    return {
+      tone: "attention",
+      title: "Choose Gmail credentials or prepare files only",
+      summary: "Invoice files can be prepared without Gmail.",
+      detail: "Choose the Gmail credentials file for draft creation, or switch invoice delivery to Prepare files only in guided setup.",
     };
   }
 

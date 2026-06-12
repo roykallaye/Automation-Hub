@@ -76,7 +76,7 @@ export function AutomationsPage({
             title="Invoices"
             action={invoiceAction}
             description="Prepare PDFs and create Gmail drafts for review."
-            buttonLabel="Prepare invoice drafts"
+            buttonLabel="Prepare invoice files"
             moduleReadiness={modules.find((module) => module.id === "invoices")}
             workflow={workflowFor(invoiceAction)}
             runningCommand={runningCommand}

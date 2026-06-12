@@ -75,6 +75,41 @@ def config_str(
     return value
 
 
+def config_str_list(
+    config: dict[str, Any],
+    section_name: str,
+    list_key: str,
+    string_key: str,
+    fallback: list[str],
+) -> list[str]:
+    value = config_value(config, section_name, list_key, None)
+    if value is None:
+        legacy_value = config_value(config, section_name, string_key, None)
+        if legacy_value is None:
+            return fallback
+        value = legacy_value
+
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        raise ConfigError(
+            f"Config value '{section_name}.{list_key}' must be a string or list of strings."
+        )
+
+    result: list[str] = []
+    for index, item in enumerate(values):
+        if not isinstance(item, str):
+            raise ConfigError(
+                f"Config value '{section_name}.{list_key}' item #{index + 1} must be a string."
+            )
+        if item.strip():
+            result.append(item.strip())
+
+    return result or fallback
+
+
 def config_path(
     config: dict[str, Any],
     section_name: str,

@@ -217,7 +217,7 @@ export function SupportPage({
                   Install automation packages
                 </p>
                 <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
-                  Run this in PowerShell after Python is installed.
+                  Copy this command for setup support. It installs packages only and does not run workflows.
                 </p>
                 <pre className="mt-3 whitespace-pre-wrap break-words rounded-md bg-white/75 p-3 font-mono text-xs leading-5 text-slate-800">
                   {pythonInstallCommand}

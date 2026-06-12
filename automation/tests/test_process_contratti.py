@@ -46,6 +46,38 @@ class ProcessContrattiTests(unittest.TestCase):
             self.assertEqual(data["items"][0]["status"], "planned_move")
             self.assertIn("destinationPath", data["items"][0])
 
+    def test_default_dry_run_uses_multiple_scanner_prefixes_and_markers(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            pdf = workspace.scans_cache / "Canon fixture.pdf"
+            pdf.write_bytes(b"%PDF-1.4\n% fake scan\n")
+            text = workspace.ocr_text / "Canon fixture.txt"
+            text.write_text(
+                "\n".join(
+                    [
+                        "Contratto fixture alternativo",
+                        "premesso che b) il sig. Lucia Bianchi all'esito del colloquio di selezione",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            report = workspace.root / "contracts-multiple-report.json"
+
+            result = run_script(
+                "automation/contracts/process_contratti.py",
+                "--config",
+                workspace.config_path,
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(pdf.exists())
+            self.assertEqual(count_files(workspace.contracts_signed), 0)
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["planned"], 1)
+
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with InnPilotWorkspace() as workspace:
             sentinel = workspace.scans_cache / "Sharp MFP sentinel.pdf"

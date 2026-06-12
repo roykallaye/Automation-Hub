@@ -52,7 +52,7 @@ Before running any dry-run automation, open `Support` / `Advanced details` and c
 - Gmail draft library should be installed.
 - Gmail sign-in library should be installed.
 
-If packages are missing, copy the install command shown in Support and run it in PowerShell. This installs Python packages only; it does not run workflows or call Gmail.
+If packages are missing, copy the install command shown in Support and give it to setup support. This installs Python packages only; it does not run workflows or call Gmail.
 
 ## Exact Setup Wizard Values
 
@@ -94,13 +94,14 @@ Expected folders include:
 - Credentials file: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Gmail\Credentials\gmail_credentials.json`
 - Token file: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Gmail\Token\gmail_token.json`
 
-InnPilot creates Gmail drafts only. It never sends emails automatically. For this rehearsal, do not use real Google credentials.
+For the rehearsal, choose either `Prepare files only` or `Create Gmail drafts`. InnPilot never sends emails automatically. Do not use real Google credentials.
 
 ### Invoice Rules
 
 - Input pattern: `Funzione Pubblica amministrazione*.pdf`
 - Match text: `testpartner`
 - Recipient email: `test@example.invalid`
+- Extra invoice patterns can be added later, for example `Ricevuta*.pdf`, `Booking*.pdf`, or `*.pdf`.
 
 ### Contracts And Scans
 
@@ -110,6 +111,7 @@ InnPilot creates Gmail drafts only. It never sends emails automatically. For thi
 - Shared scan folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Scans\IncomingCache`
 - OCR text output folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Scans\TextOutput`
 - Signed contracts output folder: `C:\Users\rkall\Desktop\InnPilot-Test-Workspace\Contracts\2026\Signed`
+- Extra scanner prefixes or contract marker phrases can be added later if the hotel uses more than one scanner or contract template.
 
 ### Safety
 
@@ -119,7 +121,7 @@ InnPilot creates Gmail drafts only. It never sends emails automatically. For thi
 
 ## Fake Gmail Credentials File
 
-Run this PowerShell command after the workspace folder is selected or created:
+Run this Windows command after the workspace folder is selected or created:
 
 ```powershell
 $root = "C:\Users\rkall\Desktop\InnPilot-Test-Workspace"

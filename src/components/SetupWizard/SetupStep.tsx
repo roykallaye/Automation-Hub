@@ -29,14 +29,27 @@ export function SetupStep({
 
 export function FieldLabel({
   label,
+  help,
   children,
 }: {
   label: string;
+  help?: string;
   children: ReactNode;
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-semibold text-slate-800">{label}</span>
+      <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
+        {label}
+        {help && (
+          <span
+            className="inline-grid h-5 w-5 place-items-center rounded-full bg-teal-50 text-xs font-bold text-teal-800 ring-1 ring-teal-100"
+            title={help}
+            aria-label={help}
+          >
+            ?
+          </span>
+        )}
+      </span>
       {children}
     </label>
   );

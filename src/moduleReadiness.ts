@@ -62,7 +62,7 @@ const definitions: ModuleDefinition[] = [
     workflowKeys: ["invoiceWorkflow"],
     relatedWorkflowCommandNames: ["process_invoices_and_drafts"],
     readyReason: "Invoice folders and processing are ready.",
-    readyNextAction: "Prepare invoice drafts when needed.",
+    readyNextAction: "Prepare invoice files when needed.",
   },
   {
     id: "gmailDrafts",
@@ -312,8 +312,8 @@ function moduleReason(moduleId: ModuleReadinessId, item: PreflightItem) {
   }
   if (item.key === "gmailCredentialsFile") {
     return item.message.toLowerCase().includes("not found")
-      ? "Gmail credentials file not found."
-      : "Gmail credentials file is not selected.";
+      ? "Gmail credentials file not found, or choose Prepare files only."
+      : "Choose Gmail credentials, or choose Prepare files only.";
   }
   if (item.key === "gmailTokenAlignment") {
     return "Gmail sign-in paths do not match.";
@@ -336,7 +336,7 @@ function moduleNextAction(moduleId: ModuleReadinessId, item: PreflightItem) {
     return "Create folders, then check setup again.";
   }
   if (item.key === "gmailCredentialsFile") {
-    return "Choose the Gmail credentials file in guided setup, then save and check setup.";
+    return "Choose the Gmail credentials file, or switch invoice delivery to Prepare files only.";
   }
   if (item.key === "gmailTokenAlignment") {
     return "Check Gmail sign-in path and save setup again.";
