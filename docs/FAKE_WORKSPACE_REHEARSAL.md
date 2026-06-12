@@ -31,8 +31,8 @@ C:\Users\rkall\Desktop\InnPilot-Test-Workspace
 Installed builds use the InnPilot app data identity:
 
 ```text
-%APPDATA%\com.innpilot.app
-%APPDATA%\com.innpilot.app\automation
+%APPDATA%\com.innpilot.desktop
+%APPDATA%\com.innpilot.desktop\automation
 ```
 
 Do not point InnPilot at real hotel folders, manager-PC folders, network shares, Downloads folders with real documents, or any shared production location.

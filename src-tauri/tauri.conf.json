@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "InnPilot",
   "version": "0.1.0",
-  "identifier": "com.innpilot.app",
+  "identifier": "com.innpilot.desktop",
   "build": {
     "beforeDevCommand": "npm run dev:vite",
     "devUrl": "http://127.0.0.1:1420",

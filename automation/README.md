@@ -51,8 +51,8 @@ Installed InnPilot builds also include a Support / Advanced action named `Instal
 Expected installed app data location:
 
 ```text
-%APPDATA%\com.innpilot.app
-%APPDATA%\com.innpilot.app\automation
+%APPDATA%\com.innpilot.desktop
+%APPDATA%\com.innpilot.desktop\automation
 ```
 
 The Tauri installer bundles only an explicit allowlist of canonical automation resource files. It does not bundle the whole `automation/` directory recursively. Run this before building an installer:

@@ -116,7 +116,7 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
         }
         Ok((config, config_path))
     } else {
-        let config = default_config();
+        let config = default_config_for_app_data(&app_data_dir);
         write_config(&config_path, &config)?;
         Ok((config, config_path))
     }
@@ -214,7 +214,29 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
 }
 
 pub(crate) fn default_config() -> HubConfig {
-    let automation_root = default_automation_root();
+    default_config_for_automation_root(default_automation_root())
+}
+
+fn default_config_for_app_data(app_data_dir: &Path) -> HubConfig {
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    default_config_for_app_data_and_current_dir(app_data_dir, &current_dir)
+}
+
+fn default_config_for_app_data_and_current_dir(
+    app_data_dir: &Path,
+    current_dir: &Path,
+) -> HubConfig {
+    let repo_automation = current_dir.join("automation");
+    let automation_root = if cfg!(debug_assertions) && looks_like_automation_root(&repo_automation)
+    {
+        repo_automation
+    } else {
+        app_data_dir.join("automation")
+    };
+    default_config_for_automation_root(automation_root)
+}
+
+fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
     let automation_config_path = automation_root.join("config.local.json");
     let script_paths = canonical_script_paths(&automation_root);
 
@@ -419,6 +441,32 @@ mod tests {
         assert_eq!(
             default_automation_root_for_current_dir(&root),
             PathBuf::from(r"C:\InnPilot\automation")
+        );
+    }
+
+    #[test]
+    fn app_data_default_uses_app_managed_automation_root_when_repo_scripts_are_missing() {
+        let app_data_dir = std::env::temp_dir().join("innpilot_app_data_config_test");
+        let temp_current_dir = std::env::temp_dir().join("innpilot_no_repo_automation_config_test");
+        fs::create_dir_all(&temp_current_dir).unwrap();
+
+        let config = default_config_for_app_data_and_current_dir(&app_data_dir, &temp_current_dir);
+
+        assert_eq!(
+            config.automation.automation_root_folder,
+            app_data_dir
+                .join("automation")
+                .to_string_lossy()
+                .to_string()
+        );
+        assert_eq!(
+            config.scripts.invoice_workflow_script,
+            app_data_dir
+                .join("automation")
+                .join("invoices")
+                .join("process_fatture.py")
+                .to_string_lossy()
+                .to_string()
         );
     }
 

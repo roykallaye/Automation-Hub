@@ -350,7 +350,7 @@ Install/refresh managed scripts
 That action copies only InnPilot's canonical automation source files into the app data automation folder, for example:
 
 ```text
-%APPDATA%\com.innpilot.app\automation
+%APPDATA%\com.innpilot.desktop\automation
 ```
 
 It copies only known versioned files such as:
