@@ -13,7 +13,8 @@
       "Bash(cargo fmt *)",
       "Bash(cargo test *)",
       "Bash(echo \"fmt exit: $?\")",
-      "Bash(node scripts/doctor-resources.mjs)"
+      "Bash(node scripts/doctor-resources.mjs)",
+      "PowerShell(npm run doctor:resources 2>&1)"
     ]
   }
 }
