@@ -62,7 +62,11 @@ export function AppShell({
           </div>
         </header>
 
-        <GuidanceBanner nextAction={nextAction} onPageChange={onPageChange} />
+        <GuidanceBanner
+          nextAction={nextAction}
+          currentPage={currentPage}
+          onPageChange={onPageChange}
+        />
 
         <div className="grid flex-1 gap-5 lg:grid-cols-[210px_1fr]">
           <Navigation
@@ -105,13 +109,24 @@ function BrandWatermark({
   );
 }
 
+/*
+  One quiet guidance strip, shown only when something actually needs the
+  user's attention on another page. Home presents the next action in its
+  hero, so the banner never doubles up there, and calm states stay calm.
+*/
 function GuidanceBanner({
   nextAction,
+  currentPage,
   onPageChange,
 }: {
   nextAction: NextAction;
+  currentPage: AppPage;
   onPageChange: (page: AppPage) => void;
 }) {
+  const needsAttention = nextAction.tone === "attention" || nextAction.tone === "blocked";
+  if (currentPage === "home" || !needsAttention || nextAction.targetPage === currentPage) {
+    return null;
+  }
   const styles =
     nextAction.tone === "success"
       ? "border-emerald-200 bg-emerald-50/85 text-emerald-950"

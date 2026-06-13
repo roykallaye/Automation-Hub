@@ -7,6 +7,7 @@ mod paths;
 mod preflight;
 mod redaction;
 mod setup;
+mod templates;
 mod workflows;
 
 use std::{process::Command, sync::Mutex};
@@ -46,7 +47,8 @@ pub fn run() {
             get_activity_detail,
             open_activity_report,
             save_client_branding,
-            read_branding_logo
+            read_branding_logo,
+            save_output_templates
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -98,6 +100,14 @@ fn save_client_branding(
 #[tauri::command]
 fn read_branding_logo(app: AppHandle) -> Result<Option<String>, String> {
     branding::read_branding_logo(&app)
+}
+
+#[tauri::command]
+fn save_output_templates(
+    app: AppHandle,
+    draft: templates::OutputTemplatesDraft,
+) -> Result<preflight::AppConfigStatus, String> {
+    templates::save_output_templates(&app, draft)
 }
 
 #[tauri::command]

@@ -29,8 +29,22 @@ LOG_DIR = ROOT / "Log"
 INPUT_GLOB = "Funzione Pubblica amministrazione*.pdf"
 INPUT_GLOBS = [INPUT_GLOB]
 EMAIL_SIGNATURE_NAME = "Your Hotel"
+HOTEL_DISPLAY_NAME = "Your Hotel"
 ARCHIVE_SUCCESSFUL_ORIGINALS = True
 DELIVERY_MODE = "gmailDrafts"
+
+# Default email body, customizable via gmail.bodyTemplate in the automation
+# config. Keep in sync with DEFAULT_GMAIL_DRAFT_BODY in src-tauri/src/config.rs.
+DEFAULT_EMAIL_BODY_TEMPLATE = (
+    "Dear Partner,\n"
+    "\n"
+    "please find attached the invoices related to our mutual guests' stays at our hotel.\n"
+    "For any additional information, please contact us.\n"
+    "\n"
+    "Kind regards,\n"
+    "{signature}\n"
+)
+EMAIL_BODY_TEMPLATE = DEFAULT_EMAIL_BODY_TEMPLATE
 
 RUN_TS = datetime.now().strftime("%Y-%m-%d_%H%M%S")
 ARCHIVE_RUN_DIR = ARCHIVE_DIR / RUN_TS
@@ -99,6 +113,7 @@ def parse_args() -> argparse.Namespace:
 def configure_run(args: argparse.Namespace) -> None:
     global INPUT_DIR, OUTPUT_DIR, ARCHIVE_DIR, LOG_DIR, ARCHIVE_RUN_DIR, LOG_FILE, REPORT_FILE
     global COMMITTENTE_EMAIL_RULES, INPUT_GLOB, INPUT_GLOBS, EMAIL_SIGNATURE_NAME, ARCHIVE_SUCCESSFUL_ORIGINALS, DELIVERY_MODE
+    global HOTEL_DISPLAY_NAME, EMAIL_BODY_TEMPLATE
 
     config = {}
     config_base = None
@@ -113,12 +128,16 @@ def configure_run(args: argparse.Namespace) -> None:
     INPUT_GLOBS = config_str_list(config, "invoice", "inputGlobs", "inputGlob", INPUT_GLOBS)
     INPUT_GLOB = INPUT_GLOBS[0]
     DELIVERY_MODE = config_str(config, "invoice", "deliveryMode", DELIVERY_MODE)
+    HOTEL_DISPLAY_NAME = config_str(config, "client", "displayName", HOTEL_DISPLAY_NAME)
     EMAIL_SIGNATURE_NAME = config_str(
         config,
         "client",
         "emailSignatureName",
         config_str(config, "client", "displayName", EMAIL_SIGNATURE_NAME),
     )
+    EMAIL_BODY_TEMPLATE = config_str(config, "gmail", "bodyTemplate", EMAIL_BODY_TEMPLATE)
+    if not EMAIL_BODY_TEMPLATE.strip():
+        EMAIL_BODY_TEMPLATE = DEFAULT_EMAIL_BODY_TEMPLATE
     COMMITTENTE_EMAIL_RULES = recipient_rules(config, COMMITTENTE_EMAIL_RULES)
     ARCHIVE_SUCCESSFUL_ORIGINALS = config_bool(
         config,
@@ -313,6 +332,30 @@ def create_single_copy_pdf_and_text(input_pdf: Path, output_pdf: Path) -> str:
     return text
 
 
+def render_email_body(
+    template: str,
+    *,
+    hotel_name: str,
+    signature: str,
+    invoice_count: int,
+    date_text: str,
+) -> str:
+    """Renders the email body template with simple placeholder replacement.
+
+    Unknown placeholders are left untouched so a typo never breaks a run.
+    """
+    rendered = template if template.strip() else DEFAULT_EMAIL_BODY_TEMPLATE
+    replacements = {
+        "{hotelName}": hotel_name,
+        "{signature}": signature,
+        "{invoiceCount}": str(invoice_count),
+        "{date}": date_text,
+    }
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+    return rendered
+
+
 def write_email_bodies_by_group(processed_files: list[dict]) -> dict:
     groups = {}
 
@@ -329,18 +372,15 @@ def write_email_bodies_by_group(processed_files: list[dict]) -> dict:
     for recipient_email, pdf_names in groups.items():
         body_path = OUTPUT_DIR / safe_email_folder_name(recipient_email) / "email_body.txt"
 
-        lines = [
-            "Dear Partner,",
-            "",
-            "please find attached the invoices related to our mutual guests' stays at our hotel.",
-            "For any additional information, please contact us.",
-            "",
-            "Kind regards,",
-            EMAIL_SIGNATURE_NAME,
-            "",
-        ]
+        body_text = render_email_body(
+            EMAIL_BODY_TEMPLATE,
+            hotel_name=HOTEL_DISPLAY_NAME,
+            signature=EMAIL_SIGNATURE_NAME,
+            invoice_count=len(pdf_names),
+            date_text=datetime.now().strftime("%d/%m/%Y"),
+        )
 
-        body_path.write_text("\n".join(lines), encoding="utf-8")
+        body_path.write_text(body_text, encoding="utf-8")
 
     return groups
 

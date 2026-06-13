@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 
 from helpers import InnPilotWorkspace, count_files, run_script
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "invoices"))
+
+import process_fatture  # noqa: E402
 
 
 def create_invoice_pdf(path: Path) -> None:
@@ -165,6 +170,58 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertTrue(sentinel.exists())
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
+
+class RenderEmailBodyTests(unittest.TestCase):
+    def test_default_template_renders_signature(self) -> None:
+        body = process_fatture.render_email_body(
+            process_fatture.DEFAULT_EMAIL_BODY_TEMPLATE,
+            hotel_name="Hotel Bellavista",
+            signature="Front Office Team",
+            invoice_count=3,
+            date_text="13/06/2026",
+        )
+
+        self.assertIn("Dear Partner,", body)
+        self.assertIn("Front Office Team", body)
+        self.assertNotIn("{signature}", body)
+
+    def test_custom_template_renders_all_placeholders(self) -> None:
+        body = process_fatture.render_email_body(
+            "From {hotelName} on {date}: {invoiceCount} invoices.\n{signature}",
+            hotel_name="Hotel Bellavista",
+            signature="The Team",
+            invoice_count=2,
+            date_text="13/06/2026",
+        )
+
+        self.assertEqual(
+            body,
+            "From Hotel Bellavista on 13/06/2026: 2 invoices.\nThe Team",
+        )
+
+    def test_unknown_placeholders_are_left_untouched(self) -> None:
+        body = process_fatture.render_email_body(
+            "Hello {guestName}, regards {signature}",
+            hotel_name="Hotel",
+            signature="Team",
+            invoice_count=1,
+            date_text="13/06/2026",
+        )
+
+        self.assertEqual(body, "Hello {guestName}, regards Team")
+
+    def test_blank_template_falls_back_to_default(self) -> None:
+        body = process_fatture.render_email_body(
+            "   \n  ",
+            hotel_name="Hotel",
+            signature="Team",
+            invoice_count=1,
+            date_text="13/06/2026",
+        )
+
+        self.assertIn("Dear Partner,", body)
+        self.assertIn("Team", body)
 
 
 if __name__ == "__main__":

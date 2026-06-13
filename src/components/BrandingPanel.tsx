@@ -10,6 +10,7 @@ import {
   MAX_WATERMARK_OPACITY_PERCENT,
   tripletToCss,
 } from "../branding";
+import { InfoHint } from "./InfoHint";
 import type { AppConfigStatus, ClientBranding } from "../types";
 
 /**
@@ -96,16 +97,12 @@ export function BrandingPanel({
 
   return (
     <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-      <div className="flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
+      <div className="flex items-center gap-3">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200">
           <Palette className="h-5 w-5" aria-hidden="true" />
         </div>
-        <div>
-          <h2 className="text-xl font-semibold text-slate-950">Hotel identity</h2>
-          <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
-            Make InnPilot feel like your hotel. The logo stays on this computer.
-          </p>
-        </div>
+        <h2 className="text-xl font-semibold text-slate-950">Hotel identity</h2>
+        <InfoHint text="Make InnPilot feel like your hotel. The logo stays on this computer." />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">

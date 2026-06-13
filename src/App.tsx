@@ -12,8 +12,10 @@ import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { deriveNextAction } from "./nextAction";
 import { ActivityPage } from "./routes/ActivityPage";
+import { AssistantPage } from "./routes/AssistantPage";
 import { AutomationsPage } from "./routes/AutomationsPage";
 import { HomePage } from "./routes/HomePage";
+import { SettingsPage } from "./routes/SettingsPage";
 import { SetupPage } from "./routes/SetupPage";
 import { SupportPage } from "./routes/SupportPage";
 import type {
@@ -265,11 +267,6 @@ function App() {
           lastSummary={lastSummary}
           nextAction={nextAction}
           onNavigate={setCurrentPage}
-          runningCommand={runningCommand}
-          workflowFor={workflowFor}
-          actionDisabledReason={actionDisabledReason}
-          onRun={startAction}
-          onOpenPath={openPath}
         />
       )}
 
@@ -277,9 +274,8 @@ function App() {
         <AutomationsPage
           configStatus={configStatus}
           modules={modules}
-          nextAction={nextAction}
+          activityHistory={activityHistory}
           runningCommand={runningCommand}
-          workflowFor={workflowFor}
           actionDisabledReason={actionDisabledReason}
           onRun={startAction}
           onOpenPath={openPath}
@@ -304,14 +300,24 @@ function App() {
           configStatus={configStatus}
           latestLogs={latestLogs}
           activityHistory={activityHistory}
-          nextAction={nextAction}
           liveOutput={liveOutput}
           lastSummary={lastSummary}
           onOpenPath={openPath}
           onOpenActivityReport={openActivityReport}
           onRefresh={refreshAll}
+          onNavigate={setCurrentPage}
         />
       )}
+
+      {currentPage === "settings" && (
+        <SettingsPage
+          configStatus={configStatus}
+          onRefresh={refreshAll}
+          onNavigate={setCurrentPage}
+        />
+      )}
+
+      {currentPage === "assistant" && <AssistantPage />}
 
       {currentPage === "support" && (
         <SupportPage
@@ -321,6 +327,7 @@ function App() {
           onOpenPath={openPath}
           onRefresh={refreshAll}
           onInstallAutomation={installManagedAutomationScripts}
+          onNavigate={setCurrentPage}
         />
       )}
 

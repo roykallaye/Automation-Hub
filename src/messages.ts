@@ -26,6 +26,54 @@ export function deliveryModeReassurance(mode?: InvoiceDeliveryMode | null) {
   return "Drafts only — no emails are sent.";
 }
 
+export type PreRunFact = {
+  text: string;
+  /** "does" = what the run will do; "wont" = explicit reassurance. */
+  kind: "does" | "wont";
+};
+
+/**
+ * Plain-language "what will happen" facts shown before a run starts.
+ * Mode-aware: every fact states whether files move, whether Gmail is
+ * contacted, and whether emails are sent.
+ */
+export function preRunFacts(
+  commandName: string,
+  deliveryMode?: InvoiceDeliveryMode | null,
+  safeModeOn?: boolean,
+): PreRunFact[] {
+  const facts: PreRunFact[] = [];
+
+  if (commandName === "process_invoices_and_drafts") {
+    facts.push({ kind: "does", text: "Reads invoice PDFs from the input folder." });
+    if (deliveryMode === "prepareOnly") {
+      facts.push({ kind: "does", text: "Prepares invoice files for you to send yourself." });
+      facts.push({ kind: "wont", text: "Gmail is not contacted. No drafts, no emails." });
+    } else {
+      facts.push({ kind: "does", text: "Prepares invoice files and creates Gmail drafts for review." });
+      facts.push({ kind: "wont", text: "Drafts only — no emails are sent." });
+    }
+  } else if (commandName === "process_signed_contracts") {
+    facts.push({ kind: "does", text: "Reads scanned documents and organizes signed contracts." });
+    facts.push({ kind: "wont", text: "Gmail is not contacted. No emails are sent." });
+  } else if (commandName === "copy_scansioni") {
+    facts.push({ kind: "does", text: "Copies scanned documents from the shared folder." });
+    facts.push({ kind: "wont", text: "Originals stay in place. Gmail is not contacted." });
+  } else if (commandName === "ocr_preprocessing") {
+    facts.push({ kind: "does", text: "Reads scanned documents and writes text files." });
+    facts.push({ kind: "wont", text: "Scans are not changed. Gmail is not contacted." });
+  } else if (commandName === "reconnect_gmail") {
+    facts.push({ kind: "does", text: "Checks Gmail sign-in and may ask you to sign in again." });
+    facts.push({ kind: "wont", text: "No drafts are created and no emails are sent." });
+  }
+
+  if (safeModeOn) {
+    facts.push({ kind: "wont", text: "Safe mode is on — hotel files are not changed." });
+  }
+
+  return facts;
+}
+
 export function readinessLabel(status: ReadinessStatus) {
   switch (status) {
     case "ready":

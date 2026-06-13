@@ -1,24 +1,32 @@
-import { FolderOpen, Sparkles } from "lucide-react";
-
-import { contractAction, gmailReconnectAction, invoiceAction } from "../actions";
-import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
-import { StatusPill } from "../components/StatusBadges";
 import {
-  deliveryModeLabel,
-  deliveryModePromise,
-  deliveryModeReassurance,
-} from "../messages";
-import { AutomationCard, GmailAccessPanel } from "../components/WorkflowCard";
+  Activity,
+  ClipboardCheck,
+  LifeBuoy,
+  PlayCircle,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Wand2,
+} from "lucide-react";
+
+import { DestinationCard } from "../components/DestinationCard";
+import { StatusHint, type StatusTone } from "../components/StatusOrb";
+import type { CardTint } from "../components/tints";
+import { deliveryModeLabel } from "../messages";
 import type {
-  AppPage,
   AppConfigStatus,
-  AutomationAction,
+  AppPage,
   ModuleReadiness,
   RunSummary,
-  WorkflowPreflight,
 } from "../types";
 import type { NextAction } from "../nextAction";
 
+/*
+  Home is a calm, guided entry point — not a dashboard.
+
+  One hero with the single next action, then large destination cards.
+  Nothing runs from Home; the user is guided to the right place instead.
+*/
 export function HomePage({
   configStatus,
   modules,
@@ -26,11 +34,6 @@ export function HomePage({
   lastSummary,
   nextAction,
   onNavigate,
-  runningCommand,
-  workflowFor,
-  actionDisabledReason,
-  onRun,
-  onOpenPath,
 }: {
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
@@ -38,225 +41,226 @@ export function HomePage({
   lastSummary: RunSummary | null;
   nextAction: NextAction;
   onNavigate: (page: AppPage) => void;
-  runningCommand: string | null;
-  workflowFor: (action: AutomationAction) => WorkflowPreflight | undefined;
-  actionDisabledReason: (action: AutomationAction) => string | null;
-  onRun: (action: AutomationAction) => void;
-  onOpenPath: (path?: string | null) => void;
 }) {
-  const folders = configStatus?.config.folders;
-  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const safeModeOn = configStatus?.config.safety.dryRunDefault ?? false;
+  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
+  const destinations = buildDestinations({ configStatus, modules, loading, lastSummary });
 
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-white/65 bg-white/55 p-6 shadow-glass backdrop-blur-xl">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
-              <Sparkles className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-brand-800">{timeOfDayGreeting()}</p>
-              <h2 className="mt-1 text-3xl font-semibold text-slate-950">
-                {nextAction.title}
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-                {nextAction.shortMessage}
-              </p>
-              {safeModeOn && (
-                <p className="mt-3 inline-flex items-center rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200">
-                  Safe mode is on — runs do not change real files
+      <section className="overflow-hidden rounded-xl border border-white/65 bg-white/55 shadow-glass backdrop-blur-xl">
+        <div className="bg-[linear-gradient(120deg,rgb(var(--brand-50))_0%,transparent_55%)] p-6 sm:p-7">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div
+                aria-hidden="true"
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-brand-800 text-white shadow-sm"
+              >
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-brand-800">{timeOfDayGreeting()}</p>
+                <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
+                  {nextAction.title}
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+                  {nextAction.shortMessage}
                 </p>
-              )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {safeModeOn && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200">
+                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                      Safe mode on — runs do not change real files
+                    </span>
+                  )}
+                  {deliveryMode && (
+                    <span className="inline-flex rounded-md bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800 ring-1 ring-brand-200">
+                      Invoices: {deliveryModeLabel(deliveryMode)}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
+            <button
+              className="shrink-0 rounded-md bg-ink px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft"
+              onClick={() => onNavigate(nextAction.targetPage)}
+            >
+              {nextAction.buttonLabel}
+            </button>
           </div>
-          <button
-            className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft"
-            onClick={() => onNavigate(nextAction.targetPage)}
-          >
-            {nextAction.buttonLabel}
-          </button>
+
+          {lastSummary && (
+            <button
+              className="mt-5 inline-flex w-full items-center justify-between gap-3 rounded-lg border border-white/70 bg-white/60 px-4 py-3 text-left transition hover:bg-white/85 sm:w-auto sm:min-w-[22rem]"
+              onClick={() => onNavigate("activity")}
+            >
+              <span className="min-w-0">
+                <span className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Most recent
+                </span>
+                <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">
+                  {lastSummary.automation_name} · {formatTime(lastSummary.end_time)}
+                </span>
+              </span>
+              <StatusHint
+                tone={lastRunTone(lastSummary)}
+                label={lastRunLabel(lastSummary)}
+              />
+            </button>
+          )}
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-        <section className="space-y-5">
-          <AttentionBanner modules={modules} configStatus={configStatus} loading={loading} />
-          <div className="grid gap-5 xl:grid-cols-2">
-            <AutomationCard
-              title="Invoices"
-              action={invoiceAction}
-              description={deliveryModePromise(deliveryMode)}
-              modeChip={deliveryModeLabel(deliveryMode)}
-              reassurance={deliveryModeReassurance(deliveryMode)}
-              buttonLabel="Prepare invoice files"
-              moduleReadiness={modules.find((module) => module.id === "invoices")}
-              workflow={workflowFor(invoiceAction)}
-              runningCommand={runningCommand}
-              disabledReason={actionDisabledReason(invoiceAction)}
-              onRun={onRun}
-              secondaryActions={[
-                {
-                  label: "Input folder",
-                  icon: FolderOpen,
-                  path: folders?.invoiceInputFolder,
-                },
-                {
-                  label: "Ready invoices",
-                  icon: FolderOpen,
-                  path: folders?.invoiceOutputFolder,
-                },
-              ]}
-              onOpenPath={onOpenPath}
-            />
-            <AutomationCard
-              title="Signed contracts"
-              action={contractAction}
-              description="Organize signed contract documents."
-              buttonLabel="Process signed contracts"
-              moduleReadiness={modules.find((module) => module.id === "contracts")}
-              workflow={workflowFor(contractAction)}
-              runningCommand={runningCommand}
-              disabledReason={actionDisabledReason(contractAction)}
-              onRun={onRun}
-              secondaryActions={[
-                {
-                  label: "Shared scan folder",
-                  icon: FolderOpen,
-                  path: folders?.scansioniNetworkShare,
-                },
-                {
-                  label: "Signed contracts",
-                  icon: FolderOpen,
-                  path: folders?.contractsOutputFolder,
-                },
-              ]}
-              onOpenPath={onOpenPath}
-            />
-          </div>
-
-          {deliveryMode !== "prepareOnly" && (
-            <GmailAccessPanel
-              action={gmailReconnectAction}
-              workflow={workflowFor(gmailReconnectAction)}
-              disabledReason={actionDisabledReason(gmailReconnectAction)}
-              disabled={Boolean(runningCommand)}
-              isRunning={runningCommand === gmailReconnectAction.commandName}
-              buttonLabel="Check Gmail sign-in"
-              moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
-              onRun={() => onRun(gmailReconnectAction)}
-            />
-          )}
-
-          <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-              Show setup by area
-            </summary>
-            <div className="mt-4">
-              <ModuleReadinessGrid modules={modules.slice(0, 5)} compact />
-            </div>
-          </details>
-        </section>
-
-        <LastRunCard summary={lastSummary} />
+      <div className="stagger-children grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        {destinations.map((destination) => (
+          <DestinationCard
+            key={destination.page}
+            icon={destination.icon}
+            title={destination.title}
+            description={destination.description}
+            tint={destination.tint}
+            hintTone={destination.hintTone}
+            hintLabel={destination.hintLabel}
+            actionLabel={destination.actionLabel}
+            futureChip={destination.futureChip}
+            highlighted={destination.page === nextAction.targetPage}
+            onOpen={() => onNavigate(destination.page)}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-function AttentionBanner({
-  modules,
+type Destination = {
+  page: AppPage;
+  icon: typeof Sparkles;
+  title: string;
+  description: string;
+  tint: CardTint;
+  hintTone: StatusTone;
+  hintLabel: string;
+  actionLabel: string;
+  futureChip?: string;
+};
+
+function buildDestinations({
   configStatus,
+  modules,
   loading,
+  lastSummary,
 }: {
-  modules: ModuleReadiness[];
   configStatus: AppConfigStatus | null;
+  modules: ModuleReadiness[];
   loading: boolean;
-}) {
-  if (loading) {
-    return (
-      <section className="rounded-xl border border-white/60 bg-white/55 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-slate-800">Checking setup...</p>
-      </section>
-    );
-  }
-
-  if (!configStatus) {
-    return (
-      <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-rose-900">
-          InnPilot setup could not be loaded.
-        </p>
-      </section>
-    );
-  }
-
+  lastSummary: RunSummary | null;
+}): Destination[] {
+  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const primaryIds =
-    configStatus.config.invoiceDeliveryMode === "prepareOnly"
-      ? ["invoices"]
-      : ["invoices", "gmailDrafts"];
-  const primaryIssue = modules.find(
-    (module) => primaryIds.includes(module.id) && module.status !== "ready",
-  );
-  const secondaryIssue = modules.find(
-    (module) => !primaryIds.includes(module.id) && module.status !== "ready",
-  );
-
-  if (!primaryIssue && !secondaryIssue) {
-    return (
-      <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-emerald-900">Everything is ready.</p>
-      </section>
+    deliveryMode === "prepareOnly" ? ["invoices"] : ["invoices", "gmailDrafts"];
+  const primaryReady =
+    !loading &&
+    Boolean(configStatus) &&
+    primaryIds.every(
+      (id) => modules.find((module) => module.id === id)?.status === "ready",
     );
-  }
+  const workModules = modules.filter((module) => module.id !== "support");
+  const readyCount = workModules.filter((module) => module.status === "ready").length;
 
-  if (!primaryIssue && secondaryIssue) {
-    return (
-      <section className="rounded-xl border border-white/65 bg-white/60 p-4 shadow-glass">
-        <p className="text-sm font-semibold text-slate-900">Main work is ready</p>
-        <p className="mt-1 text-sm font-medium text-slate-600">
-          {secondaryIssue.title} can be set up later: {secondaryIssue.nextAction}
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
-      <p className="text-sm font-semibold text-amber-950">Main setup needs attention</p>
-      <p className="mt-1 text-sm font-medium text-amber-800">
-        {primaryIssue ? primaryIssue.nextAction : "Ask setup support to check InnPilot."}
-      </p>
-    </section>
+  const pythonItem = configStatus?.preflight.items.find(
+    (item) => item.key === "pythonExecutable",
   );
+  const supportTone: StatusTone = loading
+    ? "neutral"
+    : pythonItem?.status === "ready"
+      ? "ready"
+      : "attention";
+
+  const hotelName = configStatus?.config.client.displayName?.trim();
+  const hotelNamed = Boolean(hotelName) && hotelName !== "Your Hotel";
+
+  return [
+    {
+      page: "setup",
+      icon: ClipboardCheck,
+      title: "Setup",
+      description: "Prepare folders, tools, and invoice delivery — one step at a time.",
+      tint: "sky",
+      hintTone: loading ? "neutral" : primaryReady ? "ready" : "attention",
+      hintLabel: loading ? "Checking..." : primaryReady ? "Checks passing" : "Finish setup",
+      actionLabel: primaryReady ? "Review" : "Continue",
+    },
+    {
+      page: "automations",
+      icon: PlayCircle,
+      title: "Automations",
+      description: "Run today's back-office work and see exactly what will happen first.",
+      tint: "brand",
+      hintTone: loading ? "neutral" : primaryReady ? "ready" : "attention",
+      hintLabel: loading
+        ? "Checking..."
+        : `${readyCount} of ${workModules.length} ready`,
+      actionLabel: "Open",
+    },
+    {
+      page: "activity",
+      icon: Activity,
+      title: "Activity",
+      description: "A clear story of every run: what was found, prepared, and skipped.",
+      tint: "emerald",
+      hintTone: lastSummary ? lastRunTone(lastSummary) : "neutral",
+      hintLabel: lastSummary ? lastRunLabel(lastSummary) : "No runs yet",
+      actionLabel: "Review",
+    },
+    {
+      page: "settings",
+      icon: Settings2,
+      title: "Hotel & Settings",
+      description: "Your name, colors, logo, and the wording InnPilot writes for you.",
+      tint: "amber",
+      hintTone: hotelNamed ? "ready" : "neutral",
+      hintLabel: hotelNamed ? hotelName! : "Make it yours",
+      actionLabel: "Customize",
+    },
+    {
+      page: "assistant",
+      icon: Wand2,
+      title: "AI Assistant",
+      description: "Describe a repetitive task and shape it into a new automation.",
+      tint: "violet",
+      hintTone: "future",
+      hintLabel: "Prototype",
+      actionLabel: "Explore",
+      futureChip: "Coming soon",
+    },
+    {
+      page: "support",
+      icon: LifeBuoy,
+      title: "Support",
+      description: "Calm diagnostics for tools and folders — no terminal needed.",
+      tint: "rose",
+      hintTone: supportTone,
+      hintLabel:
+        supportTone === "ready"
+          ? "All tools found"
+          : supportTone === "neutral"
+            ? "Checking..."
+            : "Check tools",
+      actionLabel: "Open",
+    },
+  ];
 }
 
-function LastRunCard({ summary }: { summary: RunSummary | null }) {
-  return (
-    <aside className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-      <h2 className="text-xl font-semibold text-slate-950">Last result</h2>
-      {summary ? (
-        <div className="mt-4 space-y-4">
-          <div>
-            <p className="text-sm font-semibold text-brand-800">{summary.automation_name}</p>
-            <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Metric label="Finished" value={formatDate(summary.end_time)} />
-            <Metric label="Duration" value={formatDuration(summary.duration_ms)} />
-          </div>
-          <p className="text-sm font-medium leading-6 text-slate-600">
-            Open Activity for details if anything needs review.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-4 rounded-lg bg-white/60 p-4 text-sm font-medium leading-6 text-slate-700">
-          No run yet. Start with invoice files or signed contracts when setup is ready.
-        </div>
-      )}
-    </aside>
-  );
+function lastRunTone(summary: RunSummary): StatusTone {
+  if (summary.status === "success") return "ready";
+  if (summary.status === "warning") return "attention";
+  return "blocked";
+}
+
+function lastRunLabel(summary: RunSummary) {
+  if (summary.status === "success") return "Completed";
+  if (summary.status === "warning") return "Needs review";
+  return "Needs attention";
 }
 
 function timeOfDayGreeting() {
@@ -266,34 +270,9 @@ function timeOfDayGreeting() {
   return "Good evening";
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md bg-white/55 p-3">
-      <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
-    </div>
-  );
-}
-
-function resultLabel(status: RunSummary["status"]) {
-  if (status === "success") return "Completed";
-  if (status === "warning") return "Needs review";
-  return "Needs attention";
-}
-
-function formatDate(value: string) {
+function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
   }).format(new Date(value));
-}
-
-function formatDuration(ms: number) {
-  if (ms < 1000) return `${ms} ms`;
-  const seconds = Math.round(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return minutes ? `${minutes}m ${remainder}s` : `${seconds}s`;
 }

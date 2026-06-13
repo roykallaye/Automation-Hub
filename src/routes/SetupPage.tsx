@@ -1,7 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
-import { BrandingPanel } from "../components/BrandingPanel";
+import { FocusFlow } from "../components/FocusFlow";
 import { PageHeader } from "../components/PageHeader";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupStatusPanel } from "../components/SetupStatusPanel";
@@ -58,6 +58,26 @@ export function SetupPage({
     nextBlockingItem?.key === "pythonExecutable" ||
     nextBlockingItem?.key === "pythonPackages";
 
+  // Focus mode: the wizard replaces the whole page so the user sees one
+  // task at a time, with a permanent way back. No Escape shortcut here —
+  // closing throws away in-progress answers, so leaving stays deliberate.
+  if (showWizard) {
+    return (
+      <FocusFlow
+        eyebrow="Guided setup"
+        title="Prepare InnPilot for your hotel"
+        exitLabel="Leave setup"
+        onExit={() => setShowWizard(false)}
+      >
+        <SetupWizard
+          config={configStatus?.config}
+          onClose={() => setShowWizard(false)}
+          onSetupSaved={onRefresh}
+        />
+      </FocusFlow>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader title="Setup" eyebrow="Readiness check">
@@ -69,56 +89,46 @@ export function SetupPage({
         </button>
       </PageHeader>
 
-      {showWizard ? (
-        <SetupWizard
-          config={configStatus?.config}
-          onClose={() => setShowWizard(false)}
-          onSetupSaved={onRefresh}
-        />
-      ) : (
-        <section
-          className={[
-            "rounded-xl border p-6 shadow-glass backdrop-blur-xl",
-            setupIncomplete
-              ? "border-amber-200 bg-amber-50"
-              : "border-white/65 bg-white/55",
-          ].join(" ")}
-        >
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-semibold text-slate-950">{guidance.title}</h2>
-                <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-                  {guidance.detail}
-                </p>
-                <p
-                  className={[
-                    "mt-3 text-sm font-semibold",
-                    guidance.tone === "ready" ? "text-emerald-900" : "text-amber-900",
-                  ].join(" ")}
-                >
-                  {guidance.summary}
-                </p>
-              </div>
+      <section
+        className={[
+          "rounded-xl border p-6 shadow-glass backdrop-blur-xl",
+          setupIncomplete ? "border-amber-200 bg-amber-50" : "border-white/65 bg-white/55",
+        ].join(" ")}
+      >
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
+              <Sparkles className="h-6 w-6" />
             </div>
-            <button
-              className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
-              onClick={() => setShowWizard(true)}
-            >
-              {nextAction.targetPage === "setup"
-                ? nextAction.buttonLabel
-                : setupReady
-                  ? "Review setup"
-                  : "Continue setup"}
-            </button>
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-950">{guidance.title}</h2>
+              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+                {guidance.detail}
+              </p>
+              <p
+                className={[
+                  "mt-3 text-sm font-semibold",
+                  guidance.tone === "ready" ? "text-emerald-900" : "text-amber-900",
+                ].join(" ")}
+              >
+                {guidance.summary}
+              </p>
+            </div>
           </div>
-        </section>
-      )}
+          <button
+            className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
+            onClick={() => setShowWizard(true)}
+          >
+            {nextAction.targetPage === "setup"
+              ? nextAction.buttonLabel
+              : setupReady
+                ? "Review setup"
+                : "Continue setup"}
+          </button>
+        </div>
+      </section>
 
-      {!showWizard && setupReady && (
+      {setupReady && (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-glass">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -137,7 +147,7 @@ export function SetupPage({
         </section>
       )}
 
-      {!showWizard && !setupReady && nextIssue && (
+      {!setupReady && nextIssue && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-glass">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -158,20 +168,16 @@ export function SetupPage({
         </section>
       )}
 
-      {!showWizard && <BrandingPanel configStatus={configStatus} onSaved={onRefresh} />}
+      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          Show readiness by area
+        </summary>
+        <div className="mt-4">
+          <ModuleReadinessGrid modules={modules} />
+        </div>
+      </details>
 
-      {!showWizard && (
-        <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-            Show readiness by area
-          </summary>
-          <div className="mt-4">
-            <ModuleReadinessGrid modules={modules} />
-          </div>
-        </details>
-      )}
-
-      {!showWizard && <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
+      <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
           Technical details for support
         </summary>
@@ -182,7 +188,7 @@ export function SetupPage({
             onRefresh={onRefresh}
           />
         </div>
-      </details>}
+      </details>
     </div>
   );
 }

@@ -1,43 +1,54 @@
-import { Clipboard } from "lucide-react";
+import { CheckCircle2, Clipboard, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { DetailsPanel } from "../components/DetailsPanel";
+import { EmptyState } from "../components/EmptyState";
 import { LiveOutputPanel } from "../components/LiveOutputPanel";
 import { PageHeader } from "../components/PageHeader";
+import { StatusOrb, type StatusTone } from "../components/StatusOrb";
 import type {
   ActivityRecord,
   ActivityStatus,
   AppConfigStatus,
+  AppPage,
   InvoiceDeliveryMode,
   LatestLog,
   RunSummary,
 } from "../types";
-import type { NextAction } from "../nextAction";
 
+/*
+  Activity is an operations journal: a day-grouped timeline telling the story
+  of each run in plain words. Technical material stays behind "Details".
+*/
 export function ActivityPage({
   configStatus,
   latestLogs,
   activityHistory,
   liveOutput,
   lastSummary,
-  nextAction,
   onOpenPath,
   onOpenActivityReport,
   onRefresh,
+  onNavigate,
 }: {
   configStatus: AppConfigStatus | null;
   latestLogs: LatestLog[];
   activityHistory: ActivityRecord[];
   liveOutput: string[];
   lastSummary: RunSummary | null;
-  nextAction: NextAction;
   onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
   onRefresh: () => void;
+  onNavigate: (page: AppPage) => void;
 }) {
+  const ordered = [...activityHistory].reverse();
+  const groups = groupByDay(ordered);
+  const allClear =
+    ordered.length > 0 && ordered.every((record) => record.status === "success");
+
   return (
     <div className="space-y-5">
-      <PageHeader title="Activity" eyebrow="Runs and results">
+      <PageHeader title="Activity" eyebrow="The story of what InnPilot did">
         <button
           className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
@@ -46,47 +57,49 @@ export function ActivityPage({
         </button>
       </PageHeader>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_390px]">
+      <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
         <section className="space-y-5">
-          {nextAction.targetPage === "activity" && (
-            <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-glass">
-              <p className="text-sm font-semibold text-amber-950">{nextAction.title}</p>
-              <p className="mt-1 text-sm font-medium text-amber-800">
-                {nextAction.shortMessage}
-              </p>
-            </section>
-          )}
-
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {allClear && (
+            <div className="animate-pop flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/85 p-4 shadow-glass">
+              <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-700" aria-hidden="true" />
               <div>
-                <h2 className="text-xl font-semibold text-slate-950">Recent runs</h2>
-                <p className="mt-1 text-sm font-medium text-slate-600">
-                  Safe summaries from completed automations.
+                <p className="text-sm font-bold text-emerald-950">All clear</p>
+                <p className="text-sm font-medium text-emerald-800">
+                  Every recorded run completed without issues.
                 </p>
               </div>
             </div>
+          )}
 
-            {activityHistory.length ? (
-              <div className="space-y-3">
-                {[...activityHistory].reverse().map((record) => (
-                  <ActivityCard
-                    key={record.id}
-                    record={record}
-                    deliveryMode={configStatus?.config.invoiceDeliveryMode}
-                    onOpenPath={onOpenPath}
-                    onOpenActivityReport={onOpenActivityReport}
-                  />
+          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+            {ordered.length ? (
+              <div className="space-y-6">
+                {groups.map((group) => (
+                  <div key={group.label}>
+                    <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+                      {group.label}
+                    </p>
+                    <ol className="relative ml-1.5 space-y-4 border-l-2 border-brand-100 pl-5">
+                      {group.records.map((record) => (
+                        <JournalEntry
+                          key={record.id}
+                          record={record}
+                          deliveryMode={configStatus?.config.invoiceDeliveryMode}
+                          onOpenPath={onOpenPath}
+                          onOpenActivityReport={onOpenActivityReport}
+                        />
+                      ))}
+                    </ol>
+                  </div>
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-white/70 bg-white/60 p-5">
-                <h3 className="text-lg font-semibold text-slate-950">No runs yet</h3>
-                <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
-                  Finish Setup, then run a safe dry-run. Results appear here with what was
-                  found, what changed, and what was skipped.
-                </p>
-              </div>
+              <EmptyState
+                title="No runs yet"
+                message="When an automation finishes, its story appears here: what was found, what was prepared, and what was skipped."
+                actionLabel="Start a safe dry-run"
+                onAction={() => onNavigate("automations")}
+              />
             )}
           </section>
 
@@ -99,20 +112,23 @@ export function ActivityPage({
             </div>
           </details>
         </section>
-        <DetailsPanel
-          summary={lastSummary}
-          latestLogs={latestLogs}
-          configStatus={configStatus}
-          showDeveloperDetails={false}
-          onOpenPath={onOpenPath}
-          onRefresh={onRefresh}
-        />
+
+        <div className="h-fit">
+          <DetailsPanel
+            summary={lastSummary}
+            latestLogs={latestLogs}
+            configStatus={configStatus}
+            showDeveloperDetails={false}
+            onOpenPath={onOpenPath}
+            onRefresh={onRefresh}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-function ActivityCard({
+function JournalEntry({
   record,
   deliveryMode,
   onOpenPath,
@@ -123,105 +139,171 @@ function ActivityCard({
   onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
 }) {
-  const summary = record.summary;
   const [copied, setCopied] = useState(false);
+  const summary = record.summary;
   const isInvoiceRun = record.workflowCommandName === "process_invoices_and_drafts";
   const touchesGmail = isInvoiceRun || record.workflowCommandName === "reconnect_gmail";
+  const hasDetails =
+    record.warnings.length > 0 ||
+    record.errors.length > 0 ||
+    Boolean(record.reportPath) ||
+    Boolean(record.logPath) ||
+    record.technicalSnippet.length > 0;
+
+  const metrics: [string, number][] = [
+    ["Found", summary.found ?? 0],
+    ["Processed", summary.processed ?? 0],
+    ["Planned", summary.planned ?? 0],
+    ["Created", summary.created ?? 0],
+    ["Issues", (summary.failed ?? 0) + (summary.warnings ?? 0)],
+  ];
+
   return (
-    <article className="rounded-lg border border-white/70 bg-white/60 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-brand-800">{modeLabel(record.mode)}</p>
-          <h3 className="mt-1 text-lg font-semibold text-slate-950">{record.workflowTitle}</h3>
-          <p className="mt-1 text-sm font-medium text-slate-600">
-            Finished {formatDate(record.finishedAt)}
-            {formatRunDuration(record.startedAt, record.finishedAt)}
-          </p>
-        </div>
-        <ActivityBadge status={record.status} />
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-        <Metric label="Found" value={summary.found ?? 0} />
-        <Metric label="Processed" value={summary.processed ?? 0} />
-        <Metric label="Planned" value={summary.planned ?? 0} />
-        <Metric label="Created" value={summary.created ?? 0} />
-        <Metric label="Issues" value={(summary.failed ?? 0) + (summary.warnings ?? 0)} />
-      </div>
-
-      {touchesGmail && (
-        <p className="mt-3 text-xs font-semibold text-slate-500">
-          {isInvoiceRun && deliveryMode === "prepareOnly"
-            ? "Gmail skipped — Prepare files only mode. No emails were sent."
-            : "No emails were sent automatically."}
-        </p>
-      )}
-
-      {(record.warnings.length > 0 ||
-        record.errors.length > 0 ||
-        record.reportPath ||
-        record.logPath ||
-        record.technicalSnippet.length > 0) && (
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-            Details
-          </summary>
-          <div className="mt-3 space-y-3 text-sm">
-            {record.warnings.length > 0 && (
-              <DetailList title="Needs review" items={record.warnings} tone="amber" />
-            )}
-            {record.errors.length > 0 && (
-              <DetailList title="Errors" items={record.errors} tone="rose" />
-            )}
-            <div className="flex flex-wrap gap-2">
-              {record.reportPath && (
-                <button
-                  className="rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                  onClick={() => onOpenActivityReport(record.reportPath)}
-                >
-                  Open report
-                </button>
+    <li className="relative">
+      <span className="absolute -left-[1.69rem] top-1.5">
+        <StatusOrb tone={activityTone(record.status)} />
+      </span>
+      <article className="rounded-lg border border-white/70 bg-white/60 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-950">{record.workflowTitle}</h3>
+            <p className="mt-0.5 text-sm font-medium text-slate-600">
+              {formatTime(record.finishedAt)}
+              {formatRunDuration(record.startedAt, record.finishedAt)}
+              {record.mode === "dry_run" && (
+                <span className="ml-2 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                  <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+                  Safe mode
+                </span>
               )}
-              {record.logPath && (
-                <button
-                  className="rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                  onClick={() => onOpenPath(record.logPath)}
-                >
-                  Open log
-                </button>
+              {record.mode === "execute" && (
+                <span className="ml-2 inline-flex rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
+                  Real run
+                </span>
               )}
-              {record.technicalSnippet.length > 0 && (
-                <button
-                  className="inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(record.technicalSnippet.join("\n"));
-                      setCopied(true);
-                    } catch {
-                      setCopied(false);
-                    }
-                  }}
-                >
-                  <Clipboard className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
-                  {copied ? "Copied" : "Copy technical details"}
-                </button>
-              )}
-            </div>
+            </p>
           </div>
-        </details>
-      )}
-    </article>
+          <ActivityBadge status={record.status} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {metrics.map(([label, value]) => (
+            <div key={label} className="rounded-md bg-white/60 px-2.5 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                {label}
+              </p>
+              <p className="mt-0.5 text-base font-semibold text-slate-950">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {touchesGmail && (
+          <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
+            {isInvoiceRun && deliveryMode === "prepareOnly"
+              ? "Gmail skipped — Prepare files only mode. No emails were sent."
+              : "No emails were sent automatically."}
+          </p>
+        )}
+
+        {hasDetails && (
+          <details className="mt-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+              Details
+            </summary>
+            <div className="mt-3 space-y-3 text-sm">
+              {record.warnings.length > 0 && (
+                <DetailList title="Needs review" items={record.warnings} tone="amber" />
+              )}
+              {record.errors.length > 0 && (
+                <DetailList title="Errors" items={record.errors} tone="rose" />
+              )}
+              <div className="flex flex-wrap gap-2">
+                {record.reportPath && (
+                  <button
+                    className="rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                    onClick={() => onOpenActivityReport(record.reportPath)}
+                  >
+                    Open report
+                  </button>
+                )}
+                {record.logPath && (
+                  <button
+                    className="rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                    onClick={() => onOpenPath(record.logPath)}
+                  >
+                    Open log
+                  </button>
+                )}
+                {record.technicalSnippet.length > 0 && (
+                  <button
+                    className="inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(
+                          record.technicalSnippet.join("\n"),
+                        );
+                        setCopied(true);
+                      } catch {
+                        setCopied(false);
+                      }
+                    }}
+                  >
+                    <Clipboard className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
+                    {copied ? "Copied" : "Copy technical details"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </details>
+        )}
+      </article>
+    </li>
   );
 }
 
-function formatRunDuration(startedAt: string, finishedAt: string) {
-  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 1) return " · under a second";
-  if (seconds < 60) return ` · ${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return ` · ${minutes}m ${seconds % 60}s`;
+function groupByDay(records: ActivityRecord[]) {
+  const groups: { label: string; records: ActivityRecord[] }[] = [];
+  for (const record of records) {
+    const label = dayLabel(record.finishedAt);
+    const group = groups[groups.length - 1];
+    if (group && group.label === label) {
+      group.records.push(record);
+    } else {
+      groups.push({ label, records: [record] });
+    }
+  }
+  return groups;
+}
+
+function dayLabel(value: string) {
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, yesterday)) return "Yesterday";
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function sameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function activityTone(status: ActivityStatus): StatusTone {
+  if (status === "success") return "ready";
+  if (status === "failed") return "blocked";
+  if (status === "unknown" || status === "cancelled") return "neutral";
+  return "attention";
 }
 
 function ActivityBadge({ status }: { status: ActivityStatus }) {
@@ -234,18 +316,9 @@ function ActivityBadge({ status }: { status: ActivityStatus }) {
           ? "bg-slate-50 text-slate-700 ring-slate-200"
           : "bg-amber-50 text-amber-800 ring-amber-200";
   return (
-    <span className={`inline-flex rounded-md px-3 py-1.5 text-xs font-bold ring-1 ${styles}`}>
+    <span className={`inline-flex shrink-0 rounded-md px-3 py-1.5 text-xs font-bold ring-1 ${styles}`}>
       {statusLabel(status)}
     </span>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md bg-white/55 p-3">
-      <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-950">{value}</p>
-    </div>
   );
 }
 
@@ -264,17 +337,13 @@ function DetailList({
       <p className="font-semibold">{title}</p>
       <ul className="mt-2 space-y-1">
         {items.map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
+          <li key={`${item}-${index}`} className="break-words">
+            {item}
+          </li>
         ))}
       </ul>
     </div>
   );
-}
-
-function modeLabel(mode: ActivityRecord["mode"]) {
-  if (mode === "dry_run") return "Safe mode";
-  if (mode === "execute") return "Real run";
-  return "Run";
 }
 
 function statusLabel(status: ActivityStatus) {
@@ -285,11 +354,19 @@ function statusLabel(status: ActivityStatus) {
   return "Unknown";
 }
 
-function formatDate(value: string) {
+function formatRunDuration(startedAt: string, finishedAt: string) {
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 1) return " · under a second";
+  if (seconds < 60) return ` · ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return ` · ${minutes}m ${seconds % 60}s`;
+}
+
+function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
   }).format(new Date(value));
 }

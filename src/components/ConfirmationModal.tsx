@@ -1,9 +1,14 @@
-import { AlertTriangle, Check, X } from "lucide-react";
+import { Check, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { deliveryModePromise, deliveryModeReassurance } from "../messages";
+import { preRunFacts } from "../messages";
 import type { AutomationAction, InvoiceDeliveryMode } from "../types";
 
+/*
+  Pre-run "what will happen" panel. Before any workflow starts, the user sees
+  mode-aware facts: what the run does, whether files move, whether Gmail is
+  contacted, and whether emails are sent.
+*/
 export function ConfirmationModal({
   action,
   deliveryMode,
@@ -28,7 +33,8 @@ export function ConfirmationModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
 
-  const isInvoiceRun = action.commandName === "process_invoices_and_drafts";
+  const facts = preRunFacts(action.commandName, deliveryMode, safeModeOn);
+  const Icon = action.icon;
 
   return (
     <div
@@ -39,15 +45,22 @@ export function ConfirmationModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirmation-title"
-        className="w-full max-w-md animate-rise rounded-lg border border-white/70 bg-white/95 p-5 shadow-glass"
+        className="w-full max-w-md animate-rise rounded-xl border border-white/70 bg-white/95 p-5 shadow-glass"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600" aria-hidden="true" />
-            <h2 id="confirmation-title" className="text-lg font-semibold text-slate-950">
-              {action.confirmationTitle}
-            </h2>
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
+              <Icon className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-brand-800">
+                Before this run
+              </p>
+              <h2 id="confirmation-title" className="text-lg font-semibold text-slate-950">
+                {action.confirmationTitle}
+              </h2>
+            </div>
           </div>
           <button
             className="rounded-md p-2 hover:bg-slate-100"
@@ -58,13 +71,26 @@ export function ConfirmationModal({
           </button>
         </div>
 
-        {isInvoiceRun && deliveryMode ? (
+        {facts.length ? (
           <div className="space-y-2">
-            <WhatWillHappenRow text={deliveryModePromise(deliveryMode)} />
-            <WhatWillHappenRow text={deliveryModeReassurance(deliveryMode)} muted />
-            {safeModeOn && (
-              <WhatWillHappenRow text="Safe mode is on — files are not changed." muted />
-            )}
+            {facts.map((fact) => (
+              <p
+                key={fact.text}
+                className={[
+                  "flex items-start gap-2 rounded-md px-3 py-2 text-sm font-medium leading-6",
+                  fact.kind === "does"
+                    ? "bg-brand-50 text-brand-900"
+                    : "bg-emerald-50 text-emerald-900",
+                ].join(" ")}
+              >
+                {fact.kind === "does" ? (
+                  <Check className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : (
+                  <ShieldCheck className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                {fact.text}
+              </p>
+            ))}
           </div>
         ) : (
           <p className="text-sm font-medium leading-6 text-slate-700">
@@ -84,24 +110,10 @@ export function ConfirmationModal({
             className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-ink-soft"
             onClick={onConfirm}
           >
-            Continue
+            Start run
           </button>
         </div>
       </section>
     </div>
-  );
-}
-
-function WhatWillHappenRow({ text, muted = false }: { text: string; muted?: boolean }) {
-  return (
-    <p
-      className={[
-        "flex items-start gap-2 rounded-md px-3 py-2 text-sm font-medium leading-6",
-        muted ? "bg-slate-50 text-slate-600" : "bg-brand-50 text-brand-900",
-      ].join(" ")}
-    >
-      <Check className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
-      {text}
-    </p>
   );
 }

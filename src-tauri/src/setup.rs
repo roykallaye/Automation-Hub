@@ -272,9 +272,10 @@ pub(crate) fn save_setup_config(
     }
 
     let mut generated = GeneratedSetup::from_draft(&draft)?;
-    // Saving setup must not reset the hotel's visual branding.
+    // Saving setup must not reset the hotel's visual branding or templates.
     if let Ok(existing) = config::ensure_config(app) {
         generated.app_config.client.branding = existing.client.branding;
+        generated.app_config.templates = existing.templates;
     }
     let app_config_path = app_config_path(app)?;
     let automation_config_path =
@@ -483,6 +484,7 @@ impl GeneratedSetup {
                 require_confirmation_for_file_moves: true,
                 redact_logs: draft.redact_logs,
             },
+            templates: Default::default(),
         };
 
         let recipient_rules = draft

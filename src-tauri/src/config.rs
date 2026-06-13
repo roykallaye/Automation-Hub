@@ -18,6 +18,8 @@ pub(crate) struct HubConfig {
     pub(crate) folders: FolderPaths,
     pub(crate) gmail: GmailConfig,
     pub(crate) safety: SafetyConfig,
+    #[serde(default)]
+    pub(crate) templates: OutputTemplatesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -56,6 +58,88 @@ pub(crate) struct BrandingConfig {
 }
 
 pub(crate) const MAX_WATERMARK_OPACITY_PERCENT: u8 = 30;
+
+/// Editable output templates, stored locally in config.json.
+///
+/// Placeholders use single braces (e.g. `{hotelName}`) and are rendered by the
+/// automation scripts at run time. Saving templates never runs a workflow,
+/// never contacts Gmail, and never sends email.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct OutputTemplatesConfig {
+    /// Subject line used when Gmail drafts are created.
+    pub(crate) gmail_draft_subject: String,
+    /// Body text used for prepared invoice emails / Gmail drafts.
+    pub(crate) gmail_draft_body: String,
+    /// Signature appended via the {signature} placeholder. Empty = hotel name.
+    pub(crate) email_signature: String,
+}
+
+pub(crate) const DEFAULT_GMAIL_DRAFT_SUBJECT: &str = "Invoices - {hotelName}";
+// Keep in sync with the fallback body in automation/invoices/process_fatture.py.
+pub(crate) const DEFAULT_GMAIL_DRAFT_BODY: &str = "Dear Partner,\n\nplease find attached the invoices related to our mutual guests' stays at our hotel.\nFor any additional information, please contact us.\n\nKind regards,\n{signature}\n";
+
+const MAX_TEMPLATE_SUBJECT_CHARS: usize = 200;
+const MAX_TEMPLATE_BODY_CHARS: usize = 4000;
+const MAX_TEMPLATE_SIGNATURE_CHARS: usize = 120;
+
+impl Default for OutputTemplatesConfig {
+    fn default() -> Self {
+        Self {
+            gmail_draft_subject: DEFAULT_GMAIL_DRAFT_SUBJECT.to_string(),
+            gmail_draft_body: DEFAULT_GMAIL_DRAFT_BODY.to_string(),
+            email_signature: String::new(),
+        }
+    }
+}
+
+impl OutputTemplatesConfig {
+    pub(crate) fn sanitized(&self) -> Self {
+        let defaults = Self::default();
+        Self {
+            gmail_draft_subject: sanitize_template_line(
+                &self.gmail_draft_subject,
+                &defaults.gmail_draft_subject,
+                MAX_TEMPLATE_SUBJECT_CHARS,
+            ),
+            gmail_draft_body: sanitize_template_text(
+                &self.gmail_draft_body,
+                &defaults.gmail_draft_body,
+                MAX_TEMPLATE_BODY_CHARS,
+            ),
+            email_signature: truncate_chars(
+                self.email_signature.trim(),
+                MAX_TEMPLATE_SIGNATURE_CHARS,
+            ),
+        }
+    }
+}
+
+fn sanitize_template_line(value: &str, fallback: &str, max_chars: usize) -> String {
+    let cleaned: String = value
+        .trim()
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        truncate_chars(&cleaned, max_chars)
+    }
+}
+
+fn sanitize_template_text(value: &str, fallback: &str, max_chars: usize) -> String {
+    let cleaned = value.replace("\r\n", "\n");
+    if cleaned.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        truncate_chars(&cleaned, max_chars)
+    }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
 
 impl Default for BrandingConfig {
     fn default() -> Self {
@@ -311,6 +395,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
             token_path: paths.gmail_token,
         },
         safety: default_config().safety,
+        templates: OutputTemplatesConfig::default(),
     }
 }
 
@@ -379,6 +464,7 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
             require_confirmation_for_file_moves: true,
             redact_logs: true,
         },
+        templates: OutputTemplatesConfig::default(),
     }
 }
 
@@ -600,6 +686,92 @@ mod tests {
         assert_eq!(branding.accent_color, "#1a2b3c");
         assert_eq!(branding.background_style, "soft");
         assert_eq!(branding.watermark_opacity, MAX_WATERMARK_OPACITY_PERCENT);
+    }
+
+    #[test]
+    fn default_config_includes_default_templates() {
+        let config = default_config();
+
+        assert_eq!(
+            config.templates.gmail_draft_subject,
+            DEFAULT_GMAIL_DRAFT_SUBJECT
+        );
+        assert_eq!(config.templates.gmail_draft_body, DEFAULT_GMAIL_DRAFT_BODY);
+        assert!(config.templates.email_signature.is_empty());
+    }
+
+    #[test]
+    fn config_without_templates_is_migrated_with_defaults() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, should_rewrite) = parse_config_with_migration(partial).unwrap();
+
+        assert!(should_rewrite);
+        assert_eq!(config.templates, OutputTemplatesConfig::default());
+    }
+
+    #[test]
+    fn config_with_templates_keeps_saved_values() {
+        let saved = r#"{
+          "schemaVersion": 2,
+          "client": { "displayName": "Test Hotel" },
+          "templates": {
+            "gmailDraftSubject": "Invoices {date} - {hotelName}",
+            "gmailDraftBody": "Hello,\nattached {invoiceCount} invoices.\n{signature}",
+            "emailSignature": "Front Office Team"
+          }
+        }"#;
+
+        let (config, _) = parse_config_with_migration(saved).unwrap();
+
+        assert_eq!(
+            config.templates.gmail_draft_subject,
+            "Invoices {date} - {hotelName}"
+        );
+        assert!(config.templates.gmail_draft_body.contains("{invoiceCount}"));
+        assert_eq!(config.templates.email_signature, "Front Office Team");
+    }
+
+    #[test]
+    fn templates_serialize_with_camel_case_keys() {
+        let json = serde_json::to_value(OutputTemplatesConfig::default()).unwrap();
+
+        assert!(json.get("gmailDraftSubject").is_some());
+        assert!(json.get("gmailDraftBody").is_some());
+        assert!(json.get("emailSignature").is_some());
+    }
+
+    #[test]
+    fn templates_sanitize_restores_defaults_and_strips_newlines_in_subject() {
+        let templates = OutputTemplatesConfig {
+            gmail_draft_subject: "  Line\nbreaks\rremoved  ".to_string(),
+            gmail_draft_body: "   \n  ".to_string(),
+            email_signature: "  The Team  ".to_string(),
+        }
+        .sanitized();
+
+        assert_eq!(templates.gmail_draft_subject, "Linebreaksremoved");
+        assert_eq!(templates.gmail_draft_body, DEFAULT_GMAIL_DRAFT_BODY);
+        assert_eq!(templates.email_signature, "The Team");
+    }
+
+    #[test]
+    fn templates_sanitize_caps_length_and_normalizes_line_endings() {
+        let long_body = format!("Hello\r\nWorld {}", "x".repeat(6000));
+        let templates = OutputTemplatesConfig {
+            gmail_draft_subject: "s".repeat(500),
+            gmail_draft_body: long_body,
+            email_signature: "g".repeat(500),
+        }
+        .sanitized();
+
+        assert_eq!(templates.gmail_draft_subject.chars().count(), 200);
+        assert!(templates.gmail_draft_body.starts_with("Hello\nWorld"));
+        assert!(templates.gmail_draft_body.chars().count() <= 4000);
+        assert_eq!(templates.email_signature.chars().count(), 120);
     }
 
     #[test]

@@ -707,6 +707,7 @@ mod tests {
                 require_confirmation_for_file_moves: true,
                 redact_logs: true,
             },
+            templates: Default::default(),
         }
     }
 

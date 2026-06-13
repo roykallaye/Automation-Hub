@@ -9,7 +9,14 @@ export type ActivityStatus =
   | "unknown";
 export type ActivityMode = "dry_run" | "execute" | "unknown";
 
-export type AppPage = "home" | "automations" | "setup" | "activity" | "support";
+export type AppPage =
+  | "home"
+  | "automations"
+  | "setup"
+  | "activity"
+  | "settings"
+  | "assistant"
+  | "support";
 
 export type ReadinessStatus =
   | "ready"
@@ -107,6 +114,13 @@ export type ActivityRecord = {
   technicalSnippet: string[];
 };
 
+/** Editable output templates, stored locally in config.json. */
+export type OutputTemplates = {
+  gmailDraftSubject: string;
+  gmailDraftBody: string;
+  emailSignature: string;
+};
+
 export type ClientBranding = {
   palette: string;
   logoPath: string;
@@ -155,6 +169,7 @@ export type HubConfig = {
     requireConfirmationForFileMoves: boolean;
     redactLogs: boolean;
   };
+  templates: OutputTemplates;
 };
 
 export type PreflightItem = {

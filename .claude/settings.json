@@ -3,7 +3,17 @@
     "allow": [
       "Bash(python -)",
       "PowerShell(Set-Location \"c:\\\\Users\\\\rkall\\\\Desktop\\\\Docs\\\\Work\\\\Personal\\\\Automation-Hub\"; cargo fmt --manifest-path src-tauri/Cargo.toml; cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; echo \"fmt-check-exit: $LASTEXITCODE\")",
-      "PowerShell(Set-Location \"c:\\\\Users\\\\rkall\\\\Desktop\\\\Docs\\\\Work\\\\Personal\\\\Automation-Hub\"; npm run build 2>&1 | Select-Object -Last 3; cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; echo \"fmt: $LASTEXITCODE\"; npm run test:rust 2>&1 | Select-String \"test result\" | Select-Object -First 2)"
+      "PowerShell(Set-Location \"c:\\\\Users\\\\rkall\\\\Desktop\\\\Docs\\\\Work\\\\Personal\\\\Automation-Hub\"; npm run build 2>&1 | Select-Object -Last 3; cargo fmt --manifest-path src-tauri/Cargo.toml -- --check; echo \"fmt: $LASTEXITCODE\"; npm run test:rust 2>&1 | Select-String \"test result\" | Select-Object -First 2)",
+      "Bash(cargo check *)",
+      "Bash(python -m unittest discover automation/tests)",
+      "Bash(rm src/components/WorkflowCard.tsx)",
+      "Bash(npx tsc *)",
+      "PowerShell(npx tsc 2>&1)",
+      "PowerShell(npm run build 2>&1)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo test *)",
+      "Bash(echo \"fmt exit: $?\")",
+      "Bash(node scripts/doctor-resources.mjs)"
     ]
   }
 }

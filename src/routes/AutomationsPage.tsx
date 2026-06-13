@@ -1,4 +1,4 @@
-import { Clock3, FolderOpen } from "lucide-react";
+import { Bot, Send } from "lucide-react";
 
 import {
   contractAction,
@@ -6,33 +6,37 @@ import {
   invoiceAction,
   maintenanceActions,
 } from "../actions";
-import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { PageHeader } from "../components/PageHeader";
+import {
+  FutureWorkflowCard,
+  WorkflowGalleryCard,
+} from "../components/WorkflowGalleryCard";
+import type { CardTint } from "../components/tints";
 import {
   deliveryModeLabel,
   deliveryModePromise,
   deliveryModeReassurance,
 } from "../messages";
-import {
-  ActionButton,
-  AutomationCard,
-  GmailAccessPanel,
-} from "../components/WorkflowCard";
+import { moduleForCommand } from "../moduleReadiness";
 import type {
-  AppPage,
+  ActivityRecord,
   AppConfigStatus,
+  AppPage,
   AutomationAction,
   ModuleReadiness,
-  WorkflowPreflight,
 } from "../types";
-import type { NextAction } from "../nextAction";
 
+/*
+  Automations is a workflow gallery: each hotel task is one card with a
+  consistent shape — what it does, whether it is ready, what happened last,
+  one button, and a plain safety statement. The pre-run "what will happen"
+  panel opens before anything starts (ConfirmationModal).
+*/
 export function AutomationsPage({
   configStatus,
   modules,
-  nextAction,
+  activityHistory,
   runningCommand,
-  workflowFor,
   actionDisabledReason,
   onRun,
   onOpenPath,
@@ -40,9 +44,8 @@ export function AutomationsPage({
 }: {
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
-  nextAction: NextAction;
+  activityHistory: ActivityRecord[];
   runningCommand: string | null;
-  workflowFor: (action: AutomationAction) => WorkflowPreflight | undefined;
   actionDisabledReason: (action: AutomationAction) => string | null;
   onRun: (action: AutomationAction) => void;
   onOpenPath: (path?: string | null) => void;
@@ -50,190 +53,166 @@ export function AutomationsPage({
 }) {
   const folders = configStatus?.config.folders;
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
-  const primaryActions = [invoiceAction, contractAction];
-  const readyPrimaryActions = primaryActions.filter((action) => !actionDisabledReason(action));
-  const blockedPrimaryActions = primaryActions.filter((action) => Boolean(actionDisabledReason(action)));
+  const anyRunning = Boolean(runningCommand);
+  const [copyScansAction, ocrAction] = maintenanceActions;
+
+  function lastRunLabelFor(commandName: string) {
+    const record = [...activityHistory]
+      .reverse()
+      .find((entry) => entry.workflowCommandName === commandName);
+    if (!record) return null;
+    return `Last run ${formatDate(record.finishedAt)} · ${shortStatus(record)}`;
+  }
+
+  function fixFor(action: AutomationAction) {
+    const module = moduleForCommand(modules, action.commandName);
+    const needsSupport = module?.blockingProblems.some((problem) =>
+      /python|support|script|tool/i.test(problem),
+    );
+    return {
+      label: needsSupport ? "Open Support" : "Fix in Setup",
+      onClick: () => onNavigate(needsSupport ? "support" : "setup"),
+    };
+  }
+
+  function galleryCard(options: {
+    action: AutomationAction;
+    title: string;
+    whatItDoes: string;
+    tint?: CardTint;
+    primaryLabel: string;
+    safety: string;
+    modeChip?: string;
+    links?: { label: string; path?: string | null }[];
+  }) {
+    const { action } = options;
+    const fix = fixFor(action);
+    return (
+      <WorkflowGalleryCard
+        icon={action.icon}
+        title={options.title}
+        whatItDoes={options.whatItDoes}
+        tint={options.tint}
+        modeChip={options.modeChip}
+        safety={options.safety}
+        module={moduleForCommand(modules, action.commandName)}
+        lastRunLabel={lastRunLabelFor(action.commandName)}
+        isRunning={runningCommand === action.commandName}
+        anyRunning={anyRunning}
+        disabledReason={actionDisabledReason(action)}
+        primaryLabel={options.primaryLabel}
+        onRun={() => onRun(action)}
+        fixLabel={fix.label}
+        onFix={fix.onClick}
+        links={options.links}
+        onOpenPath={onOpenPath}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Automations" eyebrow="Run hotel workflows" />
+      <PageHeader title="Automations" eyebrow="Today's hotel work" />
 
-      <section className="rounded-xl border border-brand-100 bg-brand-50/80 p-5 shadow-glass backdrop-blur-xl">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm font-bold text-brand-800">Recommended next</p>
-            <h2 className="mt-1 text-2xl font-semibold text-slate-950">{nextAction.title}</h2>
-            <p className="mt-2 text-sm font-medium leading-6 text-slate-700">
-              {nextAction.shortMessage}
-            </p>
-          </div>
-          <button
-            className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
-            onClick={() => onNavigate(nextAction.targetPage)}
-          >
-            {nextAction.buttonLabel}
-          </button>
-        </div>
-      </section>
+      <div className="stagger-children grid gap-5 xl:grid-cols-2">
+        {galleryCard({
+          action: invoiceAction,
+          title: "Invoice files",
+          whatItDoes: deliveryModePromise(deliveryMode),
+          tint: "sky",
+          modeChip: deliveryModeLabel(deliveryMode),
+          primaryLabel: "Prepare invoice files",
+          safety: deliveryModeReassurance(deliveryMode),
+          links: [
+            { label: "Input folder", path: folders?.invoiceInputFolder },
+            { label: "Ready invoices", path: folders?.invoiceOutputFolder },
+          ],
+        })}
 
-      <section className="grid gap-5 xl:grid-cols-2">
-        {readyPrimaryActions.includes(invoiceAction) && (
-          <AutomationCard
-            title="Invoices"
-            action={invoiceAction}
-            description={deliveryModePromise(deliveryMode)}
-            modeChip={deliveryModeLabel(deliveryMode)}
-            reassurance={deliveryModeReassurance(deliveryMode)}
-            buttonLabel="Prepare invoice files"
-            moduleReadiness={modules.find((module) => module.id === "invoices")}
-            workflow={workflowFor(invoiceAction)}
-            runningCommand={runningCommand}
-            disabledReason={actionDisabledReason(invoiceAction)}
-            onRun={onRun}
-            secondaryActions={[
-              {
-                label: "Input folder",
-                icon: FolderOpen,
-                path: folders?.invoiceInputFolder,
-              },
-              {
-                label: "Ready invoices",
-                icon: FolderOpen,
-                path: folders?.invoiceOutputFolder,
-              },
-            ]}
-            onOpenPath={onOpenPath}
-          />
-        )}
-        {readyPrimaryActions.includes(contractAction) && (
-          <AutomationCard
-            title="Signed contracts"
-            action={contractAction}
-            description="Read, sort, and organize signed contract documents."
-            buttonLabel="Process signed contracts"
-            moduleReadiness={modules.find((module) => module.id === "contracts")}
-            workflow={workflowFor(contractAction)}
-            runningCommand={runningCommand}
-            disabledReason={actionDisabledReason(contractAction)}
-            onRun={onRun}
-            secondaryActions={[
-              {
-                label: "Shared scan folder",
-                icon: FolderOpen,
-                path: folders?.scansioniNetworkShare,
-              },
-              {
-                label: "Signed contracts",
-                icon: FolderOpen,
-                path: folders?.contractsOutputFolder,
-              },
-            ]}
-            onOpenPath={onOpenPath}
-          />
-        )}
-      </section>
+        {galleryCard({
+          action: contractAction,
+          title: "Signed contracts",
+          whatItDoes: "Reads, sorts, and files signed contract documents.",
+          tint: "violet",
+          primaryLabel: "Process signed contracts",
+          safety: "Gmail is not contacted. File moves ask first.",
+          links: [
+            { label: "Shared scan folder", path: folders?.scansioniNetworkShare },
+            { label: "Signed contracts", path: folders?.contractsOutputFolder },
+          ],
+        })}
 
-      {blockedPrimaryActions.length > 0 && (
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <h2 className="text-xl font-semibold text-slate-950">Needs setup</h2>
-          <div className="mt-3 space-y-2">
-            {blockedPrimaryActions.map((action) => (
-              <BlockedWorkflow
-                key={action.commandName}
-                action={action}
-                reason={actionDisabledReason(action)}
-                onNavigate={onNavigate}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+        {galleryCard({
+          action: copyScansAction,
+          title: "Scanned documents",
+          whatItDoes: "Copies new scans from the shared folder to this computer.",
+          tint: "amber",
+          primaryLabel: "Copy scanned documents",
+          safety: "Copies only — originals stay in place.",
+          links: [
+            { label: "Shared scan folder", path: folders?.scansioniNetworkShare },
+            { label: "Local scans", path: folders?.scansioniLocalCacheFolder },
+          ],
+        })}
 
-      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Gmail sign-in and scanned documents
-        </summary>
-        <div className="mt-4 space-y-4">
-          <GmailAccessPanel
-            action={gmailReconnectAction}
-            workflow={workflowFor(gmailReconnectAction)}
-            disabledReason={actionDisabledReason(gmailReconnectAction)}
-            disabled={Boolean(runningCommand)}
-            isRunning={runningCommand === gmailReconnectAction.commandName}
-            buttonLabel="Check Gmail sign-in"
-            moduleReadiness={modules.find((module) => module.id === "gmailDrafts")}
-            onRun={() => onRun(gmailReconnectAction)}
-          />
+        {galleryCard({
+          action: ocrAction,
+          title: "Document reading",
+          whatItDoes: "Reads scanned pages and writes searchable text files.",
+          tint: "emerald",
+          primaryLabel: "Read scanned documents",
+          safety: "Scans are not changed. Gmail is not contacted.",
+          links: [
+            { label: "Local scans", path: folders?.scansioniLocalCacheFolder },
+            { label: "Text output", path: folders?.ocrTextOutputFolder },
+          ],
+        })}
 
-          <div className="rounded-xl border border-white/65 bg-white/45 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">Scanned documents</h2>
-                <p className="mt-1 text-sm font-medium text-slate-600">
-                  Copy and read scanned files when contracts need attention.
-                </p>
-              </div>
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
-                <Clock3 className="h-5 w-5" />
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {maintenanceActions.map((action) => (
-                <ActionButton
-                  key={action.commandName}
-                  action={action}
-                  workflow={workflowFor(action)}
-                  isRunning={runningCommand === action.commandName}
-                  disabled={Boolean(runningCommand) || Boolean(actionDisabledReason(action))}
-                  disabledReason={actionDisabledReason(action)}
-                  onClick={() => onRun(action)}
-                  label={
-                    action.commandName === "copy_scansioni"
-                      ? "Copy scanned documents"
-                      : "Read scanned documents"
-                  }
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </details>
+        {deliveryMode !== "prepareOnly" &&
+          galleryCard({
+            action: gmailReconnectAction,
+            title: "Gmail sign-in",
+            whatItDoes: "Keeps draft creation connected to the hotel's Gmail.",
+            tint: "rose",
+            primaryLabel: "Check Gmail sign-in",
+            safety: "Drafts only — no emails are sent.",
+          })}
 
-      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Show readiness by area
-        </summary>
-        <div className="mt-4">
-          <ModuleReadinessGrid modules={modules} compact />
-        </div>
-      </details>
+        <FutureWorkflowCard
+          icon={Bot}
+          title="AI-created automations"
+          whatItWillDo="Automations designed with the AI Assistant will appear here, ready to run with the same safety rules."
+          tint="violet"
+          chip="Coming soon"
+          actionLabel="Explore the AI Assistant"
+          onAction={() => onNavigate("assistant")}
+        />
+
+        <FutureWorkflowCard
+          icon={Send}
+          title="Send invoices automatically"
+          whatItWillDo="Sending without review stays locked until stronger controls are ready. Today, nothing is ever sent automatically."
+          tint="sky"
+          chip="Locked"
+          footnote="InnPilot never sends email on its own."
+        />
+      </div>
     </div>
   );
 }
 
-function BlockedWorkflow({
-  action,
-  reason,
-  onNavigate,
-}: {
-  action: AutomationAction;
-  reason: string | null;
-  onNavigate: (page: AppPage) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-md bg-white/60 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="text-sm font-semibold text-slate-900">{action.label}</p>
-        <p className="mt-1 text-xs font-semibold text-amber-800">
-          {reason ?? "Setup needs attention."}
-        </p>
-      </div>
-      <button
-        className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-ink-soft"
-        onClick={() => onNavigate("setup")}
-      >
-        Fix in Setup
-      </button>
-    </div>
-  );
+function shortStatus(record: ActivityRecord) {
+  if (record.status === "success") return "completed";
+  if (record.status === "needs_attention") return "needs review";
+  if (record.status === "failed") return "needs attention";
+  return record.status;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(value));
 }

@@ -82,7 +82,7 @@ Important config sections:
 
 - `client`: hotel display/signature names.
 - `paths`: invoice folders, Gmail credential/token file locations, contract scan/OCR/log folders.
-- `gmail`: subject and CC address for draft creation.
+- `gmail`: subject, CC address, and optional `bodyTemplate` for draft creation. `bodyTemplate` supports `{hotelName}`, `{signature}`, `{invoiceCount}`, and `{date}` placeholders; unknown placeholders are left untouched and an empty template falls back to the built-in body. InnPilot's Hotel & Settings page writes these keys when templates are saved.
 - `invoice`: delivery mode, input filename patterns, and recipient routing rules. `deliveryMode` can be `prepareOnly`, `gmailDrafts`, or the future blocked value `sendAutomatically`. `inputGlobs` may contain multiple patterns; legacy `inputGlob` is still accepted.
 - `contracts`: scanner filename prefixes, contract marker texts, and year metadata. `scannerFilePrefixes` and `contractMarkers` may contain multiple values; legacy single-string fields are still accepted.
 - `safety`: dry-run default, original archiving, and log redaction flags.
