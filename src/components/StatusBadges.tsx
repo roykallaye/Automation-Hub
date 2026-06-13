@@ -5,10 +5,12 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { useI18n } from "../i18n";
 import { readinessLabel } from "../messages";
 import type { ReadinessStatus, RunStatus } from "../types";
 
 export function ReadinessBadge({ status }: { status: ReadinessStatus }) {
+  const { t } = useI18n();
   const styles =
     status === "ready"
       ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
@@ -27,9 +29,30 @@ export function ReadinessBadge({ status }: { status: ReadinessStatus }) {
         styles,
       ].join(" ")}
     >
-      {readinessLabel(status)}
+      {localizedReadinessLabel(status, t)}
     </span>
   );
+}
+
+function localizedReadinessLabel(
+  status: ReadinessStatus,
+  t: ReturnType<typeof useI18n>["t"],
+) {
+  switch (status) {
+    case "ready":
+      return t("common.ready");
+    case "warning":
+    case "missingConfiguration":
+    case "missingScript":
+    case "missingFolder":
+      return t("common.needsAttention");
+    case "notChecked":
+      return t("common.notChecked");
+    case "permissionProblem":
+      return t("common.cannotRunYet");
+    default:
+      return readinessLabel(status);
+  }
 }
 
 export function StatusPill({

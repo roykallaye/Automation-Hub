@@ -8,6 +8,7 @@ import {
 import { applyBrandingToDocument } from "./branding";
 import { AppShell } from "./components/AppShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
+import { createTranslator, I18nProvider } from "./i18n";
 import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { deriveNextAction } from "./nextAction";
@@ -39,7 +40,7 @@ function App() {
   const [latestLogs, setLatestLogs] = useState<LatestLog[]>([]);
   const [activityHistory, setActivityHistory] = useState<ActivityRecord[]>([]);
   const [status, setStatus] = useState<RunStatus>("idle");
-  const [notice, setNotice] = useState<string>("Loading setup");
+  const [notice, setNotice] = useState<string>("");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
   const [currentPage, setCurrentPage] = useState<AppPage>("home");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
@@ -85,7 +86,7 @@ function App() {
     const unlistenFinished = listen<RunSummary>("command-finished", (event) => {
       setLastSummary(event.payload);
       setStatus(event.payload.status);
-      setNotice(event.payload.status === "error" ? "Run finished with errors" : "Run finished");
+      setNotice(event.payload.status === "error" ? t("app.runFinishedErrors") : t("app.runFinished"));
       void refreshConfigStatus();
       void refreshLatestLogs();
       void refreshActivityHistory();
@@ -98,6 +99,7 @@ function App() {
   }, []);
 
   const actions = useMemo(() => automationActions, []);
+  const t = useMemo(() => createTranslator(configStatus?.config.language), [configStatus?.config.language]);
 
   const runningLabel = useMemo(() => {
     if (!runningCommand) return null;
@@ -105,7 +107,7 @@ function App() {
   }, [actions, runningCommand]);
 
   const displayName = configStatus?.config.client.displayName || "InnPilot";
-  const modules = useMemo(() => deriveModuleReadiness(configStatus), [configStatus]);
+  const modules = useMemo(() => deriveModuleReadiness(configStatus, t), [configStatus, t]);
   const nextAction = useMemo(
     () =>
       deriveNextAction({
@@ -115,15 +117,16 @@ function App() {
         lastSummary,
         activityHistory,
         runningCommand,
+        t,
       }),
-    [activityHistory, configStatus, lastSummary, loadingConfig, modules, runningCommand],
+    [activityHistory, configStatus, lastSummary, loadingConfig, modules, runningCommand, t],
   );
 
   async function refreshConfigStatus() {
     try {
       const nextStatus = await invoke<AppConfigStatus>("get_config_status");
       setConfigStatus(nextStatus);
-      setNotice("Ready");
+      setNotice(t("app.ready"));
       return nextStatus;
     } catch (error) {
       setNotice(readError(error));
@@ -163,7 +166,7 @@ function App() {
 
   async function openPath(path?: string | null) {
     if (!path) {
-      setNotice("No folder is configured for this action.");
+      setNotice(t("app.noFolderConfigured"));
       return;
     }
     try {
@@ -175,7 +178,7 @@ function App() {
 
   async function openActivityReport(path?: string | null) {
     if (!path) {
-      setNotice("No activity report is available for this run.");
+      setNotice(t("app.noActivityReport"));
       return;
     }
     try {
@@ -213,7 +216,7 @@ function App() {
     setRunningCommand(action.commandName);
     setLiveOutput([]);
     setStatus("idle");
-    setNotice(`Running ${action.label}`);
+    setNotice(t("app.runningAction", { action: action.label }));
 
     try {
       const summary = await invoke<RunSummary>("run_command", {
@@ -222,7 +225,7 @@ function App() {
       });
       setLastSummary(summary);
       setStatus(summary.status);
-      setNotice(summary.status === "error" ? "Run finished with errors" : "Run finished");
+      setNotice(summary.status === "error" ? t("app.runFinishedErrors") : t("app.runFinished"));
     } catch (error) {
       setStatus("error");
       setNotice(readError(error));
@@ -237,10 +240,10 @@ function App() {
   }
 
   function actionDisabledReason(action: AutomationAction) {
-    if (loadingConfig) return "InnPilot setup is still loading.";
-    if (!configStatus) return "InnPilot setup could not be loaded.";
+    if (loadingConfig) return t("app.setupLoading");
+    if (!configStatus) return t("app.setupLoadFailed");
     const workflow = workflowFor(action);
-    if (!workflow) return "Workflow status is not available.";
+    if (!workflow) return t("app.workflowStatusMissing");
     if (!workflow.canRun) {
       const module = moduleForCommand(modules, action.commandName);
       if (module && module.status !== "ready") return module.nextAction;
@@ -250,15 +253,16 @@ function App() {
   }
 
   return (
-    <AppShell
-      currentPage={currentPage}
-      displayName={displayName}
-      logoDataUrl={logoDataUrl}
-      status={runningCommand ? "warning" : status}
-      statusLabel={runningLabel ?? notice}
-      nextAction={nextAction}
-      onPageChange={setCurrentPage}
-    >
+    <I18nProvider language={configStatus?.config.language}>
+      <AppShell
+        currentPage={currentPage}
+        displayName={displayName}
+        logoDataUrl={logoDataUrl}
+        status={runningCommand ? "warning" : status}
+        statusLabel={runningLabel ?? (notice || t("app.loadingSetup"))}
+        nextAction={nextAction}
+        onPageChange={setCurrentPage}
+      >
       {currentPage === "home" && (
         <HomePage
           configStatus={configStatus}
@@ -341,7 +345,8 @@ function App() {
           onConfirm={() => runAction(pendingAction, true)}
         />
       )}
-    </AppShell>
+      </AppShell>
+    </I18nProvider>
   );
 }
 

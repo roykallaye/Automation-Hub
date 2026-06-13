@@ -2,6 +2,7 @@ import { Check, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { preRunFacts } from "../messages";
+import { useI18n } from "../i18n";
 import type { AutomationAction, InvoiceDeliveryMode, InvoiceFileSelectionMode } from "../types";
 
 /*
@@ -25,6 +26,7 @@ export function ConfirmationModal({
   onConfirm: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -35,7 +37,7 @@ export function ConfirmationModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
 
-  const facts = preRunFacts(action.commandName, deliveryMode, fileSelectionMode, safeModeOn);
+  const facts = preRunFacts(action.commandName, deliveryMode, fileSelectionMode, safeModeOn, t);
   const Icon = action.icon;
 
   return (
@@ -57,10 +59,10 @@ export function ConfirmationModal({
             </div>
             <div>
               <p className="text-xs font-bold uppercase tracking-wide text-brand-800">
-                Before this run
+                {t("confirm.beforeRun")}
               </p>
               <h2 id="confirmation-title" className="text-lg font-semibold text-slate-950">
-                {action.confirmationTitle}
+                {confirmationTitle(action.commandName, action.confirmationTitle, t)}
               </h2>
             </div>
           </div>
@@ -105,17 +107,30 @@ export function ConfirmationModal({
             className="rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
             onClick={onCancel}
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             ref={confirmRef}
             className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-ink-soft"
             onClick={onConfirm}
           >
-            Start run
+            {t("common.startRun")}
           </button>
         </div>
       </section>
     </div>
   );
+}
+
+function confirmationTitle(
+  commandName: string,
+  fallback: string,
+  t: ReturnType<typeof useI18n>["t"],
+) {
+  if (commandName === "process_invoices_and_drafts") return t("confirm.processInvoices");
+  if (commandName === "process_signed_contracts") return t("confirm.processSignedContracts");
+  if (commandName === "copy_scansioni") return t("confirm.copyScans");
+  if (commandName === "ocr_preprocessing") return t("confirm.readScans");
+  if (commandName === "reconnect_gmail") return t("confirm.reconnectGmail");
+  return fallback;
 }

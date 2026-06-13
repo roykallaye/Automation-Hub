@@ -1,4 +1,4 @@
-import {
+﻿import {
   Activity,
   ClipboardCheck,
   LifeBuoy,
@@ -11,6 +11,7 @@ import {
 
 import { DestinationCard } from "../components/DestinationCard";
 import { StatusHint, type StatusTone } from "../components/StatusOrb";
+import { useI18n } from "../i18n";
 import type { CardTint } from "../components/tints";
 import { deliveryModeLabel } from "../messages";
 import type {
@@ -22,7 +23,7 @@ import type {
 import type { NextAction } from "../nextAction";
 
 /*
-  Home is a calm, guided entry point — not a dashboard.
+  Home is a calm, guided entry point â€” not a dashboard.
 
   One hero with the single next action, then large destination cards.
   Nothing runs from Home; the user is guided to the right place instead.
@@ -42,9 +43,10 @@ export function HomePage({
   nextAction: NextAction;
   onNavigate: (page: AppPage) => void;
 }) {
+  const { t } = useI18n();
   const safeModeOn = configStatus?.config.safety.dryRunDefault ?? false;
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
-  const destinations = buildDestinations({ configStatus, modules, loading, lastSummary });
+  const destinations = buildDestinations({ configStatus, modules, loading, lastSummary, t });
 
   return (
     <div className="space-y-5">
@@ -59,7 +61,7 @@ export function HomePage({
                 <Sparkles className="h-6 w-6" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-brand-800">{timeOfDayGreeting()}</p>
+                <p className="text-sm font-semibold text-brand-800">{timeOfDayGreeting(t)}</p>
                 <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">
                   {nextAction.title}
                 </h2>
@@ -70,12 +72,12 @@ export function HomePage({
                   {safeModeOn && (
                     <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200">
                       <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                      Safe mode on — runs do not change real files
+                      {t("home.safeModeOn")}
                     </span>
                   )}
                   {deliveryMode && (
                     <span className="inline-flex rounded-md bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800 ring-1 ring-brand-200">
-                      Invoices: {deliveryModeLabel(deliveryMode)}
+                      {t("home.invoicesMode", { mode: deliveryModeLabel(deliveryMode, t) })}
                     </span>
                   )}
                 </div>
@@ -96,15 +98,15 @@ export function HomePage({
             >
               <span className="min-w-0">
                 <span className="block text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Most recent
+                  {t("home.mostRecent")}
                 </span>
                 <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">
-                  {lastSummary.automation_name} · {formatTime(lastSummary.end_time)}
+                  {lastSummary.automation_name} Â· {formatTime(lastSummary.end_time)}
                 </span>
               </span>
               <StatusHint
                 tone={lastRunTone(lastSummary)}
-                label={lastRunLabel(lastSummary)}
+                label={lastRunLabel(lastSummary, t)}
               />
             </button>
           )}
@@ -149,11 +151,13 @@ function buildDestinations({
   modules,
   loading,
   lastSummary,
+  t,
 }: {
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
   loading: boolean;
   lastSummary: RunSummary | null;
+  t: ReturnType<typeof useI18n>["t"];
 }): Destination[] {
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const primaryIds =
@@ -183,70 +187,70 @@ function buildDestinations({
     {
       page: "setup",
       icon: ClipboardCheck,
-      title: "Setup",
-      description: "Prepare folders, tools, and invoice delivery — one step at a time.",
+      title: t("home.setupTitle"),
+      description: t("home.setupDescription"),
       tint: "sky",
       hintTone: loading ? "neutral" : primaryReady ? "ready" : "attention",
-      hintLabel: loading ? "Checking..." : primaryReady ? "Checks passing" : "Finish setup",
-      actionLabel: primaryReady ? "Review" : "Continue",
+      hintLabel: loading ? t("common.checking") : primaryReady ? t("home.setupReady") : t("home.setupFinish"),
+      actionLabel: primaryReady ? t("common.review") : t("common.continue"),
     },
     {
       page: "automations",
       icon: PlayCircle,
-      title: "Automations",
-      description: "Run today's back-office work and see exactly what will happen first.",
+      title: t("home.automationsTitle"),
+      description: t("home.automationsDescription"),
       tint: "brand",
       hintTone: loading ? "neutral" : primaryReady ? "ready" : "attention",
       hintLabel: loading
-        ? "Checking..."
-        : `${readyCount} of ${workModules.length} ready`,
-      actionLabel: "Open",
+        ? t("common.checking")
+        : t("home.readyCount", { ready: readyCount, total: workModules.length }),
+      actionLabel: t("common.open"),
     },
     {
       page: "activity",
       icon: Activity,
-      title: "Activity",
-      description: "A clear story of every run: what was found, prepared, and skipped.",
+      title: t("home.activityTitle"),
+      description: t("home.activityDescription"),
       tint: "emerald",
       hintTone: lastSummary ? lastRunTone(lastSummary) : "neutral",
-      hintLabel: lastSummary ? lastRunLabel(lastSummary) : "No runs yet",
-      actionLabel: "Review",
+      hintLabel: lastSummary ? lastRunLabel(lastSummary, t) : t("home.noRunsYet"),
+      actionLabel: t("common.review"),
     },
     {
       page: "settings",
       icon: Settings2,
-      title: "Hotel & Settings",
-      description: "Your name, colors, logo, and the wording InnPilot writes for you.",
+      title: t("home.settingsTitle"),
+      description: t("home.settingsDescription"),
       tint: "amber",
       hintTone: hotelNamed ? "ready" : "neutral",
-      hintLabel: hotelNamed ? hotelName! : "Make it yours",
-      actionLabel: "Customize",
+      hintLabel: hotelNamed ? hotelName! : t("home.makeItYours"),
+      actionLabel: t("common.customize"),
     },
     {
       page: "assistant",
       icon: Wand2,
-      title: "AI Assistant",
-      description: "Describe a repetitive task and shape it into a new automation.",
+      title: t("home.assistantTitle"),
+      description: t("home.assistantDescription"),
       tint: "violet",
       hintTone: "future",
-      hintLabel: "Prototype",
-      actionLabel: "Explore",
-      futureChip: "Coming soon",
+      hintLabel: t("home.prototype"),
+      actionLabel: t("common.explore"),
+      futureChip: t("common.comingSoon"),
     },
     {
       page: "support",
       icon: LifeBuoy,
-      title: "Support",
-      description: "Calm diagnostics for tools and folders — no terminal needed.",
+      title: t("home.supportTitle"),
+      description: t("home.supportDescription"),
       tint: "rose",
       hintTone: supportTone,
       hintLabel:
         supportTone === "ready"
-          ? "All tools found"
+          ? t("home.allToolsFound")
           : supportTone === "neutral"
-            ? "Checking..."
-            : "Check tools",
-      actionLabel: "Open",
+            ? t("common.checking")
+            : t("home.checkTools"),
+      actionLabel: t("common.open"),
     },
   ];
 }
@@ -257,17 +261,17 @@ function lastRunTone(summary: RunSummary): StatusTone {
   return "blocked";
 }
 
-function lastRunLabel(summary: RunSummary) {
-  if (summary.status === "success") return "Completed";
-  if (summary.status === "warning") return "Needs review";
-  return "Needs attention";
+function lastRunLabel(summary: RunSummary, t: ReturnType<typeof useI18n>["t"]) {
+  if (summary.status === "success") return t("status.completed");
+  if (summary.status === "warning") return t("status.needsReview");
+  return t("status.needsAttention");
 }
 
-function timeOfDayGreeting() {
+function timeOfDayGreeting(t: ReturnType<typeof useI18n>["t"]) {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  if (hour < 12) return t("home.goodMorning");
+  if (hour < 18) return t("home.goodAfternoon");
+  return t("home.goodEvening");
 }
 
 function formatTime(value: string) {
@@ -276,3 +280,4 @@ function formatTime(value: string) {
     minute: "2-digit",
   }).format(new Date(value));
 }
+

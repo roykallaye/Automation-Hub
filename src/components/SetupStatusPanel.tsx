@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 
+import { useI18n } from "../i18n";
 import { friendlyWorkflowLabel, staffMessage } from "../messages";
 import type { AppConfigStatus } from "../types";
 import { ReadinessBadge } from "./StatusBadges";
@@ -13,6 +14,7 @@ export function SetupStatusPanel({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useI18n();
   const workflows = configStatus?.preflight.workflows ?? [];
   const automationConfig = configStatus?.preflight.items.find(
     (item) => item.key === "automationConfigPath",
@@ -24,13 +26,13 @@ export function SetupStatusPanel({
     <section className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-4 flex items-start justify-between gap-5">
         <div>
-          <h2 className="text-xl font-semibold text-slate-950">InnPilot setup</h2>
+          <h2 className="text-xl font-semibold text-slate-950">{t("setup.panelTitle")}</h2>
           <p className="mt-1 text-sm font-medium text-slate-600">
             {configStatus
-              ? "InnPilot checks setup and folders before enabling workflows."
+              ? t("setup.panelReadyText")
               : loading
-                ? "Checking setup..."
-                : "InnPilot setup could not be loaded."}
+                ? t("setup.panelChecking")
+                : t("app.setupLoadFailed")}
           </p>
         </div>
         <button
@@ -38,13 +40,13 @@ export function SetupStatusPanel({
           onClick={onRefresh}
         >
           <RefreshCw className="h-4 w-4 text-brand-700" />
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
       {automationConfig && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-md bg-white/60 p-3">
           <div>
-            <p className="text-sm font-semibold text-slate-900">Automation setup file</p>
+            <p className="text-sm font-semibold text-slate-900">{t("setup.automationSetupFile")}</p>
             <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
               {staffMessage(
                 automationConfig.message,
@@ -59,7 +61,7 @@ export function SetupStatusPanel({
       {configAlignment && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-md bg-amber-50 p-3 ring-1 ring-amber-200">
           <div>
-            <p className="text-sm font-semibold text-amber-950">Setup needs review</p>
+            <p className="text-sm font-semibold text-amber-950">{t("setup.needsReview")}</p>
             <p className="mt-1 text-xs font-medium leading-5 text-amber-800">
               {staffMessage(configAlignment.message, configAlignment.status, configAlignment.key)}
             </p>
@@ -83,7 +85,7 @@ export function SetupStatusPanel({
         ))}
         {!workflows.length && (
           <div className="rounded-md bg-white/60 p-3 text-sm font-medium text-slate-700">
-            Not checked.
+            {t("setup.notChecked")}
           </div>
         )}
       </div>

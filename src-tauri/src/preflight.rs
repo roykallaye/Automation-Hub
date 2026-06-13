@@ -1963,6 +1963,7 @@ mod tests {
 
         let config = HubConfig {
             schema_version: 2,
+            language: "en".to_string(),
             client: ClientConfig {
                 display_name: "Test Hotel".to_string(),
                 branding: crate::config::BrandingConfig::default(),

@@ -1,5 +1,6 @@
 import { FileText, History } from "lucide-react";
 
+import { useI18n } from "../i18n";
 import type { AppConfigStatus, LatestLog, RunSummary } from "../types";
 import { DeveloperDetails } from "./DeveloperDetails";
 import { StatusPill } from "./StatusBadges";
@@ -19,6 +20,7 @@ export function DetailsPanel({
   onOpenPath: (path?: string | null) => void;
   onRefresh: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <aside className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="mb-5 flex items-center justify-between">
@@ -26,13 +28,13 @@ export function DetailsPanel({
           <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-brand-100">
             <History className="h-5 w-5" />
           </div>
-          <h2 className="text-xl font-semibold text-slate-950">Last run</h2>
+          <h2 className="text-xl font-semibold text-slate-950">{t("details.lastRun")}</h2>
         </div>
         <button
           className="rounded-md border border-white/70 bg-white/60 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -40,20 +42,20 @@ export function DetailsPanel({
         <div className="space-y-5">
           <div>
             <p className="text-sm font-medium text-brand-800">{summary.automation_name}</p>
-            <StatusPill status={summary.status} label={resultLabel(summary.status)} compact />
+            <StatusPill status={summary.status} label={resultLabel(summary.status, t)} compact />
           </div>
 
           <dl className="grid grid-cols-2 gap-3 text-sm">
-            <Metric label="Start" value={formatDate(summary.start_time)} />
-            <Metric label="End" value={formatDate(summary.end_time)} />
-            <Metric label="Duration" value={formatDuration(summary.duration_ms)} />
+            <Metric label={t("details.start")} value={formatDate(summary.start_time)} />
+            <Metric label={t("details.end")} value={formatDate(summary.end_time)} />
+            <Metric label={t("details.duration")} value={formatDuration(summary.duration_ms)} />
             {showDeveloperDetails && (
-              <Metric label="Technical code" value={String(summary.exit_code)} />
+              <Metric label={t("details.technicalCode")} value={String(summary.exit_code)} />
             )}
           </dl>
 
           <div>
-            <p className="mb-2 text-sm font-semibold text-slate-800">Steps</p>
+            <p className="mb-2 text-sm font-semibold text-slate-800">{t("details.steps")}</p>
             <div className="space-y-2">
               {summary.steps.map((step) => (
                 <div
@@ -71,24 +73,24 @@ export function DetailsPanel({
 
           <details>
             <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-              Technical details from last run
+              {t("details.technicalLastRun")}
             </summary>
             <pre className="mt-3 h-52 overflow-auto rounded-md bg-ink p-3 font-mono text-xs leading-5 text-slate-100">
               {summary.last_output_lines.length
                 ? summary.last_output_lines.join("\n")
-                : "No captured output."}
+                : t("details.noCapturedOutput")}
             </pre>
           </details>
         </div>
       ) : (
         <div className="rounded-lg border border-white/70 bg-white/60 p-5 text-sm font-medium leading-6 text-slate-700">
-          No run yet. When an automation finishes, InnPilot will show the result here.
+          {t("details.noRun")}
         </div>
       )}
 
       <details className="mt-5 border-t border-white/60 pt-5">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Support logs
+          {t("support.logs")}
         </summary>
         <div className="mt-3 space-y-2">
           {latestLogs.map((log) => (
@@ -110,10 +112,10 @@ export function DetailsPanel({
   );
 }
 
-function resultLabel(status: RunSummary["status"]) {
-  if (status === "success") return "Completed";
-  if (status === "warning") return "Needs attention";
-  return "Needs attention";
+function resultLabel(status: RunSummary["status"], t: ReturnType<typeof useI18n>["t"]) {
+  if (status === "success") return t("status.completed");
+  if (status === "warning") return t("status.needsAttention");
+  return t("status.needsAttention");
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

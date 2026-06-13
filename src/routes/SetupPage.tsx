@@ -6,6 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupStatusPanel } from "../components/SetupStatusPanel";
 import { SetupWizard } from "../components/SetupWizard/SetupWizard";
+import { useI18n } from "../i18n";
 import { staffMessage } from "../messages";
 import type {
   AppConfigStatus,
@@ -32,8 +33,9 @@ export function SetupPage({
   onGoToAutomations: () => void;
   onGoToSupport: () => void;
 }) {
+  const { t } = useI18n();
   const [showWizard, setShowWizard] = useState(false);
-  const guidance = setupGuidance(configStatus, loading);
+  const guidance = setupGuidance(configStatus, loading, t);
   const setupIncomplete =
     !loading &&
     (!configStatus ||
@@ -64,9 +66,9 @@ export function SetupPage({
   if (showWizard) {
     return (
       <FocusFlow
-        eyebrow="Guided setup"
-        title="Prepare InnPilot for your hotel"
-        exitLabel="Leave setup"
+        eyebrow={t("setup.guidedEyebrow")}
+        title={t("setup.guidedTitle")}
+        exitLabel={t("setup.leave")}
         onExit={() => setShowWizard(false)}
       >
         <SetupWizard
@@ -80,12 +82,12 @@ export function SetupPage({
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Setup" eyebrow="Readiness check">
+      <PageHeader title={t("setup.title")} eyebrow={t("setup.eyebrow")}>
         <button
           className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </PageHeader>
 
@@ -122,8 +124,8 @@ export function SetupPage({
             {nextAction.targetPage === "setup"
               ? nextAction.buttonLabel
               : setupReady
-                ? "Review setup"
-                : "Continue setup"}
+                ? t("setup.reviewSetup")
+                : t("setup.continueSetup")}
           </button>
         </div>
       </section>
@@ -132,16 +134,16 @@ export function SetupPage({
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-glass">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-emerald-950">Setup is ready</h2>
+              <h2 className="text-xl font-semibold text-emerald-950">{t("setup.readyTitle")}</h2>
               <p className="mt-1 text-sm font-medium text-emerald-800">
-                InnPilot setup checks are passing. Workflows are still started manually.
+                {t("setup.readyDetail")}
               </p>
             </div>
             <button
               className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
               onClick={onGoToAutomations}
             >
-              Go to Automations
+              {t("setup.goAutomations")}
             </button>
           </div>
         </section>
@@ -161,7 +163,7 @@ export function SetupPage({
                 className="shrink-0 rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-ink-soft"
                 onClick={onGoToSupport}
               >
-                Open Support
+                {t("setup.openSupport")}
               </button>
             )}
           </div>
@@ -170,7 +172,7 @@ export function SetupPage({
 
       <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Show readiness by area
+          {t("setup.showReadiness")}
         </summary>
         <div className="mt-4">
           <ModuleReadinessGrid modules={modules} />
@@ -179,7 +181,7 @@ export function SetupPage({
 
       <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          Technical details for support
+          {t("setup.technicalDetails")}
         </summary>
         <div className="mt-4">
           <SetupStatusPanel
@@ -203,22 +205,23 @@ type SetupGuidance = {
 function setupGuidance(
   configStatus: AppConfigStatus | null,
   loading: boolean,
+  t: ReturnType<typeof useI18n>["t"],
 ): SetupGuidance {
   if (loading) {
     return {
       tone: "attention",
-      title: "Checking setup",
-      summary: "Checking InnPilot setup...",
-      detail: "InnPilot is checking folders and tools.",
+      title: t("setup.checkingTitle"),
+      summary: t("setup.checkingSummary"),
+      detail: t("setup.checkingDetail"),
     };
   }
 
   if (!configStatus) {
     return {
       tone: "attention",
-      title: "Setup could not be loaded",
-      summary: "InnPilot setup could not be loaded.",
-      detail: "Refresh setup or ask setup support to check InnPilot.",
+      title: t("setup.loadFailedTitle"),
+      summary: t("setup.loadFailedSummary"),
+      detail: t("setup.loadFailedDetail"),
     };
   }
 
@@ -228,9 +231,9 @@ function setupGuidance(
   if (!blockingWorkflow) {
     return {
       tone: "ready",
-      title: "Setup is ready",
-      summary: "Setup is ready.",
-      detail: "InnPilot setup checks are passing. Workflows are still started manually.",
+      title: t("setup.readyTitle"),
+      summary: t("setup.readyTitle"),
+      detail: t("setup.readyDetail"),
     };
   }
 
@@ -238,8 +241,8 @@ function setupGuidance(
   if (!item) {
     return {
       tone: "attention",
-      title: "Setup needs one more step",
-      summary: "Setup needs one more step.",
+      title: t("setup.oneMoreTitle"),
+      summary: t("setup.oneMoreSummary"),
       detail: staffMessage(blockingWorkflow.message, blockingWorkflow.status, blockingWorkflow.key),
     };
   }
@@ -247,71 +250,71 @@ function setupGuidance(
   if (item.key === "automationConfigPath") {
     return {
       tone: "attention",
-      title: "Save setup to finish",
-      summary: "Setup draft is not saved yet.",
-      detail: "Create folders, then save setup from the guided setup review step.",
+      title: t("setup.saveToFinishTitle"),
+      summary: t("setup.saveToFinishSummary"),
+      detail: t("setup.saveToFinishDetail"),
     };
   }
 
   if (item.key === "automationRootFolder") {
     return {
       tone: "attention",
-      title: "Automation scripts need installing",
-      summary: "Setup saved. InnPilot automation scripts are not installed yet.",
-      detail: "Open Support and install InnPilot automation scripts, then run Check setup.",
+      title: t("setup.scriptsNeedInstallTitle"),
+      summary: t("setup.scriptsNeedInstallSummary"),
+      detail: t("setup.scriptsNeedInstallDetail"),
     };
   }
 
   if (item.key === "automationConfigAlignment" || item.key === "configAlignment") {
     return {
       tone: "attention",
-      title: "Setup files need review",
-      summary: "Setup was saved, but the setup files do not fully match.",
-      detail: "Open guided setup, save again, then run Check setup.",
+      title: t("setup.filesReviewTitle"),
+      summary: t("setup.filesReviewSummary"),
+      detail: t("setup.filesReviewDetail"),
     };
   }
 
   if (item.key === "gmailTokenAlignment") {
     return {
       tone: "attention",
-      title: "Gmail sign-in setup needs review",
-      summary: "Setup saved. Gmail sign-in paths do not match yet.",
-      detail: "Check the Gmail sign-in file path in guided setup and save again.",
+      title: t("setup.gmailReviewTitle"),
+      summary: t("setup.gmailReviewSummary"),
+      detail: t("setup.gmailReviewDetail"),
     };
   }
 
   if (item.key === "gmailTokenFolder") {
     return {
       tone: "attention",
-      title: "Gmail folder needs attention",
-      summary: "Setup saved. The Gmail sign-in folder is not ready yet.",
-      detail: "Create folders from guided setup, then run Check setup.",
+      title: t("setup.gmailFolderTitle"),
+      summary: t("setup.gmailFolderSummary"),
+      detail: t("setup.gmailFolderDetail"),
     };
   }
 
   if (item.key === "gmailTokenPath") {
     return {
       tone: "attention",
-      title: "Gmail sign-in can be completed later",
-      summary: "Setup saved. Gmail sign-in still needs to be completed.",
-      detail: "Reconnect Gmail when ready. InnPilot creates drafts only and never sends emails automatically.",
+      title: t("setup.gmailLaterTitle"),
+      summary: t("setup.gmailLaterSummary"),
+      detail: t("setup.gmailLaterDetail"),
     };
   }
 
   if (item.key === "gmailCredentialsFile") {
     return {
       tone: "attention",
-      title: "Choose Gmail credentials or prepare files only",
-      summary: "Invoice files can be prepared without Gmail.",
-      detail: "Choose the Gmail credentials file for draft creation, or switch invoice delivery to Prepare files only in guided setup.",
+      title: t("setup.gmailCredentialsTitle"),
+      summary: t("setup.gmailCredentialsSummary"),
+      detail: t("setup.gmailCredentialsDetail"),
     };
   }
 
   if (item.itemType === "folder") {
     return {
       tone: "attention",
-      title: "Folders need attention",
-      summary: "Setup saved. One folder is not ready yet.",
+      title: t("setup.foldersNeedTitle"),
+      summary: t("setup.foldersNeedSummary"),
       detail: folderGuidance(item),
     };
   }
@@ -319,7 +322,7 @@ function setupGuidance(
   if (item.itemType === "script") {
     return {
       tone: "attention",
-      title: "Automation tools need attention",
+      title: t("setup.toolsNeedTitle"),
       summary: scriptSummary(item),
       detail: scriptGuidance(item),
     };
@@ -328,25 +331,25 @@ function setupGuidance(
   if (item.key === "pythonExecutable") {
     return {
       tone: "attention",
-      title: "Python needs attention",
-      summary: "Setup saved. Python is not available yet.",
-      detail: "Open Support to check the selected Python executable and installation steps.",
+      title: t("setup.pythonNeedTitle"),
+      summary: t("setup.pythonNeedSummary"),
+      detail: t("setup.pythonNeedDetail"),
     };
   }
 
   if (item.key === "pythonPackages") {
     return {
       tone: "attention",
-      title: "Python packages need installing",
-      summary: "Setup saved. Python packages are not ready yet.",
-      detail: "Open Support and install the Python packages needed by InnPilot automations.",
+      title: t("setup.pythonPackagesTitle"),
+      summary: t("setup.pythonPackagesSummary"),
+      detail: t("setup.pythonPackagesDetail"),
     };
   }
 
   return {
     tone: "attention",
-    title: "Setup needs one more step",
-    summary: "Setup needs one more step.",
+    title: t("setup.oneMoreTitle"),
+    summary: t("setup.oneMoreSummary"),
     detail: staffMessage(blockingWorkflow.message, blockingWorkflow.status, blockingWorkflow.key),
   };
 }

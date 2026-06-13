@@ -10,6 +10,7 @@ import {
   MAX_WATERMARK_OPACITY_PERCENT,
   tripletToCss,
 } from "../branding";
+import { useI18n } from "../i18n";
 import { InfoHint } from "./InfoHint";
 import type { AppConfigStatus, ClientBranding } from "../types";
 
@@ -24,6 +25,7 @@ export function BrandingPanel({
   configStatus: AppConfigStatus | null;
   onSaved: () => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const savedBranding = configStatus?.config.client.branding ?? DEFAULT_BRANDING;
   const savedName = configStatus?.config.client.displayName ?? "";
   const [displayName, setDisplayName] = useState(savedName);
@@ -73,7 +75,7 @@ export function BrandingPanel({
       await invoke<AppConfigStatus>("save_client_branding", {
         draft: { displayName, ...draft },
       });
-      setResult({ kind: "success", message: "Hotel identity saved." });
+      setResult({ kind: "success", message: t("branding.saved") });
       await onSaved();
     } catch (error) {
       setResult({
@@ -101,13 +103,13 @@ export function BrandingPanel({
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200">
           <Palette className="h-5 w-5" aria-hidden="true" />
         </div>
-        <h2 className="text-xl font-semibold text-slate-950">Hotel identity</h2>
-        <InfoHint text="Make InnPilot feel like your hotel. The logo stays on this computer." />
+        <h2 className="text-xl font-semibold text-slate-950">{t("branding.title")}</h2>
+        <InfoHint text={t("branding.hint")} />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-800">Hotel name</span>
+          <span className="mb-2 block text-sm font-semibold text-slate-800">{t("branding.hotelName")}</span>
           <input
             className="w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
             value={displayName}
@@ -115,12 +117,12 @@ export function BrandingPanel({
               setDisplayName(event.target.value);
               setResult(null);
             }}
-            placeholder="Your Hotel"
+            placeholder={t("branding.hotelPlaceholder")}
           />
         </label>
 
         <div>
-          <span className="mb-2 block text-sm font-semibold text-slate-800">Hotel logo</span>
+          <span className="mb-2 block text-sm font-semibold text-slate-800">{t("branding.hotelLogo")}</span>
           <div className="flex flex-wrap items-center gap-2">
             <button
               className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/70 bg-white/80 px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
@@ -128,7 +130,7 @@ export function BrandingPanel({
               onClick={() => void chooseLogo()}
             >
               <Image className="h-4 w-4 text-brand-700" aria-hidden="true" />
-              {draft.logoPath ? "Change logo" : "Choose logo"}
+              {draft.logoPath ? t("branding.changeLogo") : t("branding.chooseLogo")}
             </button>
             {draft.logoPath && (
               <button
@@ -137,18 +139,18 @@ export function BrandingPanel({
                 onClick={() => update({ logoPath: "" })}
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
-                Remove
+                {t("branding.remove")}
               </button>
             )}
           </div>
           <p className="mt-2 truncate text-xs font-medium text-slate-500" title={draft.logoPath}>
-            {draft.logoPath || "No logo yet — the InnPilot mark is used instead."}
+            {draft.logoPath || t("branding.noLogo")}
           </p>
         </div>
       </div>
 
       <fieldset className="mt-5">
-        <legend className="mb-2 text-sm font-semibold text-slate-800">Color palette</legend>
+        <legend className="mb-2 text-sm font-semibold text-slate-800">{t("branding.palette")}</legend>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {BRAND_PALETTES.map((palette) => {
             const selected = draft.palette === palette.id;
@@ -195,9 +197,9 @@ export function BrandingPanel({
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-white/65 bg-white/65 p-4">
           <span>
-            <span className="block text-sm font-semibold text-slate-950">Logo watermark</span>
+            <span className="block text-sm font-semibold text-slate-950">{t("branding.watermark")}</span>
             <span className="mt-1 block text-sm font-medium leading-5 text-slate-600">
-              A faint hotel mark in the corner of the app.
+              {t("branding.watermarkHint")}
             </span>
           </span>
           <input
@@ -209,7 +211,7 @@ export function BrandingPanel({
         </label>
         <label className="block rounded-lg border border-white/65 bg-white/65 p-4">
           <span className="flex items-center justify-between text-sm font-semibold text-slate-950">
-            Watermark strength
+            {t("branding.watermarkStrength")}
             <span className="text-xs font-bold text-slate-600">{draft.watermarkOpacity}%</span>
           </span>
           <input
@@ -219,7 +221,7 @@ export function BrandingPanel({
             max={MAX_WATERMARK_OPACITY_PERCENT}
             value={draft.watermarkOpacity}
             disabled={!draft.watermarkEnabled}
-            aria-label="Watermark strength percent"
+            aria-label={t("branding.watermarkStrength")}
             onChange={(event) => update({ watermarkOpacity: Number(event.target.value) })}
           />
         </label>
@@ -231,7 +233,7 @@ export function BrandingPanel({
           disabled={saving || !isDirty}
           onClick={() => void save()}
         >
-          {saving ? "Saving..." : "Save hotel identity"}
+          {saving ? t("common.saving") : t("branding.save")}
         </button>
         <button
           className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/70 bg-white/65 px-4 text-sm font-semibold text-slate-700 transition hover:bg-white"
@@ -239,7 +241,7 @@ export function BrandingPanel({
           onClick={resetToDefault}
         >
           <RotateCcw className="h-4 w-4" aria-hidden="true" />
-          Reset to InnPilot default
+          {t("branding.reset")}
         </button>
         {result && (
           <p

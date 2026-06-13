@@ -1,3 +1,5 @@
+import { useI18n } from "../../i18n";
+
 export type WizardStepMeta = {
   key: string;
   title: string;
@@ -10,12 +12,13 @@ export function StepProgress({
   steps: WizardStepMeta[];
   currentIndex: number;
 }) {
+  const { t } = useI18n();
   return (
     <div className="rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase text-slate-500">Progress</p>
+        <p className="text-xs font-semibold uppercase text-slate-500">{t("wizard.progress")}</p>
         <p className="text-xs font-bold text-slate-800">
-          {currentIndex + 1} of {steps.length}
+          {t("wizard.progressCount", { current: currentIndex + 1, total: steps.length })}
         </p>
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1 xl:block xl:space-y-2 xl:overflow-visible xl:pb-0">

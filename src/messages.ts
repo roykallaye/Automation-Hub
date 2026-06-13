@@ -4,31 +4,42 @@ import type {
   ReadinessStatus,
   WorkflowPreflight,
 } from "./types";
+import type { TranslationKey } from "./i18n";
+
+type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 
 /** Short label for the configured invoice delivery mode. */
-export function deliveryModeLabel(mode?: InvoiceDeliveryMode | null) {
-  if (mode === "prepareOnly") return "Prepare files only";
-  if (mode === "sendAutomatically") return "Send automatically (not available)";
-  return "Create Gmail drafts";
+export function deliveryModeLabel(mode?: InvoiceDeliveryMode | null, t?: T) {
+  if (mode === "prepareOnly") return t ? t("delivery.prepareOnly") : "Prepare files only";
+  if (mode === "sendAutomatically") {
+    return t ? t("delivery.sendAutomatically") : "Send automatically (not available)";
+  }
+  return t ? t("delivery.gmailDrafts") : "Create Gmail drafts";
 }
 
 /** One-line promise of what the invoice workflow will do in this mode. */
-export function deliveryModePromise(mode?: InvoiceDeliveryMode | null) {
+export function deliveryModePromise(mode?: InvoiceDeliveryMode | null, t?: T) {
   if (mode === "prepareOnly") {
-    return "Prepares invoice PDFs from the invoice folder. Gmail is skipped.";
+    return t
+      ? t("delivery.prepareOnlyPromise")
+      : "Prepares invoice PDFs from the invoice folder. Gmail is skipped.";
   }
   if (mode === "sendAutomatically") {
-    return "Automatic sending is not available yet. Choose another delivery mode.";
+    return t
+      ? t("delivery.sendAutomaticallyPromise")
+      : "Automatic sending is not available yet. Choose another delivery mode.";
   }
-  return "Prepares invoice PDFs from the invoice folder and creates Gmail drafts for review.";
+  return t
+    ? t("delivery.gmailDraftsPromise")
+    : "Prepares invoice PDFs from the invoice folder and creates Gmail drafts for review.";
 }
 
 /** One-line reassurance of what will NOT happen in this mode. */
-export function deliveryModeReassurance(mode?: InvoiceDeliveryMode | null) {
+export function deliveryModeReassurance(mode?: InvoiceDeliveryMode | null, t?: T) {
   if (mode === "prepareOnly") {
-    return "No drafts are created and no emails are sent.";
+    return t ? t("delivery.prepareOnlyReassurance") : "No drafts are created and no emails are sent.";
   }
-  return "Drafts only — no emails are sent.";
+  return t ? t("delivery.draftsOnlyReassurance") : "Drafts only - no emails are sent.";
 }
 
 export type PreRunFact = {
@@ -47,38 +58,49 @@ export function preRunFacts(
   deliveryMode?: InvoiceDeliveryMode | null,
   fileSelectionMode?: InvoiceFileSelectionMode | null,
   safeModeOn?: boolean,
+  t?: T,
 ): PreRunFact[] {
   const facts: PreRunFact[] = [];
 
   if (commandName === "process_invoices_and_drafts") {
     if (fileSelectionMode === "filenamePatterns") {
-      facts.push({ kind: "does", text: "Looks only at PDFs whose names match your invoice filters." });
+      facts.push({
+        kind: "does",
+        text: t
+          ? t("invoiceSelection.filenamePatternsFact")
+          : "Looks only at PDFs whose names match your invoice filters.",
+      });
     } else {
-      facts.push({ kind: "does", text: "Looks at every PDF in the invoice input folder." });
+      facts.push({
+        kind: "does",
+        text: t
+          ? t("invoiceSelection.allPdfsFact")
+          : "Looks at every PDF in the invoice input folder.",
+      });
     }
     if (deliveryMode === "prepareOnly") {
-      facts.push({ kind: "does", text: "Prepares invoice files for you to send yourself." });
-      facts.push({ kind: "wont", text: "Gmail is not contacted. No drafts, no emails." });
+      facts.push({ kind: "does", text: t ? t("confirm.invoicePrepareOnly") : "Prepares invoice files for you to send yourself." });
+      facts.push({ kind: "wont", text: t ? t("confirm.noGmailNoEmail") : "Gmail is not contacted. No drafts, no emails." });
     } else {
-      facts.push({ kind: "does", text: "Prepares invoice files and creates Gmail drafts for review." });
-      facts.push({ kind: "wont", text: "Drafts only — no emails are sent." });
+      facts.push({ kind: "does", text: t ? t("confirm.invoiceGmailDrafts") : "Prepares invoice files and creates Gmail drafts for review." });
+      facts.push({ kind: "wont", text: t ? t("confirm.draftsOnlyNoSend") : "Drafts only - no emails are sent." });
     }
   } else if (commandName === "process_signed_contracts") {
-    facts.push({ kind: "does", text: "Reads scanned documents and organizes signed contracts." });
-    facts.push({ kind: "wont", text: "Gmail is not contacted. No emails are sent." });
+    facts.push({ kind: "does", text: t ? t("confirm.contractsDoes") : "Reads scanned documents and organizes signed contracts." });
+    facts.push({ kind: "wont", text: t ? t("confirm.gmailNotContacted") : "Gmail is not contacted. No emails are sent." });
   } else if (commandName === "copy_scansioni") {
-    facts.push({ kind: "does", text: "Copies scanned documents from the shared folder." });
-    facts.push({ kind: "wont", text: "Originals stay in place. Gmail is not contacted." });
+    facts.push({ kind: "does", text: t ? t("confirm.copyScansDoes") : "Copies scanned documents from the shared folder." });
+    facts.push({ kind: "wont", text: t ? t("confirm.copyScansWont") : "Originals stay in place. Gmail is not contacted." });
   } else if (commandName === "ocr_preprocessing") {
-    facts.push({ kind: "does", text: "Reads scanned documents and writes text files." });
-    facts.push({ kind: "wont", text: "Scans are not changed. Gmail is not contacted." });
+    facts.push({ kind: "does", text: t ? t("confirm.ocrDoes") : "Reads scanned documents and writes text files." });
+    facts.push({ kind: "wont", text: t ? t("confirm.ocrWont") : "Scans are not changed. Gmail is not contacted." });
   } else if (commandName === "reconnect_gmail") {
-    facts.push({ kind: "does", text: "Checks Gmail sign-in and may ask you to sign in again." });
-    facts.push({ kind: "wont", text: "No drafts are created and no emails are sent." });
+    facts.push({ kind: "does", text: t ? t("confirm.reconnectDoes") : "Checks Gmail sign-in and may ask you to sign in again." });
+    facts.push({ kind: "wont", text: t ? t("confirm.reconnectWont") : "No drafts are created and no emails are sent." });
   }
 
   if (safeModeOn) {
-    facts.push({ kind: "wont", text: "Safe mode is on — hotel files are not changed." });
+    facts.push({ kind: "wont", text: t ? t("confirm.safeMode") : "Safe mode is on - hotel files are not changed." });
   }
 
   return facts;

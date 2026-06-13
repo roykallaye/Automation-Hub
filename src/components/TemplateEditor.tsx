@@ -3,6 +3,7 @@ import { Eye, MailOpen, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { InfoHint } from "./InfoHint";
+import { useI18n } from "../i18n";
 import {
   BODY_VARIABLES,
   DEFAULT_TEMPLATES,
@@ -27,8 +28,9 @@ export function TemplateEditor({
   configStatus: AppConfigStatus | null;
   onSaved: () => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const saved = configStatus?.config.templates ?? DEFAULT_TEMPLATES;
-  const hotelName = configStatus?.config.client.displayName ?? "Your Hotel";
+  const hotelName = configStatus?.config.client.displayName ?? t("branding.hotelPlaceholder");
   const [draft, setDraft] = useState<OutputTemplates>(saved);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(
@@ -69,7 +71,7 @@ export function TemplateEditor({
     setResult(null);
     try {
       await invoke<AppConfigStatus>("save_output_templates", { draft });
-      setResult({ kind: "success", message: "Templates saved. Nothing was sent." });
+      setResult({ kind: "success", message: t("templates.saved") });
       await onSaved();
     } catch (error) {
       setResult({
@@ -92,8 +94,8 @@ export function TemplateEditor({
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-violet-100 text-violet-700 ring-1 ring-violet-200">
           <MailOpen className="h-5 w-5" aria-hidden="true" />
         </div>
-        <h2 className="text-xl font-semibold text-slate-950">Email templates</h2>
-        <InfoHint text="The wording InnPilot uses for prepared invoice emails and Gmail drafts. Saved on this computer — nothing is sent." />
+        <h2 className="text-xl font-semibold text-slate-950">{t("templates.title")}</h2>
+        <InfoHint text={t("templates.hint")} />
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-2">
@@ -101,7 +103,7 @@ export function TemplateEditor({
           <div>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-800">
-                Draft subject
+                {t("templates.subject")}
               </span>
               <input
                 ref={subjectRef}
@@ -120,7 +122,7 @@ export function TemplateEditor({
           <div>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-800">
-                Email body
+                {t("templates.body")}
               </span>
               <textarea
                 ref={bodyRef}
@@ -138,13 +140,13 @@ export function TemplateEditor({
 
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-800">
-              Signature <span className="font-medium text-slate-500">(optional)</span>
+              {t("templates.signature")} <span className="font-medium text-slate-500">({t("templates.optional")})</span>
             </span>
             <input
               className="w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
               value={draft.emailSignature}
               onChange={(event) => update({ emailSignature: event.target.value })}
-              placeholder={`${hotelName} (used when empty)`}
+              placeholder={t("templates.signaturePlaceholder", { hotelName })}
             />
           </label>
         </div>
@@ -152,18 +154,18 @@ export function TemplateEditor({
         <div className="flex flex-col rounded-lg border border-white/70 bg-white/70 p-4">
           <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800">
             <Eye className="h-4 w-4 text-brand-700" aria-hidden="true" />
-            Preview with sample values
+            {t("templates.preview")}
           </p>
           <div className="mt-3 flex-1 rounded-md bg-white p-4 ring-1 ring-slate-900/5">
             <p className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-950">
-              {previewSubject || "(empty subject)"}
+              {previewSubject || t("templates.emptySubject")}
             </p>
             <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm font-medium leading-6 text-slate-700">
-              {previewBody || "(empty body)"}
+              {previewBody || t("templates.emptyBody")}
             </pre>
           </div>
           <p className="mt-2 text-xs font-semibold text-slate-500">
-            Example only — created on this computer, never sent.
+            {t("templates.previewOnly")}
           </p>
         </div>
       </div>
@@ -174,7 +176,7 @@ export function TemplateEditor({
           disabled={saving || !isDirty}
           onClick={() => void save()}
         >
-          {saving ? "Saving..." : "Save templates"}
+          {saving ? t("common.saving") : t("templates.save")}
         </button>
         <button
           className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/70 bg-white/65 px-4 text-sm font-semibold text-slate-700 transition hover:bg-white"
@@ -185,7 +187,7 @@ export function TemplateEditor({
           }}
         >
           <RotateCcw className="h-4 w-4" aria-hidden="true" />
-          Reset to default
+          {t("templates.reset")}
         </button>
         {result && (
           <p

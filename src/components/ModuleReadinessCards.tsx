@@ -1,4 +1,5 @@
 import { moduleStatusLabel } from "../moduleReadiness";
+import { useI18n } from "../i18n";
 import type { ModuleReadiness } from "../types";
 
 export function ModuleReadinessGrid({
@@ -24,6 +25,7 @@ export function ModuleReadinessCard({
   module: ModuleReadiness;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <article className="rounded-xl border border-white/65 bg-white/60 p-4 shadow-glass backdrop-blur-xl">
       <div className="flex items-start justify-between gap-3">
@@ -41,7 +43,7 @@ export function ModuleReadinessCard({
             statusClass(module.status),
           ].join(" ")}
         >
-          {moduleStatusLabel(module.status)}
+          {moduleStatusLabel(module.status, t)}
         </span>
       </div>
       {!compact && (

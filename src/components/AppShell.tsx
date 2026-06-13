@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { AppPage, RunStatus } from "../types";
 import type { NextAction } from "../nextAction";
+import { useI18n } from "../i18n";
 import { Navigation } from "./Navigation";
 
 export function AppShell({
@@ -21,6 +22,7 @@ export function AppShell({
   nextAction: NextAction;
   onPageChange: (page: AppPage) => void;
 }) {
+  const { t } = useI18n();
   return (
     <main className="min-h-screen overflow-x-hidden bg-[var(--app-bg)] text-slate-950">
       <div className="absolute inset-0 bg-[linear-gradient(135deg,var(--app-bg-from)_0%,var(--app-bg-via)_46%,var(--app-bg-to)_100%)]" />
@@ -31,7 +33,7 @@ export function AppShell({
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
       >
-        Skip to content
+        {t("app.skipToContent")}
       </a>
 
       <section className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
@@ -56,7 +58,7 @@ export function AppShell({
                 {displayName}
               </h1>
               <p className="truncate text-xs font-semibold text-brand-800">
-                InnPilot · Hotel back-office, prepared with care
+                InnPilot - {t("app.tagline")}
               </p>
             </div>
           </div>

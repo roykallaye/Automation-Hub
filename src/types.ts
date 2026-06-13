@@ -53,6 +53,8 @@ export type InvoiceFileSelectionMode =
   | "allPdfs"
   | "filenamePatterns";
 
+export type AppLanguage = "en" | "it";
+
 export type ModuleReadiness = {
   id: ModuleReadinessId;
   title: string;
@@ -137,6 +139,7 @@ export type ClientBranding = {
 
 export type HubConfig = {
   schemaVersion: number;
+  language: AppLanguage;
   client: {
     displayName: string;
     branding: ClientBranding;

@@ -6,6 +6,9 @@ import type {
   ModuleReadinessId,
   RunSummary,
 } from "./types";
+import type { TranslationKey } from "./i18n";
+
+type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 
 export type NextActionTone = "success" | "attention" | "blocked" | "neutral";
 
@@ -27,6 +30,7 @@ export function deriveNextAction({
   lastSummary,
   activityHistory,
   runningCommand,
+  t = fallbackT,
 }: {
   loading: boolean;
   configStatus: AppConfigStatus | null;
@@ -34,14 +38,15 @@ export function deriveNextAction({
   lastSummary: RunSummary | null;
   activityHistory: ActivityRecord[];
   runningCommand: string | null;
+  t?: T;
 }): NextAction {
   if (runningCommand) {
     return {
       id: "run-in-progress",
-      title: "Automation is running",
-      shortMessage: "Follow progress and results in Activity.",
+      title: t("next.runningTitle"),
+      shortMessage: t("next.runningMessage"),
       targetPage: "activity",
-      buttonLabel: "Open Activity",
+      buttonLabel: t("next.openActivity"),
       priority: 100,
       tone: "neutral",
     };
@@ -51,10 +56,10 @@ export function deriveNextAction({
   if (lastSummary?.status === "error" || latestActivity?.status === "failed") {
     return {
       id: "review-failed-run",
-      title: "A run needs review",
-      shortMessage: "Open Activity to see what needs attention.",
+      title: t("next.reviewFailedTitle"),
+      shortMessage: t("next.reviewFailedMessage"),
       targetPage: "activity",
-      buttonLabel: "Review Activity",
+      buttonLabel: t("next.reviewActivity"),
       priority: 95,
       tone: "blocked",
     };
@@ -63,10 +68,10 @@ export function deriveNextAction({
   if (lastSummary?.status === "warning" || latestActivity?.status === "needs_attention") {
     return {
       id: "review-warning-run",
-      title: "Review the last result",
-      shortMessage: "Activity has the summary and next support details.",
+      title: t("next.reviewWarningTitle"),
+      shortMessage: t("next.reviewWarningMessage"),
       targetPage: "activity",
-      buttonLabel: "Open Activity",
+      buttonLabel: t("next.openActivity"),
       priority: 90,
       tone: "attention",
     };
@@ -75,10 +80,10 @@ export function deriveNextAction({
   if (loading) {
     return {
       id: "checking-setup",
-      title: "Checking setup",
-      shortMessage: "InnPilot is checking folders and tools.",
+      title: t("next.checkingSetupTitle"),
+      shortMessage: t("next.checkingSetupMessage"),
       targetPage: "setup",
-      buttonLabel: "Open Setup",
+      buttonLabel: t("next.openSetup"),
       priority: 80,
       tone: "neutral",
     };
@@ -87,10 +92,10 @@ export function deriveNextAction({
   if (!configStatus) {
     return {
       id: "setup-unavailable",
-      title: "Setup needs attention",
-      shortMessage: "InnPilot setup could not be loaded.",
+      title: t("next.setupUnavailableTitle"),
+      shortMessage: t("next.setupUnavailableMessage"),
       targetPage: "setup",
-      buttonLabel: "Go to Setup",
+      buttonLabel: t("next.goToSetup"),
       priority: 85,
       tone: "blocked",
     };
@@ -108,10 +113,10 @@ export function deriveNextAction({
   if (primaryIssue) {
     return {
       id: `finish-${primaryIssue.id}`,
-      title: "Finish setup to start",
+      title: t("next.finishSetupTitle"),
       shortMessage: primaryIssue.nextAction,
       targetPage: "setup",
-      buttonLabel: "Finish Setup",
+      buttonLabel: t("next.finishSetup"),
       priority: 75,
       tone: primaryIssue.status === "blocked" ? "blocked" : "attention",
       relatedModuleId: primaryIssue.id,
@@ -124,10 +129,10 @@ export function deriveNextAction({
   if (blockingWorkflow && invoices?.status !== "ready") {
     return {
       id: "workflow-blocked",
-      title: "Setup needs one more step",
-      shortMessage: "Fix the blocked workflow before running daily work.",
+      title: t("next.oneMoreStepTitle"),
+      shortMessage: t("next.oneMoreStepMessage"),
       targetPage: "setup",
-      buttonLabel: "Open Setup",
+      buttonLabel: t("next.openSetup"),
       priority: 70,
       tone: "attention",
     };
@@ -136,10 +141,10 @@ export function deriveNextAction({
   if (lastSummary?.status === "success" || latestActivity?.status === "success") {
     return {
       id: "view-latest-success",
-      title: "Last run completed",
-      shortMessage: "Activity has the saved summary.",
+      title: t("next.lastRunCompletedTitle"),
+      shortMessage: t("next.lastRunCompletedMessage"),
       targetPage: "activity",
-      buttonLabel: "View Activity",
+      buttonLabel: t("next.viewActivity"),
       priority: 65,
       tone: "success",
     };
@@ -148,10 +153,10 @@ export function deriveNextAction({
   if (contracts?.status === "ready") {
     return {
       id: "daily-work-ready",
-      title: "Daily automations are ready",
-      shortMessage: "Prepare invoice files or process signed contracts.",
+      title: t("next.dailyReadyTitle"),
+      shortMessage: t("next.dailyReadyMessage"),
       targetPage: "automations",
-      buttonLabel: "Open Automations",
+      buttonLabel: t("next.openAutomations"),
       priority: 60,
       tone: "success",
     };
@@ -160,10 +165,10 @@ export function deriveNextAction({
   if (ocr && ocr.status !== "ready") {
     return {
       id: "invoices-ready-ocr-later",
-      title: "Invoice drafts are ready",
-      shortMessage: "You can prepare invoice files now. Document reading can be set up later.",
+      title: t("next.invoicesReadyTitle"),
+      shortMessage: t("next.invoicesReadyMessage"),
       targetPage: "automations",
-      buttonLabel: "Prepare Drafts",
+      buttonLabel: t("next.prepareDrafts"),
       priority: 55,
       tone: "success",
       relatedModuleId: "invoices",
@@ -172,13 +177,17 @@ export function deriveNextAction({
 
   return {
     id: "ready-for-work",
-    title: "Ready for office work",
-    shortMessage: "Choose the automation you need today.",
+    title: t("next.readyTitle"),
+    shortMessage: t("next.readyMessage"),
     targetPage: "automations",
-    buttonLabel: "Open Automations",
+    buttonLabel: t("next.openAutomations"),
     priority: 50,
     tone: "success",
   };
+}
+
+function fallbackT(key: TranslationKey) {
+  return key;
 }
 
 function moduleById(modules: ModuleReadiness[], id: ModuleReadinessId) {

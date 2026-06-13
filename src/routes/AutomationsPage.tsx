@@ -1,4 +1,4 @@
-import { Bot, Send } from "lucide-react";
+﻿import { Bot, Send } from "lucide-react";
 
 import {
   contractAction,
@@ -17,6 +17,7 @@ import {
   deliveryModePromise,
   deliveryModeReassurance,
 } from "../messages";
+import { useI18n } from "../i18n";
 import { moduleForCommand } from "../moduleReadiness";
 import type {
   ActivityRecord,
@@ -28,7 +29,7 @@ import type {
 
 /*
   Automations is a workflow gallery: each hotel task is one card with a
-  consistent shape — what it does, whether it is ready, what happened last,
+  consistent shape â€” what it does, whether it is ready, what happened last,
   one button, and a plain safety statement. The pre-run "what will happen"
   panel opens before anything starts (ConfirmationModal).
 */
@@ -51,6 +52,7 @@ export function AutomationsPage({
   onOpenPath: (path?: string | null) => void;
   onNavigate: (page: AppPage) => void;
 }) {
+  const { t } = useI18n();
   const folders = configStatus?.config.folders;
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const invoiceSelectionMode = configStatus?.config.invoiceFileSelectionMode;
@@ -62,7 +64,10 @@ export function AutomationsPage({
       .reverse()
       .find((entry) => entry.workflowCommandName === commandName);
     if (!record) return null;
-    return `Last run ${formatDate(record.finishedAt)} · ${shortStatus(record)}`;
+    return t("automations.lastRun", {
+      time: formatDate(record.finishedAt),
+      status: shortStatus(record, t),
+    });
   }
 
   function fixFor(action: AutomationAction) {
@@ -71,7 +76,7 @@ export function AutomationsPage({
       /python|support|script|tool/i.test(problem),
     );
     return {
-      label: needsSupport ? "Open Support" : "Fix in Setup",
+      label: needsSupport ? t("workflow.blockedOpenSupport") : t("workflow.blockedFixSetup"),
       onClick: () => onNavigate(needsSupport ? "support" : "setup"),
     };
   }
@@ -113,107 +118,111 @@ export function AutomationsPage({
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Automations" eyebrow="Today's hotel work" />
+      <PageHeader title={t("automations.title")} eyebrow={t("automations.eyebrow")} />
 
       <div className="stagger-children grid gap-5 xl:grid-cols-2">
         {galleryCard({
           action: invoiceAction,
-          title: "Invoice files",
-          whatItDoes: invoiceWorkflowPromise(deliveryModePromise(deliveryMode), invoiceSelectionMode),
+          title: t("automations.invoiceTitle"),
+          whatItDoes: invoiceWorkflowPromise(deliveryModePromise(deliveryMode, t), invoiceSelectionMode, t),
           tint: "sky",
-          modeChip: deliveryModeLabel(deliveryMode),
-          primaryLabel: "Prepare invoice files",
-          safety: deliveryModeReassurance(deliveryMode),
+          modeChip: deliveryModeLabel(deliveryMode, t),
+          primaryLabel: t("automations.invoicePrimary"),
+          safety: deliveryModeReassurance(deliveryMode, t),
           links: [
-            { label: "Input folder", path: folders?.invoiceInputFolder },
-            { label: "Ready invoices", path: folders?.invoiceOutputFolder },
+            { label: t("automations.folderInput"), path: folders?.invoiceInputFolder },
+            { label: t("automations.folderReadyInvoices"), path: folders?.invoiceOutputFolder },
           ],
         })}
 
         {galleryCard({
           action: contractAction,
-          title: "Signed contracts",
-          whatItDoes: "Reads, sorts, and files signed contract documents.",
+          title: t("automations.contractsTitle"),
+          whatItDoes: t("automations.contractsDescription"),
           tint: "violet",
-          primaryLabel: "Process signed contracts",
-          safety: "Gmail is not contacted. File moves ask first.",
+          primaryLabel: t("automations.contractsPrimary"),
+          safety: t("automations.contractsSafety"),
           links: [
-            { label: "Shared scan folder", path: folders?.scansioniNetworkShare },
-            { label: "Signed contracts", path: folders?.contractsOutputFolder },
+            { label: t("automations.folderSharedScans"), path: folders?.scansioniNetworkShare },
+            { label: t("automations.folderSignedContracts"), path: folders?.contractsOutputFolder },
           ],
         })}
 
         {galleryCard({
           action: copyScansAction,
-          title: "Scanned documents",
-          whatItDoes: "Copies new scans from the shared folder to this computer.",
+          title: t("automations.scansTitle"),
+          whatItDoes: t("automations.scansDescription"),
           tint: "amber",
-          primaryLabel: "Copy scanned documents",
-          safety: "Copies only — originals stay in place.",
+          primaryLabel: t("automations.scansPrimary"),
+          safety: t("automations.scansSafety"),
           links: [
-            { label: "Shared scan folder", path: folders?.scansioniNetworkShare },
-            { label: "Local scans", path: folders?.scansioniLocalCacheFolder },
+            { label: t("automations.folderSharedScans"), path: folders?.scansioniNetworkShare },
+            { label: t("automations.folderLocalScans"), path: folders?.scansioniLocalCacheFolder },
           ],
         })}
 
         {galleryCard({
           action: ocrAction,
-          title: "Document reading",
-          whatItDoes: "Reads scanned pages and writes searchable text files.",
+          title: t("automations.ocrTitle"),
+          whatItDoes: t("automations.ocrDescription"),
           tint: "emerald",
-          primaryLabel: "Read scanned documents",
-          safety: "Scans are not changed. Gmail is not contacted.",
+          primaryLabel: t("automations.ocrPrimary"),
+          safety: t("automations.ocrSafety"),
           links: [
-            { label: "Local scans", path: folders?.scansioniLocalCacheFolder },
-            { label: "Text output", path: folders?.ocrTextOutputFolder },
+            { label: t("automations.folderLocalScans"), path: folders?.scansioniLocalCacheFolder },
+            { label: t("automations.folderTextOutput"), path: folders?.ocrTextOutputFolder },
           ],
         })}
 
         {deliveryMode !== "prepareOnly" &&
           galleryCard({
             action: gmailReconnectAction,
-            title: "Gmail sign-in",
-            whatItDoes: "Keeps draft creation connected to the hotel's Gmail.",
+            title: t("automations.gmailTitle"),
+            whatItDoes: t("automations.gmailDescription"),
             tint: "rose",
-            primaryLabel: "Check Gmail sign-in",
-            safety: "Drafts only — no emails are sent.",
+            primaryLabel: t("automations.gmailPrimary"),
+            safety: t("delivery.draftsOnlyReassurance"),
           })}
 
         <FutureWorkflowCard
           icon={Bot}
-          title="AI-created automations"
-          whatItWillDo="Automations designed with the AI Assistant will appear here, ready to run with the same safety rules."
+          title={t("automations.futureAiTitle")}
+          whatItWillDo={t("automations.futureAiDescription")}
           tint="violet"
-          chip="Coming soon"
-          actionLabel="Explore the AI Assistant"
+          chip={t("common.comingSoon")}
+          actionLabel={t("automations.futureAiAction")}
           onAction={() => onNavigate("assistant")}
         />
 
         <FutureWorkflowCard
           icon={Send}
-          title="Send invoices automatically"
-          whatItWillDo="Sending without review stays locked until stronger controls are ready. Today, nothing is ever sent automatically."
+          title={t("automations.futureSendTitle")}
+          whatItWillDo={t("automations.futureSendDescription")}
           tint="sky"
-          chip="Locked"
-          footnote="InnPilot never sends email on its own."
+          chip={t("common.locked")}
+          footnote={t("automations.futureSendFootnote")}
         />
       </div>
     </div>
   );
 }
 
-function invoiceWorkflowPromise(deliveryPromise: string, selectionMode?: string | null) {
+function invoiceWorkflowPromise(
+  deliveryPromise: string,
+  selectionMode: string | null | undefined,
+  t: ReturnType<typeof useI18n>["t"],
+) {
   const selection =
     selectionMode === "filenamePatterns"
-      ? " Only PDFs matching your filename filters are considered."
-      : " Every PDF in the invoice folder is considered an invoice.";
+      ? ` ${t("invoiceSelection.filenamePatternsFact")}`
+      : ` ${t("invoiceSelection.allPdfsFact")}`;
   return `${deliveryPromise}${selection}`;
 }
 
-function shortStatus(record: ActivityRecord) {
-  if (record.status === "success") return "completed";
-  if (record.status === "needs_attention") return "needs review";
-  if (record.status === "failed") return "needs attention";
+function shortStatus(record: ActivityRecord, t: ReturnType<typeof useI18n>["t"]) {
+  if (record.status === "success") return t("status.completed").toLowerCase();
+  if (record.status === "needs_attention") return t("status.needsReview").toLowerCase();
+  if (record.status === "failed") return t("status.needsAttention").toLowerCase();
   return record.status;
 }
 
@@ -225,3 +234,4 @@ function formatDate(value: string) {
     month: "2-digit",
   }).format(new Date(value));
 }
+

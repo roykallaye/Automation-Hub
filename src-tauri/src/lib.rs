@@ -48,7 +48,8 @@ pub fn run() {
             open_activity_report,
             save_client_branding,
             read_branding_logo,
-            save_output_templates
+            save_output_templates,
+            save_app_language
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -108,6 +109,18 @@ fn save_output_templates(
     draft: templates::OutputTemplatesDraft,
 ) -> Result<preflight::AppConfigStatus, String> {
     templates::save_output_templates(&app, draft)
+}
+
+#[tauri::command]
+fn save_app_language(
+    app: AppHandle,
+    language: String,
+) -> Result<preflight::AppConfigStatus, String> {
+    let (config, config_path) = config::save_language_for_app(&app, &language)?;
+    Ok(preflight::AppConfigStatus::new(
+        config_path.to_string_lossy().to_string(),
+        config,
+    ))
 }
 
 #[tauri::command]

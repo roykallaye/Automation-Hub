@@ -11,6 +11,7 @@ const CONFIG_VERSION: u32 = 2;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HubConfig {
     pub(crate) schema_version: u32,
+    pub(crate) language: String,
     pub(crate) client: ClientConfig,
     pub(crate) invoice_delivery_mode: InvoiceDeliveryMode,
     pub(crate) invoice_file_selection_mode: InvoiceFileSelectionMode,
@@ -325,6 +326,16 @@ pub(crate) fn save_config_for_app(app: &AppHandle, config: &HubConfig) -> Result
     Ok(config_path)
 }
 
+pub(crate) fn save_language_for_app(
+    app: &AppHandle,
+    language: &str,
+) -> Result<(HubConfig, PathBuf), String> {
+    let (mut config, _) = ensure_config_with_path(app)?;
+    config.language = sanitize_language(language);
+    let path = save_config_for_app(app, &config)?;
+    Ok((config, path))
+}
+
 fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), String> {
     let value: serde_json::Value =
         serde_json::from_str(contents).map_err(|error| format!("Invalid config file: {error}"))?;
@@ -340,6 +351,7 @@ fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), Stri
     let merged = merge_json(default_value, value);
     let mut config: HubConfig = serde_json::from_value(merged.clone())
         .map_err(|error| format!("Invalid config file: {error}"))?;
+    config.language = sanitize_language(&config.language);
     let original: serde_json::Value =
         serde_json::from_str(contents).map_err(|error| format!("Invalid config file: {error}"))?;
     if original.get("invoiceFileSelectionMode").is_none() {
@@ -378,6 +390,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
     let fatture_logs = paths.fatture_logs;
     HubConfig {
         schema_version: CONFIG_VERSION,
+        language: "en".to_string(),
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
             branding: crate::config::BrandingConfig::default(),
@@ -440,6 +453,7 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
 
     HubConfig {
         schema_version: CONFIG_VERSION,
+        language: "en".to_string(),
         client: ClientConfig {
             display_name: "Your Hotel".to_string(),
             branding: crate::config::BrandingConfig::default(),
@@ -478,6 +492,13 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
             redact_logs: true,
         },
         templates: OutputTemplatesConfig::default(),
+    }
+}
+
+pub(crate) fn sanitize_language(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "it" => "it".to_string(),
+        _ => "en".to_string(),
     }
 }
 
@@ -568,6 +589,7 @@ mod tests {
             config.invoice_file_selection_mode,
             InvoiceFileSelectionMode::AllPdfs
         );
+        assert_eq!(config.language, "en");
         assert!(config
             .scripts
             .invoice_workflow_script
@@ -825,6 +847,32 @@ mod tests {
             config.invoice_file_selection_mode,
             InvoiceFileSelectionMode::FilenamePatterns
         );
+    }
+
+    #[test]
+    fn config_language_accepts_italian() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "language": "it",
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, _) = parse_config_with_migration(partial).unwrap();
+
+        assert_eq!(config.language, "it");
+    }
+
+    #[test]
+    fn invalid_config_language_falls_back_to_english() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "language": "fr",
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, _) = parse_config_with_migration(partial).unwrap();
+
+        assert_eq!(config.language, "en");
     }
 
     #[test]

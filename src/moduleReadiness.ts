@@ -1,4 +1,5 @@
 import { staffMessage } from "./messages";
+import type { TranslationKey } from "./i18n";
 import type {
   AppConfigStatus,
   ModuleReadiness,
@@ -9,13 +10,17 @@ import type {
 
 type ModuleDefinition = {
   id: ModuleReadinessId;
-  title: string;
+  titleKey: TranslationKey;
   itemKeys: string[];
   workflowKeys: string[];
   relatedWorkflowCommandNames: string[];
-  readyReason: string;
-  readyNextAction: string;
+  readyReasonKey: TranslationKey;
+  readyNextActionKey: TranslationKey;
 };
+
+type Translator = (key: TranslationKey) => string;
+
+const fallbackT: Translator = (key) => key;
 
 // These keys mirror backend PreflightItem.key values in src-tauri/src/preflight.rs.
 // Keep this list in sync when backend readiness items are added or renamed.
@@ -48,7 +53,7 @@ const PREFLIGHT_KEYS = {
 const definitions: ModuleDefinition[] = [
   {
     id: "invoices",
-    title: "Invoices",
+    titleKey: "module.invoices",
     itemKeys: [
       PREFLIGHT_KEYS.invoiceWorkflowScript,
       PREFLIGHT_KEYS.invoiceInputFolder,
@@ -61,12 +66,12 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["invoiceWorkflow"],
     relatedWorkflowCommandNames: ["process_invoices_and_drafts"],
-    readyReason: "Invoice folders and processing are ready.",
-    readyNextAction: "Prepare invoice files when needed.",
+    readyReasonKey: "module.invoiceReadyReason",
+    readyNextActionKey: "module.invoiceReadyNext",
   },
   {
     id: "gmailDrafts",
-    title: "Gmail drafts",
+    titleKey: "module.gmailDrafts",
     itemKeys: [
       PREFLIGHT_KEYS.gmailDraftScript,
       PREFLIGHT_KEYS.gmailCredentialsFile,
@@ -79,12 +84,12 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["gmailDraftsWorkflow"],
     relatedWorkflowCommandNames: ["process_invoices_and_drafts", "reconnect_gmail"],
-    readyReason: "Gmail draft setup is ready.",
-    readyNextAction: "Drafts can be created for review. No emails are sent automatically.",
+    readyReasonKey: "module.gmailReadyReason",
+    readyNextActionKey: "module.gmailReadyNext",
   },
   {
     id: "scanCopy",
-    title: "Scanned documents",
+    titleKey: "module.scanCopy",
     itemKeys: [
       PREFLIGHT_KEYS.copyScansioniScript,
       PREFLIGHT_KEYS.scansioniNetworkShare,
@@ -92,12 +97,12 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["scansioniNetwork"],
     relatedWorkflowCommandNames: ["copy_scansioni"],
-    readyReason: "Scanned-document folders are ready.",
-    readyNextAction: "Copy scanned documents when needed.",
+    readyReasonKey: "module.scanReadyReason",
+    readyNextActionKey: "module.scanReadyNext",
   },
   {
     id: "ocr",
-    title: "Document reading",
+    titleKey: "module.ocr",
     itemKeys: [
       PREFLIGHT_KEYS.ocrPreprocessingScript,
       PREFLIGHT_KEYS.scansioniLocalCacheFolder,
@@ -105,12 +110,12 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["ocrWorkflow"],
     relatedWorkflowCommandNames: ["ocr_preprocessing"],
-    readyReason: "Document reading is ready.",
-    readyNextAction: "Read scanned documents when contracts need review.",
+    readyReasonKey: "module.ocrReadyReason",
+    readyNextActionKey: "module.ocrReadyNext",
   },
   {
     id: "contracts",
-    title: "Signed contracts",
+    titleKey: "module.contracts",
     itemKeys: [
       PREFLIGHT_KEYS.contractProcessingScript,
       PREFLIGHT_KEYS.copyScansioniScript,
@@ -126,12 +131,12 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["contractsWorkflow"],
     relatedWorkflowCommandNames: ["process_signed_contracts"],
-    readyReason: "Signed-contract processing is ready.",
-    readyNextAction: "Process signed contracts when new scans are available.",
+    readyReasonKey: "module.contractsReadyReason",
+    readyNextActionKey: "module.contractsReadyNext",
   },
   {
     id: "support",
-    title: "Support",
+    titleKey: "module.support",
     itemKeys: [
       PREFLIGHT_KEYS.invoiceLogFolder,
       PREFLIGHT_KEYS.contractLogFolder,
@@ -139,15 +144,16 @@ const definitions: ModuleDefinition[] = [
     ],
     workflowKeys: ["clientProfile"],
     relatedWorkflowCommandNames: [],
-    readyReason: "Support folders and hotel profile are ready.",
-    readyNextAction: "Open Support if setup details are needed.",
+    readyReasonKey: "module.supportReadyReason",
+    readyNextActionKey: "module.supportReadyNext",
   },
 ];
 
 export function deriveModuleReadiness(
   configStatus: AppConfigStatus | null,
+  t: Translator = fallbackT,
 ): ModuleReadiness[] {
-  return definitions.map((definition) => deriveModule(configStatus, definition));
+  return definitions.map((definition) => deriveModule(configStatus, definition, t));
 }
 
 export function moduleForCommand(
@@ -162,14 +168,15 @@ export function moduleForCommand(
 function deriveModule(
   configStatus: AppConfigStatus | null,
   definition: ModuleDefinition,
+  t: Translator,
 ): ModuleReadiness {
   if (!configStatus) {
     return {
       id: definition.id,
-      title: definition.title,
+      title: t(definition.titleKey),
       status: "not_checked",
-      shortReason: "Not checked yet.",
-      nextAction: "Refresh setup to check this area.",
+      shortReason: t("module.notCheckedReason"),
+      nextAction: t("module.notCheckedNext"),
       relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
       blockingProblems: [],
       warnings: [],
@@ -194,10 +201,10 @@ function deriveModule(
   if (!items.length && !workflows.length) {
     return {
       id: definition.id,
-      title: definition.title,
+      title: t(definition.titleKey),
       status: "not_checked",
-      shortReason: "Not checked yet.",
-      nextAction: "Refresh setup to check this area.",
+      shortReason: t("module.notCheckedReason"),
+      nextAction: t("module.notCheckedNext"),
       relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
       blockingProblems: [],
       warnings: [],
@@ -209,10 +216,10 @@ function deriveModule(
     const status = moduleStatusForItem(first);
     return {
       id: definition.id,
-      title: definition.title,
+      title: t(definition.titleKey),
       status,
-      shortReason: moduleReason(definition.id, first),
-      nextAction: moduleNextAction(definition.id, first),
+      shortReason: moduleReason(definition.id, first, t),
+      nextAction: moduleNextAction(definition.id, first, t),
       relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
       blockingProblems: blockingItems.map((item) =>
         staffMessage(item.message, item.status, item.key),
@@ -226,14 +233,14 @@ function deriveModule(
   if (blockingWorkflow) {
     return {
       id: definition.id,
-      title: definition.title,
+      title: t(definition.titleKey),
       status: "needs_attention",
       shortReason: staffMessage(
         blockingWorkflow.message,
         blockingWorkflow.status,
         blockingWorkflow.key,
       ),
-      nextAction: "Open Setup and check this area.",
+      nextAction: t("module.openSetupArea"),
       relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
       blockingProblems: [
         staffMessage(blockingWorkflow.message, blockingWorkflow.status, blockingWorkflow.key),
@@ -247,14 +254,14 @@ function deriveModule(
   if (warningItems.length) {
     return {
       id: definition.id,
-      title: definition.title,
+      title: t(definition.titleKey),
       status: "needs_attention",
       shortReason: staffMessage(
         warningItems[0].message,
         warningItems[0].status,
         warningItems[0].key,
       ),
-      nextAction: "Review setup when convenient.",
+      nextAction: t("module.reviewConvenient"),
       relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
       blockingProblems: [],
       warnings: warningItems.map((item) =>
@@ -265,10 +272,10 @@ function deriveModule(
 
   return {
     id: definition.id,
-    title: definition.title,
+    title: t(definition.titleKey),
     status: "ready",
-    shortReason: definition.readyReason,
-    nextAction: definition.readyNextAction,
+    shortReason: t(definition.readyReasonKey),
+    nextAction: t(definition.readyNextActionKey),
     relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
     blockingProblems: [],
     warnings: [],
@@ -286,87 +293,87 @@ function moduleStatusForItem(item: PreflightItem): ModuleReadinessStatus {
   return "needs_attention";
 }
 
-function moduleReason(moduleId: ModuleReadinessId, item: PreflightItem) {
+function moduleReason(moduleId: ModuleReadinessId, item: PreflightItem, t: Translator) {
   if (item.itemType === "script") {
     if (moduleId === "scanCopy" || moduleId === "ocr") {
-      return "Scan/OCR tool is not configured yet.";
+      return t("module.scanToolMissing");
     }
     if (moduleId === "contracts") {
-      return "Contract processing needs scan/OCR setup.";
+      return t("module.contractsNeedOcr");
     }
-    return "Automation tool is not configured yet.";
+    return t("module.toolMissing");
   }
 
   if (item.itemType === "folder") {
     if (item.key === "scansioniNetworkShare") {
-      return "Shared scan folder is not reachable.";
+      return t("module.sharedScanMissing");
     }
     if (item.key === "gmailTokenFolder") {
-      return "Gmail sign-in folder is not ready.";
+      return t("module.gmailFolderMissing");
     }
-    return "A required folder is not ready.";
+    return t("module.folderMissing");
   }
 
   if (item.key === "automationConfigPath") {
-    return "Setup has not been saved yet.";
+    return t("module.setupUnsaved");
   }
   if (item.key === "gmailCredentialsFile") {
     return item.message.toLowerCase().includes("not found")
-      ? "Gmail credentials file not found, or choose Prepare files only."
-      : "Choose Gmail credentials, or choose Prepare files only.";
+      ? t("module.gmailCredentialsMissing")
+      : t("module.gmailCredentialsChoose");
   }
   if (item.key === "gmailTokenAlignment") {
-    return "Gmail sign-in paths do not match.";
+    return t("module.gmailPathsMismatch");
   }
   if (item.key === "pythonExecutable") {
-    return "Python is not available.";
+    return t("module.pythonUnavailable");
   }
 
   return staffMessage(item.message, item.status, item.key);
 }
 
-function moduleNextAction(moduleId: ModuleReadinessId, item: PreflightItem) {
+function moduleNextAction(moduleId: ModuleReadinessId, item: PreflightItem, t: Translator) {
   if (item.key === "automationConfigPath") {
-    return "Save setup from the guided setup review step.";
+    return t("module.saveSetup");
   }
   if (item.key === "scansioniNetworkShare") {
-    return "Choose the shared scan folder in guided setup.";
+    return t("module.chooseSharedScan");
   }
   if (item.key === "gmailTokenFolder") {
-    return "Create folders, then check setup again.";
+    return t("module.createFoldersCheck");
   }
   if (item.key === "gmailCredentialsFile") {
-    return "Choose the Gmail credentials file, or switch invoice delivery to Prepare files only.";
+    return t("module.chooseGmailOrPrepare");
   }
   if (item.key === "gmailTokenAlignment") {
-    return "Check Gmail sign-in path and save setup again.";
+    return t("module.checkGmailPath");
   }
   if (item.itemType === "folder") {
-    return "Create folders from guided setup, then check setup.";
+    return t("module.createFoldersFromSetup");
   }
   if (item.itemType === "script") {
     if (moduleId === "scanCopy" || moduleId === "ocr" || moduleId === "contracts") {
-      return "Configure the missing scan/OCR tool, then check setup.";
+      return t("module.configureScanTool");
     }
-    return "Configure the missing automation tool, then check setup.";
+    return t("module.configureTool");
   }
   if (item.key === "pythonExecutable") {
-    return "Install Python or update the Python setting.";
+    return t("module.installPython");
   }
-  return "Open Setup and check this area.";
+  return t("module.openSetupArea");
 }
 
-export function moduleStatusLabel(status: ModuleReadinessStatus) {
+export function moduleStatusLabel(status: ModuleReadinessStatus, t: Translator = fallbackT) {
   switch (status) {
     case "ready":
-      return "Ready";
+      return t("common.ready");
     case "needs_attention":
-      return "Needs attention";
+      return t("common.needsAttention");
     case "not_configured":
-      return "Not configured";
+      return t("common.notChecked");
     case "blocked":
-      return "Cannot run yet";
+      return t("common.cannotRunYet");
     case "not_checked":
-      return "Not checked";
+      return t("common.notChecked");
   }
 }

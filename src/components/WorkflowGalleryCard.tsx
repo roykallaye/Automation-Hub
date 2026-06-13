@@ -1,6 +1,7 @@
 import { FolderOpen, Loader2, Lock, Wrench, type LucideIcon } from "lucide-react";
 
 import { moduleStatusLabel } from "../moduleReadiness";
+import { useI18n } from "../i18n";
 import type { ModuleReadiness } from "../types";
 import { InfoHint } from "./InfoHint";
 import { StatusHint, type StatusTone } from "./StatusOrb";
@@ -70,6 +71,7 @@ export function WorkflowGalleryCard({
   links?: { label: string; path?: string | null }[];
   onOpenPath?: (path?: string | null) => void;
 }) {
+  const { t } = useI18n();
   const tone = workflowTone(module);
   const blocked = Boolean(disabledReason);
   const RunIcon = isRunning ? Loader2 : Icon;
@@ -105,7 +107,7 @@ export function WorkflowGalleryCard({
           label={module ? moduleStatusLabel(module.status) : "Not checked"}
         />
         <span className="text-xs font-semibold text-slate-500">
-          {lastRunLabel ?? "Not run yet"}
+          {lastRunLabel ?? t("common.notRunYet")}
         </span>
       </div>
 
@@ -119,7 +121,7 @@ export function WorkflowGalleryCard({
                 onClick={onFix}
               >
                 <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-                {fixLabel ?? "Go fix this"}
+                {fixLabel ?? t("workflow.goFixThis")}
               </button>
             )}
           </div>
@@ -133,7 +135,7 @@ export function WorkflowGalleryCard({
               className={["h-5 w-5", isRunning ? "animate-spin" : ""].join(" ")}
               aria-hidden="true"
             />
-            {isRunning ? "Running..." : primaryLabel}
+            {isRunning ? t("common.running") : primaryLabel}
           </button>
         )}
       </div>
@@ -148,7 +150,7 @@ export function WorkflowGalleryCard({
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/60 bg-white/60 px-3 text-xs font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={anyRunning || !link.path}
               onClick={() => onOpenPath(link.path)}
-              title={link.path ? undefined : "Folder is not configured."}
+              title={link.path ? undefined : t("workflow.folderMissing")}
             >
               <FolderOpen className="h-4 w-4 text-brand-700" aria-hidden="true" />
               <span className="truncate">{link.label}</span>
@@ -166,7 +168,7 @@ export function FutureWorkflowCard({
   title,
   whatItWillDo,
   tint = "violet",
-  chip = "Coming soon",
+  chip,
   footnote,
   actionLabel,
   onAction,
@@ -180,6 +182,7 @@ export function FutureWorkflowCard({
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <section className="flex h-full flex-col rounded-xl border border-dashed border-brand-200 bg-white/40 p-5">
       <div className="flex items-center gap-3">
@@ -195,7 +198,7 @@ export function FutureWorkflowCard({
             <InfoHint text={whatItWillDo} />
             <span className="inline-flex items-center gap-1 rounded-md bg-brand-50 px-2 py-1 text-[11px] font-bold text-brand-800 ring-1 ring-brand-200">
               <Lock className="h-3 w-3" aria-hidden="true" />
-              {chip}
+              {chip ?? t("common.comingSoon")}
             </span>
           </div>
           <span className="sr-only">{whatItWillDo}</span>

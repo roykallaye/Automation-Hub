@@ -664,6 +664,7 @@ mod tests {
 
         HubConfig {
             schema_version: 2,
+            language: "en".to_string(),
             client: ClientConfig {
                 display_name: "Fake Hotel".to_string(),
                 branding: crate::config::BrandingConfig::default(),

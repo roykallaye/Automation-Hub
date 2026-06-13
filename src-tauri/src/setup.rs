@@ -276,6 +276,7 @@ pub(crate) fn save_setup_config(
     let mut generated = GeneratedSetup::from_draft(&draft)?;
     // Saving setup must not reset the hotel's visual branding or templates.
     if let Ok(existing) = config::ensure_config(app) {
+        generated.app_config.language = existing.language;
         generated.app_config.client.branding = existing.client.branding;
         generated.app_config.templates = existing.templates;
     }
@@ -450,6 +451,7 @@ impl GeneratedSetup {
 
         let app_config = HubConfig {
             schema_version: current.schema_version,
+            language: current.language,
             client: ClientConfig {
                 display_name: non_empty_or(&draft.hotel_display_name, "Your Hotel"),
                 branding: crate::config::BrandingConfig::default(),

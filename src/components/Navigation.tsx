@@ -11,6 +11,7 @@ import {
 
 import type { AppPage } from "../types";
 import type { NextAction } from "../nextAction";
+import { useI18n, type TranslationKey } from "../i18n";
 
 /*
   Navigation is organized by user intent:
@@ -20,17 +21,17 @@ import type { NextAction } from "../nextAction";
 */
 const navigationItems: {
   key: AppPage;
-  label: string;
+  labelKey: TranslationKey;
   icon: LucideIcon;
-  group?: string;
+  groupKey?: TranslationKey;
 }[] = [
-  { key: "home", label: "Home", icon: Home },
-  { key: "automations", label: "Automations", icon: PlayCircle },
-  { key: "activity", label: "Activity", icon: Activity },
-  { key: "setup", label: "Setup", icon: ClipboardCheck, group: "Prepare" },
-  { key: "settings", label: "Hotel & Settings", icon: Settings2 },
-  { key: "assistant", label: "AI Assistant", icon: Wand2, group: "More" },
-  { key: "support", label: "Support", icon: LifeBuoy },
+  { key: "home", labelKey: "nav.home", icon: Home },
+  { key: "automations", labelKey: "nav.automations", icon: PlayCircle },
+  { key: "activity", labelKey: "nav.activity", icon: Activity },
+  { key: "setup", labelKey: "nav.setup", icon: ClipboardCheck, groupKey: "nav.groupPrepare" },
+  { key: "settings", labelKey: "nav.settings", icon: Settings2 },
+  { key: "assistant", labelKey: "nav.assistant", icon: Wand2, groupKey: "nav.groupMore" },
+  { key: "support", labelKey: "nav.support", icon: LifeBuoy },
 ];
 
 export function Navigation({
@@ -42,6 +43,7 @@ export function Navigation({
   nextAction: NextAction;
   onPageChange: (page: AppPage) => void;
 }) {
+  const { t } = useI18n();
   return (
     <nav
       aria-label="Main navigation"
@@ -53,12 +55,12 @@ export function Navigation({
         const isNext = item.key === nextAction.targetPage && !active;
         return (
           <div key={item.key} className="shrink-0 lg:shrink">
-            {item.group && (
+            {item.groupKey && (
               <p
                 aria-hidden="true"
                 className="hidden px-3 pb-1 pt-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 lg:block"
               >
-                {item.group}
+                {t(item.groupKey)}
               </p>
             )}
             <button
@@ -80,10 +82,10 @@ export function Navigation({
                   active ? "text-brand-200" : "text-brand-700",
                 ].join(" ")}
               />
-              <span className="whitespace-nowrap">{item.label}</span>
+              <span className="whitespace-nowrap">{t(item.labelKey)}</span>
               {isNext && (
                 <span className="ml-auto rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-800">
-                  Next
+                  {t("nav.next")}
                 </span>
               )}
             </button>
