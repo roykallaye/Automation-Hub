@@ -1,7 +1,7 @@
 use crate::{
     config::{
         self, AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig,
-        InvoiceDeliveryMode, SafetyConfig, ScriptPaths,
+        InvoiceDeliveryMode, InvoiceFileSelectionMode, SafetyConfig, ScriptPaths,
     },
     preflight,
 };
@@ -23,6 +23,8 @@ pub(crate) struct SetupDraft {
     python_executable: String,
     #[serde(default = "default_invoice_delivery_mode")]
     invoice_delivery_mode: InvoiceDeliveryMode,
+    #[serde(default = "default_invoice_file_selection_mode")]
+    invoice_file_selection_mode: InvoiceFileSelectionMode,
     gmail_subject: String,
     cc_email: String,
     gmail_credentials_file: String,
@@ -453,6 +455,7 @@ impl GeneratedSetup {
                 branding: crate::config::BrandingConfig::default(),
             },
             invoice_delivery_mode: draft.invoice_delivery_mode.clone(),
+            invoice_file_selection_mode: draft.invoice_file_selection_mode.clone(),
             automation: AutomationConfig {
                 automation_root_folder: current.automation.automation_root_folder,
                 automation_config_path: automation_config_path.to_string_lossy().to_string(),
@@ -499,10 +502,8 @@ impl GeneratedSetup {
             })
             .collect::<Vec<_>>();
 
-        let invoice_input_patterns = normalized_list_or_default(
-            &draft.invoice_input_patterns,
-            "Funzione Pubblica amministrazione*.pdf",
-        );
+        let invoice_input_patterns =
+            normalized_list_or_default(&draft.invoice_input_patterns, "*.pdf");
         let scanner_filename_prefixes =
             normalized_list_or_default(&draft.scanner_filename_prefixes, "Sharp MFP");
         let contract_marker_texts = normalized_list_or_default(
@@ -512,7 +513,7 @@ impl GeneratedSetup {
         let first_invoice_input_pattern = invoice_input_patterns
             .first()
             .cloned()
-            .unwrap_or_else(|| "Funzione Pubblica amministrazione*.pdf".to_string());
+            .unwrap_or_else(|| "*.pdf".to_string());
         let first_scanner_filename_prefix = scanner_filename_prefixes
             .first()
             .cloned()
@@ -546,6 +547,7 @@ impl GeneratedSetup {
             },
             "invoice": {
                 "deliveryMode": draft.invoice_delivery_mode,
+                "fileSelectionMode": draft.invoice_file_selection_mode,
                 "inputGlob": first_invoice_input_pattern,
                 "inputGlobs": invoice_input_patterns,
                 "recipientRules": recipient_rules,
@@ -867,6 +869,10 @@ fn default_invoice_delivery_mode() -> InvoiceDeliveryMode {
     InvoiceDeliveryMode::GmailDrafts
 }
 
+fn default_invoice_file_selection_mode() -> InvoiceFileSelectionMode {
+    InvoiceFileSelectionMode::AllPdfs
+}
+
 fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1090,10 +1096,20 @@ mod tests {
             InvoiceDeliveryMode::GmailDrafts
         );
         assert_eq!(
+            generated.app_config.invoice_file_selection_mode,
+            InvoiceFileSelectionMode::AllPdfs
+        );
+        assert_eq!(
             generated.automation_config["invoice"]["deliveryMode"]
                 .as_str()
                 .unwrap(),
             "gmailDrafts"
+        );
+        assert_eq!(
+            generated.automation_config["invoice"]["fileSelectionMode"]
+                .as_str()
+                .unwrap(),
+            "allPdfs"
         );
         assert_eq!(
             generated.app_config.folders.invoice_input_folder,
@@ -1166,6 +1182,7 @@ mod tests {
             "gmailSubject": "Invoices",
             "ccEmail": "",
             "invoiceDeliveryMode": "gmailDrafts",
+            "invoiceFileSelectionMode": "filenamePatterns",
             "gmailCredentialsFile": "",
             "gmailTokenFile": "",
             "invoiceInputPattern": "*.pdf",
@@ -1187,6 +1204,10 @@ mod tests {
         assert_eq!(
             draft.invoice_delivery_mode,
             InvoiceDeliveryMode::GmailDrafts
+        );
+        assert_eq!(
+            draft.invoice_file_selection_mode,
+            InvoiceFileSelectionMode::FilenamePatterns
         );
         assert_eq!(draft.scanner_filename_prefixes, vec!["Scanner"]);
         assert_eq!(draft.contract_marker_texts, vec!["Contract"]);
@@ -1271,6 +1292,7 @@ mod tests {
             workspace_base: root.to_string_lossy().to_string(),
             python_executable: r"C:\InnPilot\.venv\Scripts\python.exe".to_string(),
             invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
+            invoice_file_selection_mode: InvoiceFileSelectionMode::AllPdfs,
             gmail_subject: "Invoices - Test Hotel".to_string(),
             cc_email: "backoffice@example.invalid".to_string(),
             gmail_credentials_file: root

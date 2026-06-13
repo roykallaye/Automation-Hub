@@ -1,4 +1,9 @@
-import type { InvoiceDeliveryMode, ReadinessStatus, WorkflowPreflight } from "./types";
+import type {
+  InvoiceDeliveryMode,
+  InvoiceFileSelectionMode,
+  ReadinessStatus,
+  WorkflowPreflight,
+} from "./types";
 
 /** Short label for the configured invoice delivery mode. */
 export function deliveryModeLabel(mode?: InvoiceDeliveryMode | null) {
@@ -10,12 +15,12 @@ export function deliveryModeLabel(mode?: InvoiceDeliveryMode | null) {
 /** One-line promise of what the invoice workflow will do in this mode. */
 export function deliveryModePromise(mode?: InvoiceDeliveryMode | null) {
   if (mode === "prepareOnly") {
-    return "Prepares invoice files for you to send yourself. Gmail is skipped.";
+    return "Prepares invoice PDFs from the invoice folder. Gmail is skipped.";
   }
   if (mode === "sendAutomatically") {
     return "Automatic sending is not available yet. Choose another delivery mode.";
   }
-  return "Prepares invoice files and creates Gmail drafts for review.";
+  return "Prepares invoice PDFs from the invoice folder and creates Gmail drafts for review.";
 }
 
 /** One-line reassurance of what will NOT happen in this mode. */
@@ -40,12 +45,17 @@ export type PreRunFact = {
 export function preRunFacts(
   commandName: string,
   deliveryMode?: InvoiceDeliveryMode | null,
+  fileSelectionMode?: InvoiceFileSelectionMode | null,
   safeModeOn?: boolean,
 ): PreRunFact[] {
   const facts: PreRunFact[] = [];
 
   if (commandName === "process_invoices_and_drafts") {
-    facts.push({ kind: "does", text: "Reads invoice PDFs from the input folder." });
+    if (fileSelectionMode === "filenamePatterns") {
+      facts.push({ kind: "does", text: "Looks only at PDFs whose names match your invoice filters." });
+    } else {
+      facts.push({ kind: "does", text: "Looks at every PDF in the invoice input folder." });
+    }
     if (deliveryMode === "prepareOnly") {
       facts.push({ kind: "does", text: "Prepares invoice files for you to send yourself." });
       facts.push({ kind: "wont", text: "Gmail is not contacted. No drafts, no emails." });

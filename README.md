@@ -234,7 +234,9 @@ Guided setup does not process invoices, does not create Gmail drafts, does not s
 
 Invoice delivery mode controls whether InnPilot prepares invoice files only or also creates Gmail drafts. Existing configs without this field behave like the previous mode: `gmailDrafts`. New guided setup defaults to the recommended draft mode, but setup support can choose `prepareOnly` when the hotel wants to send emails manually. `sendAutomatically` is a future/blocked mode and does not request Gmail send scope.
 
-Invoice filename patterns, scanner filename prefixes, and contract marker text can each contain multiple values. InnPilot matches invoices or scans when any configured value matches, while still accepting older single-value config fields.
+Invoice file selection defaults to `allPdfs`: every PDF intentionally placed in the invoice input folder is treated as an invoice candidate, and non-PDF files are ignored. Hotels that use mixed PDF folders can switch to `filenamePatterns`; `inputGlobs` may contain multiple optional filters while legacy `inputGlob` remains accepted.
+
+Scanner filename prefixes and contract marker text can each contain multiple values. InnPilot matches scans or contract text when any configured value matches, while still accepting older single-value config fields.
 
 Recommended local setup:
 
@@ -416,7 +418,9 @@ Workflow buttons are disabled when required scripts or folders are missing or pe
 
 ### Invoice Workflow
 
-Runs the configured invoice processing script, then the configured Gmail draft script. Canonical Python scripts are run with `--config <automationConfigPath>`.
+Runs the configured invoice processing script. In `prepareOnly` mode Gmail is skipped; in `gmailDrafts` mode the configured Gmail draft script runs afterward. Canonical Python scripts are run with `--config <automationConfigPath>`.
+
+By default, every PDF placed in the invoice input folder is treated as an invoice candidate. Filename filters are optional advanced setup for folders that may contain other PDFs.
 
 Expected configured paths:
 

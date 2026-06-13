@@ -798,18 +798,47 @@ function InvoiceRulesStep({
     <SetupStep
       icon={<ReceiptText className="h-6 w-6" />}
       title="Invoice rules"
-      helper="Match invoice text to the right draft recipient."
+      helper="Choose which PDFs InnPilot should prepare and how to route them."
     >
-      <ListEditor
-        label="Invoice file name patterns"
-        help="InnPilot looks for invoice PDFs whose names match any of these patterns."
-        values={draft.invoiceInputPatterns}
-        placeholder="Funzione Pubblica amministrazione*.pdf"
-        addLabel="Add pattern"
-        onChange={(index, value) => updateList("invoiceInputPatterns", index, value)}
-        onAdd={() => addListItem("invoiceInputPatterns", "")}
-        onRemove={(index) => removeListItem("invoiceInputPatterns", index)}
-      />
+      <div className="grid gap-3 md:grid-cols-2">
+        <DeliveryModeCard
+          title="Process every PDF in the invoice folder"
+          text="Best for most hotels. If staff put invoices here, InnPilot prepares them."
+          selected={draft.invoiceFileSelectionMode === "allPdfs"}
+          onClick={() => update("invoiceFileSelectionMode", "allPdfs")}
+        />
+        <DeliveryModeCard
+          title="Only process matching filenames"
+          text="Optional filter for folders that may contain other PDF types."
+          selected={draft.invoiceFileSelectionMode === "filenamePatterns"}
+          onClick={() => update("invoiceFileSelectionMode", "filenamePatterns")}
+        />
+      </div>
+
+      <p className="mt-4 rounded-md bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-950">
+        Invoice folder: every PDF placed here is treated as an invoice candidate unless filename filtering is enabled.
+      </p>
+
+      <details
+        className="mt-5 rounded-lg border border-white/65 bg-white/50 p-4"
+        open={draft.invoiceFileSelectionMode === "filenamePatterns"}
+      >
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          Optional filename filters
+        </summary>
+        <div className="mt-4">
+          <ListEditor
+            label="Invoice filename patterns"
+            help="Use this only when the invoice folder may contain PDFs that are not invoices."
+            values={draft.invoiceInputPatterns}
+            placeholder="*.pdf"
+            addLabel="Add filter"
+            onChange={(index, value) => updateList("invoiceInputPatterns", index, value)}
+            onAdd={() => addListItem("invoiceInputPatterns", "")}
+            onRemove={(index) => removeListItem("invoiceInputPatterns", index)}
+          />
+        </div>
+      </details>
 
       <div className="mt-5 space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -1053,9 +1082,10 @@ function ReviewStep({
         <SummaryCard title="Hotel" value={draft.hotelDisplayName || "Not set"} />
         <SummaryCard title="Workspace" value={draft.workspaceBase || "Not set"} />
         <SummaryCard title="Invoice delivery" value={deliveryModeSummary(draft.invoiceDeliveryMode)} />
+        <SummaryCard title="Invoice files" value={fileSelectionSummary(draft)} />
         <SummaryCard
           title="Invoice rules"
-          value={`${filledRules.length} recipient rule${filledRules.length === 1 ? "" : "s"}, ${draft.invoiceInputPatterns.filter((pattern) => pattern.trim()).length} file pattern${draft.invoiceInputPatterns.filter((pattern) => pattern.trim()).length === 1 ? "" : "s"}`}
+          value={`${filledRules.length} recipient rule${filledRules.length === 1 ? "" : "s"}`}
         />
         <SummaryCard title="Contract year" value={draft.contractYear || "Not set"} />
         <SummaryCard title="Python" value={draft.pythonExecutable || "Not set"} />
@@ -1500,4 +1530,12 @@ function deliveryModeSummary(mode: SetupDraft["invoiceDeliveryMode"]) {
   if (mode === "prepareOnly") return "Prepare files only. Emails are sent manually.";
   if (mode === "sendAutomatically") return "Send automatically is not available yet.";
   return "Create Gmail drafts. No automatic sending.";
+}
+
+function fileSelectionSummary(draft: SetupDraft) {
+  if (draft.invoiceFileSelectionMode === "filenamePatterns") {
+    const count = draft.invoiceInputPatterns.filter((pattern) => pattern.trim()).length;
+    return `Only matching filenames (${count} filter${count === 1 ? "" : "s"}).`;
+  }
+  return "Every PDF in the invoice folder.";
 }

@@ -10,7 +10,7 @@ export const invoiceAction: AutomationAction = {
   requiresConfirmation: true,
   confirmationTitle: "Process invoices?",
   confirmationMessage:
-    "InnPilot will process invoice files. If Gmail drafts are enabled, no emails will be sent automatically.",
+    "InnPilot will prepare invoice PDFs from the invoice folder. If Gmail drafts are enabled, no emails will be sent automatically.",
 };
 
 export const contractAction: AutomationAction = {

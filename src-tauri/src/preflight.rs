@@ -209,6 +209,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
 #[serde(rename_all = "camelCase")]
 struct AutomationFileConfig {
     paths: Option<AutomationFilePaths>,
+    invoice: Option<AutomationFileInvoice>,
     safety: Option<AutomationFileSafety>,
 }
 
@@ -224,6 +225,12 @@ struct AutomationFilePaths {
     contract_destination_dir: Option<String>,
     contract_ocr_text_dir: Option<String>,
     contract_log_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationFileInvoice {
+    file_selection_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -335,6 +342,22 @@ fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
             paths.contract_log_dir.as_deref(),
             false,
         );
+    }
+
+    if let Some(invoice) = automation_config.invoice.as_ref() {
+        if let Some(file_selection_mode) = invoice.file_selection_mode.as_deref() {
+            let app_mode = serde_json::to_value(&config.invoice_file_selection_mode)
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                .unwrap_or_default();
+            if file_selection_mode != app_mode {
+                mismatches.push(AlignmentMismatch {
+                    app_field: "invoiceFileSelectionMode",
+                    automation_field: "invoice.fileSelectionMode",
+                    blocking: false,
+                });
+            }
+        }
     }
 
     if let Some(safety) = automation_config.safety.as_ref() {
@@ -1945,6 +1968,7 @@ mod tests {
                 branding: crate::config::BrandingConfig::default(),
             },
             invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
+            invoice_file_selection_mode: crate::config::InvoiceFileSelectionMode::AllPdfs,
             automation: crate::config::AutomationConfig {
                 automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: scripts

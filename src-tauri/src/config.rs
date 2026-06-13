@@ -13,6 +13,7 @@ pub(crate) struct HubConfig {
     pub(crate) schema_version: u32,
     pub(crate) client: ClientConfig,
     pub(crate) invoice_delivery_mode: InvoiceDeliveryMode,
+    pub(crate) invoice_file_selection_mode: InvoiceFileSelectionMode,
     pub(crate) automation: AutomationConfig,
     pub(crate) scripts: ScriptPaths,
     pub(crate) folders: FolderPaths,
@@ -28,6 +29,13 @@ pub(crate) enum InvoiceDeliveryMode {
     PrepareOnly,
     GmailDrafts,
     SendAutomatically,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum InvoiceFileSelectionMode {
+    AllPdfs,
+    FilenamePatterns,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -330,10 +338,13 @@ fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), Stri
     let default_value =
         serde_json::to_value(default_config()).map_err(|error| format!("Config error: {error}"))?;
     let merged = merge_json(default_value, value);
-    let config: HubConfig = serde_json::from_value(merged.clone())
+    let mut config: HubConfig = serde_json::from_value(merged.clone())
         .map_err(|error| format!("Invalid config file: {error}"))?;
     let original: serde_json::Value =
         serde_json::from_str(contents).map_err(|error| format!("Invalid config file: {error}"))?;
+    if original.get("invoiceFileSelectionMode").is_none() {
+        config.invoice_file_selection_mode = InvoiceFileSelectionMode::FilenamePatterns;
+    }
     Ok((config, merged != original))
 }
 
@@ -372,6 +383,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
             branding: crate::config::BrandingConfig::default(),
         },
         invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
+        invoice_file_selection_mode: InvoiceFileSelectionMode::FilenamePatterns,
         automation: default_config().automation,
         scripts: ScriptPaths {
             invoice_workflow_script: paths.invoice_process_command,
@@ -433,6 +445,7 @@ fn default_config_for_automation_root(automation_root: PathBuf) -> HubConfig {
             branding: crate::config::BrandingConfig::default(),
         },
         invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
+        invoice_file_selection_mode: InvoiceFileSelectionMode::AllPdfs,
         automation: AutomationConfig {
             automation_root_folder: automation_root.to_string_lossy().to_string(),
             automation_config_path: automation_config_path.to_string_lossy().to_string(),
@@ -551,6 +564,10 @@ mod tests {
             config.invoice_delivery_mode,
             InvoiceDeliveryMode::GmailDrafts
         );
+        assert_eq!(
+            config.invoice_file_selection_mode,
+            InvoiceFileSelectionMode::AllPdfs
+        );
         assert!(config
             .scripts
             .invoice_workflow_script
@@ -604,6 +621,10 @@ mod tests {
         assert_eq!(
             config.invoice_delivery_mode,
             InvoiceDeliveryMode::GmailDrafts
+        );
+        assert_eq!(
+            config.invoice_file_selection_mode,
+            InvoiceFileSelectionMode::FilenamePatterns
         );
     }
 
@@ -787,6 +808,22 @@ mod tests {
         assert_eq!(
             config.invoice_delivery_mode,
             InvoiceDeliveryMode::GmailDrafts
+        );
+    }
+
+    #[test]
+    fn missing_invoice_file_selection_mode_preserves_legacy_filename_pattern_behavior() {
+        let partial = r#"{
+          "schemaVersion": 2,
+          "client": { "displayName": "Test Hotel" }
+        }"#;
+
+        let (config, should_rewrite) = parse_config_with_migration(partial).unwrap();
+
+        assert!(should_rewrite);
+        assert_eq!(
+            config.invoice_file_selection_mode,
+            InvoiceFileSelectionMode::FilenamePatterns
         );
     }
 

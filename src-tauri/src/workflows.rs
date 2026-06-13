@@ -669,6 +669,7 @@ mod tests {
                 branding: crate::config::BrandingConfig::default(),
             },
             invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
+            invoice_file_selection_mode: crate::config::InvoiceFileSelectionMode::AllPdfs,
             automation: AutomationConfig {
                 automation_root_folder: scripts.to_string_lossy().to_string(),
                 automation_config_path: root

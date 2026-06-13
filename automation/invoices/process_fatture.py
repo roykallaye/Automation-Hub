@@ -14,6 +14,7 @@ from shared.config import (  # noqa: E402
     config_path,
     config_str_list,
     config_str,
+    config_value,
     load_config,
     recipient_rules,
 )
@@ -26,8 +27,9 @@ INPUT_DIR = ROOT / "Input"
 OUTPUT_DIR = ROOT / "Output_ProntoInvio"
 ARCHIVE_DIR = ROOT / "Archivio"
 LOG_DIR = ROOT / "Log"
-INPUT_GLOB = "Funzione Pubblica amministrazione*.pdf"
+INPUT_GLOB = "*.pdf"
 INPUT_GLOBS = [INPUT_GLOB]
+FILE_SELECTION_MODE = "allPdfs"
 EMAIL_SIGNATURE_NAME = "Your Hotel"
 HOTEL_DISPLAY_NAME = "Your Hotel"
 ARCHIVE_SUCCESSFUL_ORIGINALS = True
@@ -113,7 +115,7 @@ def parse_args() -> argparse.Namespace:
 def configure_run(args: argparse.Namespace) -> None:
     global INPUT_DIR, OUTPUT_DIR, ARCHIVE_DIR, LOG_DIR, ARCHIVE_RUN_DIR, LOG_FILE, REPORT_FILE
     global COMMITTENTE_EMAIL_RULES, INPUT_GLOB, INPUT_GLOBS, EMAIL_SIGNATURE_NAME, ARCHIVE_SUCCESSFUL_ORIGINALS, DELIVERY_MODE
-    global HOTEL_DISPLAY_NAME, EMAIL_BODY_TEMPLATE
+    global HOTEL_DISPLAY_NAME, EMAIL_BODY_TEMPLATE, FILE_SELECTION_MODE
 
     config = {}
     config_base = None
@@ -127,6 +129,21 @@ def configure_run(args: argparse.Namespace) -> None:
     LOG_DIR = config_path(config, "paths", "invoiceLogDir", LOG_DIR, config_base)
     INPUT_GLOBS = config_str_list(config, "invoice", "inputGlobs", "inputGlob", INPUT_GLOBS)
     INPUT_GLOB = INPUT_GLOBS[0]
+    configured_file_selection_mode = config_str(config, "invoice", "fileSelectionMode", "")
+    has_legacy_patterns = (
+        config_value(config, "invoice", "inputGlobs", None) is not None
+        or config_value(config, "invoice", "inputGlob", None) is not None
+    )
+    if configured_file_selection_mode:
+        FILE_SELECTION_MODE = configured_file_selection_mode
+    elif has_legacy_patterns:
+        FILE_SELECTION_MODE = "filenamePatterns"
+    else:
+        FILE_SELECTION_MODE = "allPdfs"
+    if FILE_SELECTION_MODE not in {"allPdfs", "filenamePatterns"}:
+        raise ConfigError(
+            "Config value 'invoice.fileSelectionMode' must be 'allPdfs' or 'filenamePatterns'."
+        )
     DELIVERY_MODE = config_str(config, "invoice", "deliveryMode", DELIVERY_MODE)
     HOTEL_DISPLAY_NAME = config_str(config, "client", "displayName", HOTEL_DISPLAY_NAME)
     EMAIL_SIGNATURE_NAME = config_str(
@@ -397,13 +414,34 @@ def collect_groups_by_email(processed_files: list[dict]) -> dict:
     return groups
 
 
-def collect_input_pdfs() -> list[Path]:
-    matches: dict[str, Path] = {}
-    for pattern in INPUT_GLOBS:
-        for path in INPUT_DIR.glob(pattern):
-            key = str(path.resolve() if path.exists() else path)
-            matches.setdefault(key, path)
-    return sorted(matches.values(), key=lambda path: path.name.lower())
+def collect_input_pdfs() -> tuple[list[Path], dict[str, int]]:
+    folder_items = [path for path in INPUT_DIR.iterdir()] if INPUT_DIR.is_dir() else []
+    pdf_candidates = [path for path in folder_items if path.is_file() and path.suffix.lower() == ".pdf"]
+    ignored_non_pdf = len([path for path in folder_items if path.is_file() and path.suffix.lower() != ".pdf"])
+
+    if FILE_SELECTION_MODE == "allPdfs":
+        matches = {str(path.resolve() if path.exists() else path): path for path in pdf_candidates}
+        skipped_by_filename_filter = 0
+    else:
+        matches: dict[str, Path] = {}
+        for pattern in INPUT_GLOBS:
+            for path in INPUT_DIR.glob(pattern):
+                if not path.is_file() or path.suffix.lower() != ".pdf":
+                    continue
+                key = str(path.resolve() if path.exists() else path)
+                matches.setdefault(key, path)
+        matched_keys = set(matches.keys())
+        skipped_by_filename_filter = len([
+            path
+            for path in pdf_candidates
+            if str(path.resolve() if path.exists() else path) not in matched_keys
+        ])
+
+    return sorted(matches.values(), key=lambda path: path.name.lower()), {
+        "candidatePdfsFound": len(pdf_candidates),
+        "ignoredNonPdf": ignored_non_pdf,
+        "skippedByFilenameFilter": skipped_by_filename_filter,
+    }
 
 
 def invoice_report_item(result: dict) -> dict:
@@ -441,14 +479,21 @@ def main(args: argparse.Namespace | None = None):
     configure_run(args)
     started_at = now_iso()
     dry_run = args.dry_run
-    input_pdfs = collect_input_pdfs()
+    input_pdfs, selection_stats = collect_input_pdfs()
 
     log("=== START process fatture ===")
     log(f"Mode: {'DRY RUN' if dry_run else 'EXECUTE'}")
     log(f"Input folder: {INPUT_DIR}")
     log(f"Output folder: {OUTPUT_DIR}")
     log(f"Archive folder: {ARCHIVE_DIR}")
-    log(f"Input PDFs found for {INPUT_GLOBS}: {len(input_pdfs)}")
+    if FILE_SELECTION_MODE == "allPdfs":
+        log(f"Input PDFs found: {len(input_pdfs)}")
+    else:
+        log(f"Input PDFs found for {INPUT_GLOBS}: {len(input_pdfs)}")
+    if selection_stats["ignoredNonPdf"]:
+        log(f"Ignored non-PDF files: {selection_stats['ignoredNonPdf']}")
+    if selection_stats["skippedByFilenameFilter"]:
+        log(f"Skipped by filename filter: {selection_stats['skippedByFilenameFilter']}")
 
     if not input_pdfs:
         report = {
@@ -460,6 +505,9 @@ def main(args: argparse.Namespace | None = None):
                 status="success",
                 summary={
                     "found": 0,
+                    "candidatePdfsFound": selection_stats["candidatePdfsFound"],
+                    "ignoredNonPdf": selection_stats["ignoredNonPdf"],
+                    "skippedByFilenameFilter": selection_stats["skippedByFilenameFilter"],
                     "processed": 0,
                     "planned": 0,
                     "created": 0,
@@ -478,6 +526,8 @@ def main(args: argparse.Namespace | None = None):
                 "outputFolder": str(OUTPUT_DIR),
                 "archiveFolder": str(ARCHIVE_RUN_DIR),
                 "deliveryMode": DELIVERY_MODE,
+                "fileSelectionMode": FILE_SELECTION_MODE,
+                "inputGlobs": INPUT_GLOBS if FILE_SELECTION_MODE == "filenamePatterns" else [],
                 "gmailSkippedByMode": DELIVERY_MODE == "prepareOnly",
                 "recipientGroups": {},
             },
@@ -715,6 +765,9 @@ def main(args: argparse.Namespace | None = None):
             status=invoice_status(len(failed_items), len(missing_email_items)),
             summary={
                 "found": len(input_pdfs),
+                "candidatePdfsFound": selection_stats["candidatePdfsFound"],
+                "ignoredNonPdf": selection_stats["ignoredNonPdf"],
+                "skippedByFilenameFilter": selection_stats["skippedByFilenameFilter"],
                 "processed": len(processed_items),
                 "planned": len(groups_by_email) + (1 if missing_email_items else 0),
                 "created": 0 if dry_run else len(processed_items),
@@ -739,6 +792,8 @@ def main(args: argparse.Namespace | None = None):
             "outputFolder": str(OUTPUT_DIR),
             "archiveFolder": str(ARCHIVE_RUN_DIR),
             "deliveryMode": DELIVERY_MODE,
+            "fileSelectionMode": FILE_SELECTION_MODE,
+            "inputGlobs": INPUT_GLOBS if FILE_SELECTION_MODE == "filenamePatterns" else [],
             "gmailSkippedByMode": DELIVERY_MODE == "prepareOnly",
             "recipientGroups": groups_by_email,
         },

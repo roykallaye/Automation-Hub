@@ -303,11 +303,11 @@ def main(args: argparse.Namespace | None = None):
     configure_run(args)
     started_at = now_iso()
     dry_run = args.dry_run
-    input_pdfs = sorted(INPUT_DIR.glob("Funzione Pubblica amministrazione*.pdf"))
+    input_pdfs = sorted(path for path in INPUT_DIR.glob("*.pdf") if path.is_file())
 
     log("=== START create Gmail draft ===")
     log(f"Mode: {'DRY RUN' if dry_run else 'EXECUTE'}")
-    log(f"Funzione Pubblica amministrazione PDFs found: {len(input_pdfs)}")
+    log(f"Input PDFs found: {len(input_pdfs)}")
     log(f"Output folder: {OUTPUT_DIR}")
 
     groups = find_recipient_groups()

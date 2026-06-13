@@ -22,8 +22,10 @@
   },
   "invoice": {
     "deliveryMode": "gmailDrafts",
-    "inputGlob": "Funzione Pubblica amministrazione*.pdf",
+    "fileSelectionMode": "allPdfs",
+    "inputGlob": "*.pdf",
     "inputGlobs": [
+      "*.pdf",
       "Funzione Pubblica amministrazione*.pdf",
       "Ricevuta*.pdf",
       "Booking*.pdf"

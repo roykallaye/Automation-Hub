@@ -83,7 +83,7 @@ Important config sections:
 - `client`: hotel display/signature names.
 - `paths`: invoice folders, Gmail credential/token file locations, contract scan/OCR/log folders.
 - `gmail`: subject, CC address, and optional `bodyTemplate` for draft creation. `bodyTemplate` supports `{hotelName}`, `{signature}`, `{invoiceCount}`, and `{date}` placeholders; unknown placeholders are left untouched and an empty template falls back to the built-in body. InnPilot's Hotel & Settings page writes these keys when templates are saved.
-- `invoice`: delivery mode, input filename patterns, and recipient routing rules. `deliveryMode` can be `prepareOnly`, `gmailDrafts`, or the future blocked value `sendAutomatically`. `inputGlobs` may contain multiple patterns; legacy `inputGlob` is still accepted.
+- `invoice`: delivery mode, file selection mode, optional filename filters, and recipient routing rules. `deliveryMode` can be `prepareOnly`, `gmailDrafts`, or the future blocked value `sendAutomatically`. `fileSelectionMode` defaults to `allPdfs`, meaning every PDF in the invoice input folder is an invoice candidate and non-PDF files are ignored. Use `filenamePatterns` only for mixed PDF folders; `inputGlobs` may contain multiple filters and legacy `inputGlob` is still accepted.
 - `contracts`: scanner filename prefixes, contract marker texts, and year metadata. `scannerFilePrefixes` and `contractMarkers` may contain multiple values; legacy single-string fields are still accepted.
 - `safety`: dry-run default, original archiving, and log redaction flags.
 
@@ -138,7 +138,9 @@ Invoice processing:
 python automation\invoices\process_fatture.py --config automation\config.local.json --dry-run
 ```
 
-In dry-run mode the invoice script reads matching input PDFs and uses a temporary file for PDF parsing, but it does not write final PDFs into the real output folder, does not create recipient folders, does not copy failed originals, and does not delete originals.
+In dry-run mode the invoice script reads candidate input PDFs and uses a temporary file for PDF parsing, but it does not write final PDFs into the real output folder, does not create recipient folders, does not copy failed originals, and does not delete originals. By default candidates are all PDFs in the invoice input folder. Optional filename filters are only used when `invoice.fileSelectionMode` is `filenamePatterns`.
+
+Future invoice validation may add a review queue or content confidence checks for PDFs that do not look like invoices. Today the safe rule is simpler: the invoice input folder is the intentional signal, unreadable PDFs are reported as issues, and non-PDF files are ignored.
 
 Gmail draft creation:
 

@@ -34,6 +34,7 @@ export function buildConfigPreview(draft: SetupDraft) {
         displayName: draft.hotelDisplayName,
       },
       invoiceDeliveryMode: draft.invoiceDeliveryMode,
+      invoiceFileSelectionMode: draft.invoiceFileSelectionMode,
       automation: {
         automationRootFolder: "C:\\InnPilot\\automation",
         automationConfigPath: joinWorkspace(draft.workspaceBase, "automation", "config.local.json"),
@@ -83,7 +84,8 @@ export function buildConfigPreview(draft: SetupDraft) {
       },
       invoice: {
         deliveryMode: draft.invoiceDeliveryMode,
-        inputGlob: draft.invoiceInputPatterns[0] || "Funzione Pubblica amministrazione*.pdf",
+        fileSelectionMode: draft.invoiceFileSelectionMode,
+        inputGlob: draft.invoiceInputPatterns[0] || "*.pdf",
         inputGlobs: draft.invoiceInputPatterns.filter((pattern) => pattern.trim()),
         recipientRules: draft.recipientRules
           .filter((rule) => rule.matchText.trim() || rule.email.trim())

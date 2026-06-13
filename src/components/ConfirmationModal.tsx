@@ -2,7 +2,7 @@ import { Check, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { preRunFacts } from "../messages";
-import type { AutomationAction, InvoiceDeliveryMode } from "../types";
+import type { AutomationAction, InvoiceDeliveryMode, InvoiceFileSelectionMode } from "../types";
 
 /*
   Pre-run "what will happen" panel. Before any workflow starts, the user sees
@@ -12,12 +12,14 @@ import type { AutomationAction, InvoiceDeliveryMode } from "../types";
 export function ConfirmationModal({
   action,
   deliveryMode,
+  fileSelectionMode,
   safeModeOn,
   onCancel,
   onConfirm,
 }: {
   action: AutomationAction;
   deliveryMode?: InvoiceDeliveryMode | null;
+  fileSelectionMode?: InvoiceFileSelectionMode | null;
   safeModeOn?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -33,7 +35,7 @@ export function ConfirmationModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
 
-  const facts = preRunFacts(action.commandName, deliveryMode, safeModeOn);
+  const facts = preRunFacts(action.commandName, deliveryMode, fileSelectionMode, safeModeOn);
   const Icon = action.icon;
 
   return (

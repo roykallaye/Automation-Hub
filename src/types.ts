@@ -49,6 +49,10 @@ export type InvoiceDeliveryMode =
   | "gmailDrafts"
   | "sendAutomatically";
 
+export type InvoiceFileSelectionMode =
+  | "allPdfs"
+  | "filenamePatterns";
+
 export type ModuleReadiness = {
   id: ModuleReadinessId;
   title: string;
@@ -138,6 +142,7 @@ export type HubConfig = {
     branding: ClientBranding;
   };
   invoiceDeliveryMode: InvoiceDeliveryMode;
+  invoiceFileSelectionMode: InvoiceFileSelectionMode;
   automation: {
     automationRootFolder: string;
     automationConfigPath: string;

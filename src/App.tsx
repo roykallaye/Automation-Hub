@@ -335,6 +335,7 @@ function App() {
         <ConfirmationModal
           action={pendingAction}
           deliveryMode={configStatus?.config.invoiceDeliveryMode}
+          fileSelectionMode={configStatus?.config.invoiceFileSelectionMode}
           safeModeOn={configStatus?.config.safety.dryRunDefault}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => runAction(pendingAction, true)}

@@ -1,4 +1,4 @@
-import type { HubConfig, InvoiceDeliveryMode } from "../../types";
+import type { HubConfig, InvoiceDeliveryMode, InvoiceFileSelectionMode } from "../../types";
 
 export type RecipientRuleDraft = {
   id: string;
@@ -12,6 +12,7 @@ export type SetupDraft = {
   workspaceBase: string;
   pythonExecutable: string;
   invoiceDeliveryMode: InvoiceDeliveryMode;
+  invoiceFileSelectionMode: InvoiceFileSelectionMode;
   gmailSubject: string;
   ccEmail: string;
   gmailCredentialsFile: string;
@@ -71,13 +72,14 @@ export function createSetupDraft(config?: HubConfig | null): SetupDraft {
         ? configuredPython
         : managedPythonExecutable(),
     invoiceDeliveryMode: config?.invoiceDeliveryMode || "gmailDrafts",
+    invoiceFileSelectionMode: config?.invoiceFileSelectionMode || "allPdfs",
     gmailSubject: "Invoices - Your Hotel",
     ccEmail: "",
     gmailCredentialsFile:
       config?.gmail.tokenPath.replace(/gmail_token\.json$/i, "gmail_credentials.json") ||
       defaults.gmailCredentialsFile,
     gmailTokenFile: config?.gmail.tokenPath || defaults.gmailTokenFile,
-    invoiceInputPatterns: ["Funzione Pubblica amministrazione*.pdf"],
+    invoiceInputPatterns: ["*.pdf"],
     recipientRules: [
       {
         id: createRuleId(),

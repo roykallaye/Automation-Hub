@@ -128,6 +128,119 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(data["summary"]["found"], 1)
             self.assertEqual(data["summary"]["planned"], 1)
 
+    def test_dry_run_all_pdfs_mode_processes_arbitrary_pdf_names(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"]["fileSelectionMode"] = "allPdfs"
+            config["invoice"]["inputGlobs"] = ["Funzione Pubblica amministrazione*.pdf"]
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            invoice = workspace.invoice_input / "renamed by reception.pdf"
+            report = workspace.root / "invoice-all-pdfs-report.json"
+            create_invoice_pdf(invoice)
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(invoice.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["details"]["fileSelectionMode"], "allPdfs")
+            self.assertEqual(data["summary"]["candidatePdfsFound"], 1)
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["skippedByFilenameFilter"], 0)
+
+    def test_dry_run_ignores_non_pdf_files_in_all_pdfs_mode(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"]["fileSelectionMode"] = "allPdfs"
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            invoice = workspace.invoice_input / "manual-name.pdf"
+            note = workspace.invoice_input / "do-not-process.txt"
+            report = workspace.root / "invoice-ignore-non-pdf-report.json"
+            create_invoice_pdf(invoice)
+            note.write_text("not an invoice pdf", encoding="utf-8")
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(note.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["ignoredNonPdf"], 1)
+
+    def test_filename_patterns_mode_skips_non_matching_pdfs(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"]["fileSelectionMode"] = "filenamePatterns"
+            config["invoice"]["inputGlobs"] = ["Booking*.pdf"]
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            matching = workspace.invoice_input / "Booking fixture.pdf"
+            skipped = workspace.invoice_input / "manual-name.pdf"
+            report = workspace.root / "invoice-filter-report.json"
+            create_invoice_pdf(matching)
+            create_invoice_pdf(skipped)
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(skipped.exists())
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["details"]["fileSelectionMode"], "filenamePatterns")
+            self.assertEqual(data["summary"]["candidatePdfsFound"], 2)
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["skippedByFilenameFilter"], 1)
+
+    def test_legacy_input_glob_without_selection_mode_keeps_filename_filtering(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["invoice"].pop("inputGlobs", None)
+            config["invoice"]["inputGlob"] = "Booking*.pdf"
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            matching = workspace.invoice_input / "Booking fixture.pdf"
+            skipped = workspace.invoice_input / "manual-name.pdf"
+            report = workspace.root / "invoice-legacy-glob-report.json"
+            create_invoice_pdf(matching)
+            create_invoice_pdf(skipped)
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--dry-run",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["details"]["fileSelectionMode"], "filenamePatterns")
+            self.assertEqual(data["summary"]["found"], 1)
+            self.assertEqual(data["summary"]["skippedByFilenameFilter"], 1)
+
     def test_dry_run_prepare_only_reports_gmail_skipped_by_mode(self) -> None:
         with InnPilotWorkspace() as workspace:
             config = workspace.config()

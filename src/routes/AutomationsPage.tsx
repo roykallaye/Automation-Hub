@@ -53,6 +53,7 @@ export function AutomationsPage({
 }) {
   const folders = configStatus?.config.folders;
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
+  const invoiceSelectionMode = configStatus?.config.invoiceFileSelectionMode;
   const anyRunning = Boolean(runningCommand);
   const [copyScansAction, ocrAction] = maintenanceActions;
 
@@ -118,7 +119,7 @@ export function AutomationsPage({
         {galleryCard({
           action: invoiceAction,
           title: "Invoice files",
-          whatItDoes: deliveryModePromise(deliveryMode),
+          whatItDoes: invoiceWorkflowPromise(deliveryModePromise(deliveryMode), invoiceSelectionMode),
           tint: "sky",
           modeChip: deliveryModeLabel(deliveryMode),
           primaryLabel: "Prepare invoice files",
@@ -199,6 +200,14 @@ export function AutomationsPage({
       </div>
     </div>
   );
+}
+
+function invoiceWorkflowPromise(deliveryPromise: string, selectionMode?: string | null) {
+  const selection =
+    selectionMode === "filenamePatterns"
+      ? " Only PDFs matching your filename filters are considered."
+      : " Every PDF in the invoice folder is considered an invoice.";
+  return `${deliveryPromise}${selection}`;
 }
 
 function shortStatus(record: ActivityRecord) {

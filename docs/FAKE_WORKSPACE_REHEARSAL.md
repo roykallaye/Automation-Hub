@@ -98,10 +98,10 @@ For the rehearsal, choose either `Prepare files only` or `Create Gmail drafts`. 
 
 ### Invoice Rules
 
-- Input pattern: `Funzione Pubblica amministrazione*.pdf`
+- File selection: `Process every PDF in the invoice folder`
 - Match text: `testpartner`
 - Recipient email: `test@example.invalid`
-- Extra invoice patterns can be added later, for example `Ricevuta*.pdf`, `Booking*.pdf`, or `*.pdf`.
+- Optional filename filters can be enabled later for mixed folders, for example `Funzione Pubblica amministrazione*.pdf`, `Ricevuta*.pdf`, or `Booking*.pdf`.
 
 ### Contracts And Scans
 
@@ -189,7 +189,7 @@ $root = "C:\Users\rkall\Desktop\InnPilot-Test-Workspace"
 New-Item -ItemType Directory -Force "$root\Invoices\Input" | Out-Null
 New-Item -ItemType Directory -Force "$root\Scans\IncomingCache" | Out-Null
 New-Item -ItemType Directory -Force "$root\Scans\TextOutput" | Out-Null
-"fake invoice placeholder" | Set-Content -Encoding UTF8 "$root\Invoices\Input\Funzione Pubblica amministrazione testpartner.pdf"
+"fake invoice placeholder" | Set-Content -Encoding UTF8 "$root\Invoices\Input\manual testpartner invoice.pdf"
 "fake scan placeholder" | Set-Content -Encoding UTF8 "$root\Scans\IncomingCache\Sharp MFP fake.pdf"
 "Oggetto: Contratto di lavoro subordinato a tempo determinato" | Set-Content -Encoding UTF8 "$root\Scans\TextOutput\Sharp MFP fake.txt"
 ```
