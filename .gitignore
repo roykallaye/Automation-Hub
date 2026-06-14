@@ -42,6 +42,10 @@ client_secret*.json
 **/*.jpeg
 **/*.png
 
+# App icons are part of the product and must be version-controlled.
+# (The broad image ignores above keep hotel scans/PDFs out of git.)
+!src-tauri/icons/**/*.png
+
 # Secrets and OAuth tokens
 .env
 .env.*

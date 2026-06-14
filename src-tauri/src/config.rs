@@ -179,13 +179,20 @@ impl BrandingConfig {
     }
 }
 
-const KNOWN_PALETTES: [&str; 6] = [
+// Keep in sync with BRAND_PALETTES in src/branding.ts.
+const KNOWN_PALETTES: [&str; 12] = [
     "innpilotDefault",
+    "amethystSuite",
     "coastalHotel",
+    "midnightNavy",
     "luxuryGold",
+    "sunsetCoral",
+    "roseBoutique",
     "alpineSpa",
-    "modernMinimal",
+    "forestEmerald",
     "mediterranean",
+    "slateHarbor",
+    "modernMinimal",
 ];
 
 fn sanitize_palette(palette: &str) -> String {

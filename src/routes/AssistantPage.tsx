@@ -284,7 +284,7 @@ export function AssistantPage() {
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
           <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-amber-tile ring-1">
               <Lightbulb className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
@@ -310,7 +310,7 @@ export function AssistantPage() {
 
         <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
           <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-sky-100 text-sky-700 ring-1 ring-sky-200">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
               <Send className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>

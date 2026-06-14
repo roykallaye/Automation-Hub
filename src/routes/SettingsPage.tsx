@@ -97,7 +97,7 @@ export function SettingsPage({
 
       <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-sky-100 text-sky-700 ring-1 ring-sky-200">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
             <Mail className="h-5 w-5" aria-hidden="true" />
           </div>
           <h2 className="text-xl font-semibold text-slate-950">{t("settings.invoiceDeliveryTitle")}</h2>
@@ -142,7 +142,7 @@ export function SettingsPage({
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-emerald-tile ring-1">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </div>
             <h2 className="text-xl font-semibold text-slate-950">{t("settings.safetyTitle")}</h2>
@@ -170,7 +170,7 @@ export function SettingsPage({
         <div className="space-y-5">
           <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
             <div className="flex items-start gap-3">
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-violet-100 text-violet-700 ring-1 ring-violet-200">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
                 <Laptop className="h-5 w-5" aria-hidden="true" />
               </div>
               <div>

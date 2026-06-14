@@ -1,28 +1,33 @@
 /*
-  Cheerful card tints.
+  Card tints — all derived from the active palette.
 
-  Status colors stay strictly semantic (see StatusOrb); these tints are purely
-  decorative hues that give each destination and workflow its own friendly
-  identity. Soft pastels only — premium and warm, never neon.
+  The actual colors live in CSS variables (--tint-<slot>-bg/fg/ring/wash) that
+  applyBrandingToDocument() generates by hue-rotating the brand color, so every
+  tint belongs to the chosen palette. These maps just point at the utility
+  classes defined in src/styles.css. Status colors stay separate and semantic
+  (see StatusOrb); they are the one set of fixed hues allowed to ignore the
+  palette because they must always read as ready / attention / blocked.
+
+  Slot names are stable identifiers, not literal hues.
 */
 export type CardTint = "brand" | "sky" | "violet" | "amber" | "emerald" | "rose";
 
-/** Icon tile: colored background + icon color + soft ring. */
+/** Icon tile: palette-derived background + icon color + ring (pair with ring-1). */
 export const TINT_TILE: Record<CardTint, string> = {
-  brand: "bg-brand-50 text-brand-800 ring-brand-100",
-  sky: "bg-sky-100 text-sky-700 ring-sky-200",
-  violet: "bg-violet-100 text-violet-700 ring-violet-200",
-  amber: "bg-amber-100 text-amber-700 ring-amber-200",
-  emerald: "bg-emerald-100 text-emerald-700 ring-emerald-200",
-  rose: "bg-rose-100 text-rose-700 ring-rose-200",
+  brand: "tint-brand-tile",
+  sky: "tint-sky-tile",
+  violet: "tint-violet-tile",
+  amber: "tint-amber-tile",
+  emerald: "tint-emerald-tile",
+  rose: "tint-rose-tile",
 };
 
-/** Gentle gradient wash for the card surface. */
+/** Gentle palette-derived gradient wash for a card surface. */
 export const TINT_WASH: Record<CardTint, string> = {
-  brand: "bg-gradient-to-br from-brand-50/90 via-white/60 to-white/55",
-  sky: "bg-gradient-to-br from-sky-50/90 via-white/60 to-white/55",
-  violet: "bg-gradient-to-br from-violet-50/90 via-white/60 to-white/55",
-  amber: "bg-gradient-to-br from-amber-50/90 via-white/60 to-white/55",
-  emerald: "bg-gradient-to-br from-emerald-50/90 via-white/60 to-white/55",
-  rose: "bg-gradient-to-br from-rose-50/90 via-white/60 to-white/55",
+  brand: "tint-brand-wash",
+  sky: "tint-sky-wash",
+  violet: "tint-violet-wash",
+  amber: "tint-amber-wash",
+  emerald: "tint-emerald-wash",
+  rose: "tint-rose-wash",
 };

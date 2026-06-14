@@ -14,7 +14,13 @@
       "Bash(cargo test *)",
       "Bash(echo \"fmt exit: $?\")",
       "Bash(node scripts/doctor-resources.mjs)",
-      "PowerShell(npm run doctor:resources 2>&1)"
+      "PowerShell(npm run doctor:resources 2>&1)",
+      "Bash(cd \"c:/Users/rkall/Desktop/Docs/Work/Personal/Automation-Hub\" && echo \"=== tauri.conf.json ===\" && cat src-tauri/tauri.conf.json && echo \"=== search recent images ===\" && find /c/Users/rkall/Downloads /c/Users/rkall/Desktop -maxdepth 2 -type f \\\\\\( -iname \"*.png\" -o -iname \"*.jpg\" -o -iname \"*.jpeg\" \\\\\\) -newermt \"2026-06-10\" 2>/dev/null | head -20)",
+      "Read(//c/Users/rkall/Downloads/**)",
+      "Bash(cp \"/c/Users/rkall/Downloads/ChatGPT Image Jun 13, 2026, 09_50_42 PM.png\" src-tauri/icons/source-logo.png)",
+      "Bash(python -c \"from PIL import Image; im=Image.open\\(r'src-tauri/icons/source-logo.png'\\); print\\(im.size, im.mode\\)\")",
+      "PowerShell(npx tauri icon src-tauri/icons/source-logo.png 2>&1)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

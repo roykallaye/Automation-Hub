@@ -91,7 +91,7 @@ export function TemplateEditor({
   return (
     <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="flex items-center gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-violet-100 text-violet-700 ring-1 ring-violet-200">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
           <MailOpen className="h-5 w-5" aria-hidden="true" />
         </div>
         <h2 className="text-xl font-semibold text-slate-950">{t("templates.title")}</h2>

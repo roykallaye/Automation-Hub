@@ -21,9 +21,37 @@
   --brand-900: 19 78 74;
   --brand-950: 4 47 46;
 
-  /* Primary action ("ink") surface */
-  --ink: 2 6 23;
-  --ink-soft: 30 41 59;
+  /* Primary action / CTA ("ink") surface — derives from brand at runtime
+     (see applyBrandingToDocument). Default mirrors the teal brand-800/900. */
+  --ink: 17 94 89;
+  --ink-soft: 19 78 74;
+
+  /* Decorative card tints (palette-derived at runtime). These fallbacks use
+     the default teal family so cards are never unstyled before JS runs. */
+  --tint-brand-bg: 204 251 241;
+  --tint-brand-fg: 17 94 89;
+  --tint-brand-ring: 153 246 228;
+  --tint-brand-wash: 240 253 250;
+  --tint-sky-bg: 204 251 241;
+  --tint-sky-fg: 17 94 89;
+  --tint-sky-ring: 153 246 228;
+  --tint-sky-wash: 240 253 250;
+  --tint-violet-bg: 204 251 241;
+  --tint-violet-fg: 17 94 89;
+  --tint-violet-ring: 153 246 228;
+  --tint-violet-wash: 240 253 250;
+  --tint-amber-bg: 204 251 241;
+  --tint-amber-fg: 17 94 89;
+  --tint-amber-ring: 153 246 228;
+  --tint-amber-wash: 240 253 250;
+  --tint-emerald-bg: 204 251 241;
+  --tint-emerald-fg: 17 94 89;
+  --tint-emerald-ring: 153 246 228;
+  --tint-emerald-wash: 240 253 250;
+  --tint-rose-bg: 204 251 241;
+  --tint-rose-fg: 17 94 89;
+  --tint-rose-ring: 153 246 228;
+  --tint-rose-wash: 240 253 250;
 
   /* App background wash */
   --app-bg: #eef2f4;
@@ -69,6 +97,92 @@ pre {
   outline: 2px solid rgb(var(--brand-700));
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/*
+  Palette-derived card tints. Each tile sets background + icon color and the
+  ring color (used by Tailwind's `ring-1`). Each wash is a soft gradient for a
+  card surface. The colors come from --tint-* variables set per palette.
+*/
+.tint-brand-tile,
+.tint-sky-tile,
+.tint-violet-tile,
+.tint-amber-tile,
+.tint-emerald-tile,
+.tint-rose-tile {
+  --tw-ring-opacity: 1;
+}
+.tint-brand-tile {
+  background-color: rgb(var(--tint-brand-bg));
+  color: rgb(var(--tint-brand-fg));
+  --tw-ring-color: rgb(var(--tint-brand-ring));
+}
+.tint-sky-tile {
+  background-color: rgb(var(--tint-sky-bg));
+  color: rgb(var(--tint-sky-fg));
+  --tw-ring-color: rgb(var(--tint-sky-ring));
+}
+.tint-violet-tile {
+  background-color: rgb(var(--tint-violet-bg));
+  color: rgb(var(--tint-violet-fg));
+  --tw-ring-color: rgb(var(--tint-violet-ring));
+}
+.tint-amber-tile {
+  background-color: rgb(var(--tint-amber-bg));
+  color: rgb(var(--tint-amber-fg));
+  --tw-ring-color: rgb(var(--tint-amber-ring));
+}
+.tint-emerald-tile {
+  background-color: rgb(var(--tint-emerald-bg));
+  color: rgb(var(--tint-emerald-fg));
+  --tw-ring-color: rgb(var(--tint-emerald-ring));
+}
+.tint-rose-tile {
+  background-color: rgb(var(--tint-rose-bg));
+  color: rgb(var(--tint-rose-fg));
+  --tw-ring-color: rgb(var(--tint-rose-ring));
+}
+.tint-brand-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-brand-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
+}
+.tint-sky-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-sky-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
+}
+.tint-violet-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-violet-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
+}
+.tint-amber-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-amber-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
+}
+.tint-emerald-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-emerald-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
+}
+.tint-rose-wash {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--tint-rose-wash)),
+    rgba(255, 255, 255, 0.55)
+  );
 }
 
 /* Subtle entrance used for page changes and panels. */

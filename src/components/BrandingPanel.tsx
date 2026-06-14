@@ -100,7 +100,7 @@ export function BrandingPanel({
   return (
     <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="flex items-center gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-amber-tile ring-1">
           <Palette className="h-5 w-5" aria-hidden="true" />
         </div>
         <h2 className="text-xl font-semibold text-slate-950">{t("branding.title")}</h2>
@@ -151,8 +151,9 @@ export function BrandingPanel({
 
       <fieldset className="mt-5">
         <legend className="mb-2 text-sm font-semibold text-slate-800">{t("branding.palette")}</legend>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {BRAND_PALETTES.map((palette) => {
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-white/60 bg-white/30 p-2 [scrollbar-width:thin]">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {BRAND_PALETTES.map((palette) => {
             const selected = draft.palette === palette.id;
             return (
               <button
@@ -179,7 +180,7 @@ export function BrandingPanel({
                   )}
                   <span
                     className="h-4 w-4 rounded-full ring-1 ring-slate-900/10"
-                    style={{ backgroundColor: tripletToCss(palette.ink) }}
+                    style={{ backgroundColor: tripletToCss(palette.brand[800]) }}
                   />
                 </span>
                 <span className="mt-2 block text-sm font-semibold text-slate-900">
@@ -190,7 +191,8 @@ export function BrandingPanel({
                 </span>
               </button>
             );
-          })}
+            })}
+          </div>
         </div>
       </fieldset>
 
