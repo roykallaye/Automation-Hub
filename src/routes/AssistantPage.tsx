@@ -246,6 +246,27 @@ export function AssistantPage() {
         </section>
       )}
 
+      <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
+            <ScanText className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-semibold text-slate-950">
+                {t("assistant.folderDiscoveryTitle")}
+              </h3>
+              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-brand-900">
+                {t("common.comingSoon")}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+              {t("assistant.folderDiscoveryText")}
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section>
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">
           {t("assistant.frequent")}

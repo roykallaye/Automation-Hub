@@ -1,12 +1,38 @@
 import type { SetupDraft } from "./setupDraft";
-import { joinWorkspace, resolveWorkspacePath } from "./setupDraft";
+import { defaultPathsForWorkspace, joinWorkspace, resolveWorkspacePath } from "./setupDraft";
 
 export function buildConfigPreview(draft: SetupDraft) {
-  const invoiceInput = joinWorkspace(draft.workspaceBase, "Invoices", "Input");
-  const invoiceOutput = joinWorkspace(draft.workspaceBase, "Invoices", "ReadyToSend");
-  const invoiceArchive = joinWorkspace(draft.workspaceBase, "Invoices", "Archive");
-  const invoiceLogs = joinWorkspace(draft.workspaceBase, "Invoices", "Logs");
-  const scansCache = joinWorkspace(draft.workspaceBase, "Scans", "IncomingCache");
+  const defaults = defaultPathsForWorkspace(draft.workspaceBase, draft.contractYear || "2026");
+  const invoiceInput = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.invoiceInputFolder,
+    "Invoices",
+    "Input",
+  );
+  const invoiceOutput = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.invoiceOutputFolder,
+    "Invoices",
+    "ReadyToSend",
+  );
+  const invoiceArchive = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.invoiceArchiveFolder,
+    "Invoices",
+    "Archive",
+  );
+  const invoiceLogs = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.invoiceLogFolder,
+    "Invoices",
+    "Logs",
+  );
+  const scansCache = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.scansLocalCacheFolder,
+    "Scans",
+    "IncomingCache",
+  );
   const sharedScanFolder = resolveWorkspacePath(
     draft.workspaceBase,
     draft.sharedScanFolder,
@@ -26,7 +52,14 @@ export function buildConfigPreview(draft: SetupDraft) {
     draft.contractYear || "2026",
     "Signed",
   );
-  const contractLogs = joinWorkspace(draft.workspaceBase, "Contracts", "Logs");
+  const contractLogs = resolveWorkspacePath(
+    draft.workspaceBase,
+    draft.contractLogFolder,
+    "Contracts",
+    "Logs",
+  );
+  const gmailCredentialsFile = draft.gmailCredentialsFile || defaults.gmailCredentialsFile;
+  const gmailTokenFile = draft.gmailTokenFile || defaults.gmailTokenFile;
 
   return {
     innPilotAppConfig: {
@@ -52,7 +85,7 @@ export function buildConfigPreview(draft: SetupDraft) {
         contractLogFolder: contractLogs,
       },
       gmail: {
-        tokenPath: draft.gmailTokenFile,
+        tokenPath: gmailTokenFile,
       },
       safety: {
         dryRunDefault: draft.safeMode,
@@ -70,8 +103,8 @@ export function buildConfigPreview(draft: SetupDraft) {
         invoiceOutputDir: invoiceOutput,
         invoiceArchiveDir: invoiceArchive,
         invoiceLogDir: invoiceLogs,
-        gmailCredentialsFile: draft.gmailCredentialsFile,
-        gmailTokenFile: draft.gmailTokenFile,
+        gmailCredentialsFile,
+        gmailTokenFile,
         contractInputShortcut: "",
         contractInputDir: sharedScanFolder,
         contractDestinationDir: contractOutput,

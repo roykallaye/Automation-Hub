@@ -2,6 +2,7 @@ mod activity;
 mod automation_install;
 mod branding;
 mod config;
+mod folder_discovery;
 mod logs;
 mod paths;
 mod preflight;
@@ -49,7 +50,8 @@ pub fn run() {
             save_client_branding,
             read_branding_logo,
             save_output_templates,
-            save_app_language
+            save_app_language,
+            inspect_existing_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -121,6 +123,11 @@ fn save_app_language(
         config_path.to_string_lossy().to_string(),
         config,
     ))
+}
+
+#[tauri::command]
+fn inspect_existing_folder(path: String) -> Result<folder_discovery::FolderInspection, String> {
+    folder_discovery::inspect_existing_folder(path)
 }
 
 #[tauri::command]

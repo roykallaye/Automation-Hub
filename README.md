@@ -232,6 +232,15 @@ Guided setup is intentionally separate from automation runs:
 
 Guided setup does not process invoices, does not create Gmail drafts, does not send emails, and does not move/delete hotel files. Workflows are still run manually from the Automations page after setup is ready.
 
+Guided setup can start in either folder mode:
+
+- Create a new InnPilot workspace: InnPilot previews and creates a clean folder structure under the selected workspace.
+- Use existing hotel folders: setup support maps folders the hotel already uses for invoices, scans, contracts, logs, and Gmail files.
+
+Existing-folder discovery is deterministic and read-only. InnPilot validates that a selected path is an existing folder, lists only immediate folder/file names, counts common file types, and inspects nearby sibling folders for simple role suggestions such as invoice input, archive, scans, OCR text, and signed contracts. It does not read file contents, recurse through large folder trees, upload data, call AI, move files, rename files, delete files, or save mappings silently. Suggestions must be confirmed by the user before setup is saved.
+
+If a Windows path is copied from File Explorer with quotes, for example `"C:\Hotel\Fatture\Input"`, InnPilot trims the surrounding quotes safely before checking the folder.
+
 Invoice delivery mode controls whether InnPilot prepares invoice files only or also creates Gmail drafts. Existing configs without this field behave like the previous mode: `gmailDrafts`. New guided setup defaults to the recommended draft mode, but setup support can choose `prepareOnly` when the hotel wants to send emails manually. `sendAutomatically` is a future/blocked mode and does not request Gmail send scope.
 
 Invoice file selection defaults to `allPdfs`: every PDF intentionally placed in the invoice input folder is treated as an invoice candidate, and non-PDF files are ignored. Hotels that use mixed PDF folders can switch to `filenamePatterns`; `inputGlobs` may contain multiple optional filters while legacy `inputGlob` remains accepted.

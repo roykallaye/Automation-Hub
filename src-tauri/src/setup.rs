@@ -16,6 +16,8 @@ use tauri::{AppHandle, Manager};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupDraft {
+    #[serde(default = "default_setup_mode")]
+    setup_mode: SetupMode,
     hotel_display_name: String,
     email_signature_name: String,
     workspace_base: String,
@@ -29,6 +31,14 @@ pub(crate) struct SetupDraft {
     cc_email: String,
     gmail_credentials_file: String,
     gmail_token_file: String,
+    #[serde(default)]
+    invoice_input_folder: String,
+    #[serde(default)]
+    invoice_output_folder: String,
+    #[serde(default)]
+    invoice_archive_folder: String,
+    #[serde(default)]
+    invoice_log_folder: String,
     #[serde(
         default,
         alias = "invoiceInputPattern",
@@ -50,11 +60,22 @@ pub(crate) struct SetupDraft {
     )]
     contract_marker_texts: Vec<String>,
     shared_scan_folder: String,
+    #[serde(default)]
+    scans_local_cache_folder: String,
     ocr_text_output_folder: String,
     signed_contracts_output_folder: String,
+    #[serde(default)]
+    contract_log_folder: String,
     safe_mode: bool,
     archive_originals: bool,
     redact_logs: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum SetupMode {
+    NewWorkspace,
+    ExistingFolders,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,95 +370,118 @@ impl GeneratedSetup {
             draft.contract_year.trim().to_string()
         };
 
-        let invoice_input = workspace_base.join("Invoices").join("Input");
-        let invoice_output = workspace_base.join("Invoices").join("ReadyToSend");
-        let invoice_archive = workspace_base.join("Invoices").join("Archive");
-        let invoice_logs = workspace_base.join("Invoices").join("Logs");
+        let invoice_input_default = workspace_base.join("Invoices").join("Input");
+        let invoice_output_default = workspace_base.join("Invoices").join("ReadyToSend");
+        let invoice_archive_default = workspace_base.join("Invoices").join("Archive");
+        let invoice_logs_default = workspace_base.join("Invoices").join("Logs");
         let gmail_token_folder = workspace_base.join("Gmail").join("Token");
         let gmail_credentials_folder = workspace_base.join("Gmail").join("Credentials");
-        let scans_cache = workspace_base.join("Scans").join("IncomingCache");
+        let scans_cache_default = workspace_base.join("Scans").join("IncomingCache");
         let default_scans_text = workspace_base.join("Scans").join("TextOutput");
         let contracts_output_default = workspace_base.join("Contracts").join(&year).join("Signed");
-        let contracts_logs = workspace_base.join("Contracts").join("Logs");
+        let contracts_logs_default = workspace_base.join("Contracts").join("Logs");
         let support_diagnostics = workspace_base.join("Support").join("Diagnostics");
         let automation_config_folder = workspace_base.join("automation");
 
-        let ocr_text_output = setup_path_or_default(
+        let invoice_input = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.invoice_input_folder,
+            invoice_input_default,
+        )?;
+        let invoice_output = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.invoice_output_folder,
+            invoice_output_default,
+        )?;
+        let invoice_archive = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.invoice_archive_folder,
+            invoice_archive_default,
+        )?;
+        let invoice_logs = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.invoice_log_folder,
+            invoice_logs_default,
+        )?;
+        let scans_cache = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.scans_local_cache_folder,
+            scans_cache_default.clone(),
+        )?;
+
+        let ocr_text_output = setup_path_for_mode(
+            &draft.setup_mode,
             &workspace_base,
             &draft.ocr_text_output_folder,
             default_scans_text.clone(),
         )?;
-        let signed_contracts_output = setup_path_or_default(
+        let signed_contracts_output = setup_path_for_mode(
+            &draft.setup_mode,
             &workspace_base,
             &draft.signed_contracts_output_folder,
             contracts_output_default.clone(),
         )?;
-        let shared_scan_folder = setup_path_or_default(
+        let contracts_logs = setup_path_for_mode(
+            &draft.setup_mode,
+            &workspace_base,
+            &draft.contract_log_folder,
+            contracts_logs_default,
+        )?;
+        let shared_scan_folder = setup_path_for_mode(
+            &draft.setup_mode,
             &workspace_base,
             &draft.shared_scan_folder,
-            scans_cache.clone(),
+            scans_cache_default.clone(),
         )?;
-        let gmail_token_file = setup_path_or_default(
+        let gmail_token_file = setup_path_for_mode(
+            &draft.setup_mode,
             &workspace_base,
             &draft.gmail_token_file,
             gmail_token_folder.join("gmail_token.json"),
         )?;
-        let gmail_credentials_file = setup_path_or_default(
+        let gmail_credentials_file = setup_path_for_mode(
+            &draft.setup_mode,
             &workspace_base,
             &draft.gmail_credentials_file,
             gmail_credentials_folder.join("gmail_credentials.json"),
         )?;
 
-        let folder_specs = vec![
-            FolderSpec {
-                label: "Invoices/Input",
-                path: invoice_input.clone(),
-            },
-            FolderSpec {
-                label: "Invoices/ReadyToSend",
-                path: invoice_output.clone(),
-            },
-            FolderSpec {
-                label: "Invoices/Archive",
-                path: invoice_archive.clone(),
-            },
-            FolderSpec {
-                label: "Invoices/Logs",
-                path: invoice_logs.clone(),
-            },
-            FolderSpec {
-                label: "Gmail/Token",
-                path: gmail_token_folder,
-            },
-            FolderSpec {
-                label: "Gmail/Credentials",
-                path: gmail_credentials_folder,
-            },
-            FolderSpec {
-                label: "Scans/IncomingCache",
-                path: scans_cache.clone(),
-            },
-            FolderSpec {
-                label: "Scans/TextOutput",
-                path: ocr_text_output.clone(),
-            },
-            FolderSpec {
-                label: "Contracts/<year>/Signed",
-                path: signed_contracts_output.clone(),
-            },
-            FolderSpec {
-                label: "Contracts/Logs",
-                path: contracts_logs.clone(),
-            },
-            FolderSpec {
-                label: "Support/Diagnostics",
-                path: support_diagnostics,
-            },
-            FolderSpec {
-                label: "automation",
-                path: automation_config_folder.clone(),
-            },
-        ];
+        let mut folder_specs = Vec::new();
+        push_folder(&mut folder_specs, "Invoices/Input", &invoice_input);
+        push_folder(&mut folder_specs, "Invoices/ReadyToSend", &invoice_output);
+        push_folder(&mut folder_specs, "Invoices/Archive", &invoice_archive);
+        push_folder(&mut folder_specs, "Invoices/Logs", &invoice_logs);
+        push_folder(
+            &mut folder_specs,
+            "Gmail/Token",
+            &file_parent(&gmail_token_file),
+        );
+        push_folder(
+            &mut folder_specs,
+            "Gmail/Credentials",
+            &file_parent(&gmail_credentials_file),
+        );
+        push_folder(&mut folder_specs, "Scans/IncomingCache", &scans_cache);
+        push_folder(&mut folder_specs, "Scans/TextOutput", &ocr_text_output);
+        push_folder(
+            &mut folder_specs,
+            "Contracts/<year>/Signed",
+            &signed_contracts_output,
+        );
+        push_folder(&mut folder_specs, "Contracts/Logs", &contracts_logs);
+        folder_specs.push(FolderSpec {
+            label: "Support/Diagnostics",
+            path: support_diagnostics,
+        });
+        folder_specs.push(FolderSpec {
+            label: "automation",
+            path: automation_config_folder.clone(),
+        });
 
         for spec in &folder_specs {
             validate_setup_folder_path(&workspace_base, &spec.path)?;
@@ -471,18 +515,18 @@ impl GeneratedSetup {
                 contract_processing_script: canonical_scripts.contract_processing_script,
             },
             folders: FolderPaths {
-                invoice_input_folder: invoice_input.to_string_lossy().to_string(),
-                invoice_output_folder: invoice_output.to_string_lossy().to_string(),
-                invoice_archive_folder: invoice_archive.to_string_lossy().to_string(),
-                invoice_log_folder: invoice_logs.to_string_lossy().to_string(),
-                scansioni_network_share: shared_scan_folder.to_string_lossy().to_string(),
-                scansioni_local_cache_folder: scans_cache.to_string_lossy().to_string(),
-                ocr_text_output_folder: ocr_text_output.to_string_lossy().to_string(),
-                contracts_output_folder: signed_contracts_output.to_string_lossy().to_string(),
-                contract_log_folder: contracts_logs.to_string_lossy().to_string(),
+                invoice_input_folder: path_text(&invoice_input),
+                invoice_output_folder: path_text(&invoice_output),
+                invoice_archive_folder: path_text(&invoice_archive),
+                invoice_log_folder: path_text(&invoice_logs),
+                scansioni_network_share: path_text(&shared_scan_folder),
+                scansioni_local_cache_folder: path_text(&scans_cache),
+                ocr_text_output_folder: path_text(&ocr_text_output),
+                contracts_output_folder: path_text(&signed_contracts_output),
+                contract_log_folder: path_text(&contracts_logs),
             },
             gmail: GmailConfig {
-                token_path: gmail_token_file.to_string_lossy().to_string(),
+                token_path: path_text(&gmail_token_file),
             },
             safety: SafetyConfig {
                 dry_run_default: draft.safe_mode,
@@ -535,7 +579,7 @@ impl GeneratedSetup {
                 "invoiceOutputDir": app_config.folders.invoice_output_folder,
                 "invoiceArchiveDir": app_config.folders.invoice_archive_folder,
                 "invoiceLogDir": app_config.folders.invoice_log_folder,
-                "gmailCredentialsFile": gmail_credentials_file.to_string_lossy().to_string(),
+                "gmailCredentialsFile": path_text(&gmail_credentials_file),
                 "gmailTokenFile": app_config.gmail.token_path,
                 "contractInputShortcut": "",
                 "contractInputDir": app_config.folders.scansioni_network_share,
@@ -725,6 +769,30 @@ fn setup_path_or_default(
     Ok(workspace_base.join(path))
 }
 
+fn setup_path_for_mode(
+    mode: &SetupMode,
+    workspace_base: &Path,
+    value: &str,
+    default: PathBuf,
+) -> Result<Option<PathBuf>, String> {
+    if value.trim().is_empty() && *mode == SetupMode::ExistingFolders {
+        return Ok(None);
+    }
+    setup_path_or_default(workspace_base, value, default).map(Some)
+}
+
+fn path_text(path: &Option<PathBuf>) -> String {
+    path.as_ref()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn file_parent(path: &Option<PathBuf>) -> Option<PathBuf> {
+    path.as_ref()
+        .and_then(|path| path.parent())
+        .map(Path::to_path_buf)
+}
+
 fn repair_concatenated_absolute_path(value: &str) -> String {
     let bytes = value.as_bytes();
     for index in 1..bytes.len().saturating_sub(2) {
@@ -871,8 +939,21 @@ fn default_invoice_delivery_mode() -> InvoiceDeliveryMode {
     InvoiceDeliveryMode::GmailDrafts
 }
 
+fn default_setup_mode() -> SetupMode {
+    SetupMode::NewWorkspace
+}
+
 fn default_invoice_file_selection_mode() -> InvoiceFileSelectionMode {
     InvoiceFileSelectionMode::AllPdfs
+}
+
+fn push_folder(specs: &mut Vec<FolderSpec>, label: &'static str, path: &Option<PathBuf>) {
+    if let Some(path) = path {
+        specs.push(FolderSpec {
+            label,
+            path: path.clone(),
+        });
+    }
 }
 
 fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -1272,6 +1353,74 @@ mod tests {
     }
 
     #[test]
+    fn existing_folder_mappings_are_preserved_in_generated_config() {
+        let root = temp_root("existing_mapped_workspace");
+        let existing = temp_root("existing_business_folders");
+        let mut draft = draft_for_root(&root);
+        draft.setup_mode = SetupMode::ExistingFolders;
+        draft.invoice_input_folder = existing
+            .join("Fatture")
+            .join("Input")
+            .to_string_lossy()
+            .to_string();
+        draft.invoice_output_folder = existing
+            .join("Fatture")
+            .join("ProntoInvio")
+            .to_string_lossy()
+            .to_string();
+        draft.contract_log_folder = existing.join("LogContratti").to_string_lossy().to_string();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.folders.invoice_input_folder,
+            existing.join("Fatture").join("Input").to_string_lossy()
+        );
+        assert_eq!(
+            generated.automation_config["paths"]["invoiceOutputDir"]
+                .as_str()
+                .unwrap(),
+            existing
+                .join("Fatture")
+                .join("ProntoInvio")
+                .to_string_lossy()
+        );
+        assert_eq!(
+            generated.app_config.folders.contract_log_folder,
+            existing.join("LogContratti").to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn existing_folder_mode_allows_skipped_optional_paths() {
+        let root = temp_root("existing_skipped");
+        let mut draft = draft_for_root(&root);
+        draft.setup_mode = SetupMode::ExistingFolders;
+        draft.invoice_input_folder.clear();
+        draft.invoice_output_folder.clear();
+        draft.invoice_archive_folder.clear();
+        draft.invoice_log_folder.clear();
+        draft.shared_scan_folder.clear();
+        draft.scans_local_cache_folder.clear();
+        draft.ocr_text_output_folder.clear();
+        draft.signed_contracts_output_folder.clear();
+        draft.contract_log_folder.clear();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(generated.app_config.folders.invoice_input_folder, "");
+        assert_eq!(generated.app_config.folders.contracts_output_folder, "");
+        assert!(!generated
+            .folder_specs
+            .iter()
+            .any(|spec| spec.label == "Invoices/Input"));
+        assert!(generated
+            .folder_specs
+            .iter()
+            .any(|spec| spec.label == "automation"));
+    }
+
+    #[test]
     fn atomic_write_creates_backup_if_config_exists() {
         let root = temp_root("backup");
         fs::create_dir_all(&root).unwrap();
@@ -1289,6 +1438,7 @@ mod tests {
 
     fn draft_for_root(root: &Path) -> SetupDraft {
         SetupDraft {
+            setup_mode: SetupMode::NewWorkspace,
             hotel_display_name: "Test Hotel".to_string(),
             email_signature_name: "Test Hotel Team".to_string(),
             workspace_base: root.to_string_lossy().to_string(),
@@ -1309,6 +1459,26 @@ mod tests {
                 .join("gmail_token.json")
                 .to_string_lossy()
                 .to_string(),
+            invoice_input_folder: root
+                .join("Invoices")
+                .join("Input")
+                .to_string_lossy()
+                .to_string(),
+            invoice_output_folder: root
+                .join("Invoices")
+                .join("ReadyToSend")
+                .to_string_lossy()
+                .to_string(),
+            invoice_archive_folder: root
+                .join("Invoices")
+                .join("Archive")
+                .to_string_lossy()
+                .to_string(),
+            invoice_log_folder: root
+                .join("Invoices")
+                .join("Logs")
+                .to_string_lossy()
+                .to_string(),
             invoice_input_patterns: vec!["*.pdf".to_string(), "Booking*.pdf".to_string()],
             recipient_rules: vec![RecipientRuleDraft {
                 id: None,
@@ -1319,6 +1489,11 @@ mod tests {
             scanner_filename_prefixes: vec!["Scanner".to_string(), "Reception Scanner".to_string()],
             contract_marker_texts: vec!["Contract".to_string(), "Contratto".to_string()],
             shared_scan_folder: root.join("SharedScans").to_string_lossy().to_string(),
+            scans_local_cache_folder: root
+                .join("Scans")
+                .join("IncomingCache")
+                .to_string_lossy()
+                .to_string(),
             ocr_text_output_folder: root
                 .join("Scans")
                 .join("TextOutput")
@@ -1328,6 +1503,11 @@ mod tests {
                 .join("Contracts")
                 .join("2026")
                 .join("Signed")
+                .to_string_lossy()
+                .to_string(),
+            contract_log_folder: root
+                .join("Contracts")
+                .join("Logs")
                 .to_string_lossy()
                 .to_string(),
             safe_mode: true,

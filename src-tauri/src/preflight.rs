@@ -720,12 +720,19 @@ fn command_output_with_timeout(
     args: &[&str],
     timeout: Duration,
 ) -> Result<Output, TimedCommandError> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| TimedCommandError::Io)?;
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+
+    let mut child = command.spawn().map_err(|_| TimedCommandError::Io)?;
     let deadline = Instant::now() + timeout;
 
     loop {

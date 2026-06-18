@@ -17,6 +17,8 @@ import { useMemo, useState } from "react";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type {
   HubConfig,
+  ExistingFolderRole,
+  FolderInspection,
   PreflightReport,
   PreflightItem,
   SaveSetupResult,
@@ -46,6 +48,7 @@ import { StepProgress, type WizardStepMeta } from "./StepProgress";
 
 const stepDefinitions: { key: string; titleKey: TranslationKey }[] = [
   { key: "welcome", titleKey: "wizard.stepWelcome" },
+  { key: "mode", titleKey: "wizard.stepFolderMode" },
   { key: "profile", titleKey: "wizard.stepProfile" },
   { key: "workspace", titleKey: "wizard.stepWorkspace" },
   { key: "folders", titleKey: "wizard.stepFolders" },
@@ -59,11 +62,24 @@ const stepDefinitions: { key: string; titleKey: TranslationKey }[] = [
 
 type PathFieldKey =
   | "workspaceBase"
+  | "invoiceInputFolder"
+  | "invoiceOutputFolder"
+  | "invoiceArchiveFolder"
+  | "invoiceLogFolder"
   | "gmailCredentialsFile"
   | "gmailTokenFile"
   | "sharedScanFolder"
+  | "scansLocalCacheFolder"
   | "ocrTextOutputFolder"
-  | "signedContractsOutputFolder";
+  | "signedContractsOutputFolder"
+  | "contractLogFolder";
+
+type ExistingFolderField = Exclude<PathFieldKey, "workspaceBase">;
+
+type FolderInspectionState =
+  | { kind: "loading" }
+  | { kind: "success"; result: FolderInspection }
+  | { kind: "error"; message: string };
 
 type SetupAction = "preview" | "initialize" | "save" | "validate";
 
@@ -87,6 +103,7 @@ export function SetupWizard({
   const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
   const [setupResult, setSetupResult] = useState<SetupActionResult | null>(null);
   const [setupAction, setSetupAction] = useState<string | null>(null);
+  const [inspections, setInspections] = useState<Record<string, FolderInspectionState>>({});
   const [completedActions, setCompletedActions] = useState<SetupAction[]>([]);
   const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>([]);
   const steps = useMemo<WizardStepMeta[]>(
@@ -104,21 +121,76 @@ export function SetupWizard({
     setSetupResult(null);
   }
 
+  function chooseSetupMode(mode: SetupDraft["setupMode"]) {
+    setDraft((current) => {
+      const defaults = defaultPathsForWorkspace(current.workspaceBase, current.contractYear);
+      if (mode === "newWorkspace") {
+        const fillIfEmpty = <K extends keyof ReturnType<typeof defaultPathsForWorkspace>>(field: K) =>
+          current[field] || defaults[field];
+        return {
+          ...current,
+          setupMode: mode,
+          invoiceInputFolder: fillIfEmpty("invoiceInputFolder"),
+          invoiceOutputFolder: fillIfEmpty("invoiceOutputFolder"),
+          invoiceArchiveFolder: fillIfEmpty("invoiceArchiveFolder"),
+          invoiceLogFolder: fillIfEmpty("invoiceLogFolder"),
+          gmailCredentialsFile: fillIfEmpty("gmailCredentialsFile"),
+          gmailTokenFile: fillIfEmpty("gmailTokenFile"),
+          sharedScanFolder: fillIfEmpty("sharedScanFolder"),
+          scansLocalCacheFolder: fillIfEmpty("scansLocalCacheFolder"),
+          ocrTextOutputFolder: fillIfEmpty("ocrTextOutputFolder"),
+          signedContractsOutputFolder: fillIfEmpty("signedContractsOutputFolder"),
+          contractLogFolder: fillIfEmpty("contractLogFolder"),
+        };
+      }
+
+      const clearDefault = <K extends keyof ReturnType<typeof defaultPathsForWorkspace>>(field: K) =>
+        current[field] === defaults[field] ? "" : current[field];
+      return {
+        ...current,
+        setupMode: mode,
+        invoiceInputFolder: clearDefault("invoiceInputFolder"),
+        invoiceOutputFolder: clearDefault("invoiceOutputFolder"),
+        invoiceArchiveFolder: clearDefault("invoiceArchiveFolder"),
+        invoiceLogFolder: clearDefault("invoiceLogFolder"),
+        gmailCredentialsFile: clearDefault("gmailCredentialsFile"),
+        gmailTokenFile: clearDefault("gmailTokenFile"),
+        sharedScanFolder: clearDefault("sharedScanFolder"),
+        scansLocalCacheFolder: clearDefault("scansLocalCacheFolder"),
+        ocrTextOutputFolder: clearDefault("ocrTextOutputFolder"),
+        signedContractsOutputFolder: clearDefault("signedContractsOutputFolder"),
+        contractLogFolder: clearDefault("contractLogFolder"),
+      };
+    });
+    setCompletedActions([]);
+    setSetupResult(null);
+    setInspections({});
+  }
+
   function updateWorkspaceBase(nextWorkspace: string) {
     const repairedWorkspace = repairConcatenatedAbsolutePath(nextWorkspace);
     setDraft((current) => {
       const oldDefaults = defaultPathsForWorkspace(current.workspaceBase, current.contractYear);
       const nextDefaults = defaultPathsForWorkspace(repairedWorkspace, current.contractYear);
       const defaultManagedFields: (keyof ReturnType<typeof defaultPathsForWorkspace>)[] = [
+        "invoiceInputFolder",
+        "invoiceOutputFolder",
+        "invoiceArchiveFolder",
+        "invoiceLogFolder",
         "sharedScanFolder",
+        "scansLocalCacheFolder",
         "gmailCredentialsFile",
         "gmailTokenFile",
         "ocrTextOutputFolder",
         "signedContractsOutputFolder",
+        "contractLogFolder",
       ];
       const refreshedDefaults = Object.fromEntries(
         defaultManagedFields
-          .filter((field) => !current[field] || current[field] === oldDefaults[field])
+          .filter((field) =>
+            current.setupMode === "newWorkspace" &&
+            (!current[field] || current[field] === oldDefaults[field])
+          )
           .map((field) => [field, nextDefaults[field]]),
       ) as Partial<SetupDraft>;
 
@@ -143,7 +215,7 @@ export function SetupWizard({
     if (field === "workspaceBase") {
       updateWorkspaceBase(selectedPath);
     } else {
-      update(field, repairConcatenatedAbsolutePath(selectedPath) as SetupDraft[typeof field]);
+      update(field, normalizePathInput(selectedPath) as SetupDraft[typeof field]);
     }
   }
 
@@ -155,7 +227,7 @@ export function SetupWizard({
       filters: [{ name: "JSON files", extensions: ["json"] }],
     });
     const selectedPath = normalizeDialogSelection(selected);
-    if (selectedPath) update(field, repairConcatenatedAbsolutePath(selectedPath) as SetupDraft[typeof field]);
+    if (selectedPath) update(field, normalizePathInput(selectedPath) as SetupDraft[typeof field]);
   }
 
   async function chooseTokenFolder() {
@@ -165,7 +237,58 @@ export function SetupWizard({
       defaultPath: draft.gmailTokenFile || draft.workspaceBase,
     });
     const selectedPath = normalizeDialogSelection(selected);
-    if (selectedPath) update("gmailTokenFile", `${repairConcatenatedAbsolutePath(selectedPath).replace(/[\\/]+$/g, "")}\\gmail_token.json`);
+    if (selectedPath) update("gmailTokenFile", `${normalizePathInput(selectedPath).replace(/[\\/]+$/g, "")}\\gmail_token.json`);
+  }
+
+  async function chooseGmailCredentialsFolder() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: draft.gmailCredentialsFile || draft.workspaceBase,
+    });
+    const selectedPath = normalizeDialogSelection(selected);
+    if (selectedPath) {
+      update("gmailCredentialsFile", `${normalizePathInput(selectedPath).replace(/[\\/]+$/g, "")}\\gmail_credentials.json`);
+    }
+  }
+
+  async function inspectFolder(field: ExistingFolderField, value: string) {
+    const path = folderPathForInspection(field, value);
+    if (!path.trim()) {
+      setInspections((current) => ({
+        ...current,
+        [field]: { kind: "error", message: t("wizard.discoveryChooseFolderFirst") },
+      }));
+      return;
+    }
+
+    setInspections((current) => ({ ...current, [field]: { kind: "loading" } }));
+    try {
+      const result = await invoke<FolderInspection>("inspect_existing_folder", { path });
+      setInspections((current) => ({ ...current, [field]: { kind: "success", result } }));
+    } catch (error) {
+      setInspections((current) => ({
+        ...current,
+        [field]: {
+          kind: "error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    }
+  }
+
+  function applySuggestedFolder(role: string | null | undefined, path: string) {
+    if (!role) return;
+    const field = roleToDraftField(role);
+    if (!field) return;
+    const normalized = normalizePathInput(path);
+    if (field === "gmailCredentialsFile") {
+      update(field, `${normalized.replace(/[\\/]+$/g, "")}\\gmail_credentials.json`);
+    } else if (field === "gmailTokenFile") {
+      update(field, `${normalized.replace(/[\\/]+$/g, "")}\\gmail_token.json`);
+    } else {
+      update(field, normalized as SetupDraft[typeof field]);
+    }
   }
 
   function updateRule(id: string, patch: Partial<RecipientRuleDraft>) {
@@ -427,6 +550,9 @@ export function SetupWizard({
 
       <div className="space-y-4">
         {currentStep.key === "welcome" && <WelcomeStep />}
+        {currentStep.key === "mode" && (
+          <FolderModeStep draft={draft} onChooseMode={chooseSetupMode} />
+        )}
         {currentStep.key === "profile" && (
           <ProfileStep draft={draft} update={update} />
         )}
@@ -437,7 +563,22 @@ export function SetupWizard({
             onChooseFolder={() => chooseDirectory("workspaceBase")}
           />
         )}
-        {currentStep.key === "folders" && <FolderPreviewStep draft={draft} />}
+        {currentStep.key === "folders" && (
+          draft.setupMode === "existingFolders" ? (
+            <ExistingFoldersStep
+              draft={draft}
+              update={update}
+              inspections={inspections}
+              onInspect={inspectFolder}
+              onApplySuggestion={applySuggestedFolder}
+              onChooseDirectory={chooseDirectory}
+              onChooseGmailCredentialsFolder={chooseGmailCredentialsFolder}
+              onChooseTokenFolder={chooseTokenFolder}
+            />
+          ) : (
+            <FolderPreviewStep draft={draft} />
+          )
+        )}
         {currentStep.key === "gmail" && (
           <GmailStep
             draft={draft}
@@ -576,6 +717,71 @@ function normalizeDialogSelection(selected: string | string[] | null) {
   return selected;
 }
 
+function normalizePathInput(value: string) {
+  return repairConcatenatedAbsolutePath(value.trim().replace(/^["']|["']$/g, ""));
+}
+
+function folderPathForInspection(field: ExistingFolderField, value: string) {
+  const normalized = normalizePathInput(value);
+  if (field === "gmailCredentialsFile" || field === "gmailTokenFile") {
+    return folderFromFileValue(normalized);
+  }
+  return normalized;
+}
+
+function folderFromFileValue(value: string) {
+  const cleaned = value.replace(/[\\/]+$/g, "");
+  if (!/\.[a-z0-9]+$/i.test(cleaned)) return cleaned;
+  const index = Math.max(cleaned.lastIndexOf("\\"), cleaned.lastIndexOf("/"));
+  return index > 0 ? cleaned.slice(0, index) : cleaned;
+}
+
+function roleToDraftField(role: string): ExistingFolderField | null {
+  const mapping: Record<ExistingFolderRole, ExistingFolderField> = {
+    invoiceInputFolder: "invoiceInputFolder",
+    invoiceOutputFolder: "invoiceOutputFolder",
+    invoiceArchiveFolder: "invoiceArchiveFolder",
+    invoiceLogFolder: "invoiceLogFolder",
+    gmailCredentialsFolder: "gmailCredentialsFile",
+    gmailTokenFolder: "gmailTokenFile",
+    scansioniNetworkShare: "sharedScanFolder",
+    scansioniLocalCacheFolder: "scansLocalCacheFolder",
+    ocrTextOutputFolder: "ocrTextOutputFolder",
+    contractsOutputFolder: "signedContractsOutputFolder",
+    contractLogFolder: "contractLogFolder",
+  };
+  return role in mapping ? mapping[role as ExistingFolderRole] : null;
+}
+
+function roleLabel(role: string | null | undefined, t: ReturnType<typeof useI18n>["t"]) {
+  switch (role) {
+    case "invoiceInputFolder":
+      return t("wizard.existingInvoiceInput");
+    case "invoiceOutputFolder":
+      return t("wizard.existingInvoiceOutput");
+    case "invoiceArchiveFolder":
+      return t("wizard.existingInvoiceArchive");
+    case "invoiceLogFolder":
+      return t("wizard.existingInvoiceLogs");
+    case "gmailCredentialsFolder":
+      return t("wizard.existingGmailCredentialsFolder");
+    case "gmailTokenFolder":
+      return t("wizard.existingGmailTokenFolder");
+    case "scansioniNetworkShare":
+      return t("wizard.existingSharedScans");
+    case "scansioniLocalCacheFolder":
+      return t("wizard.existingLocalScanCache");
+    case "ocrTextOutputFolder":
+      return t("wizard.existingOcrTextOutput");
+    case "contractsOutputFolder":
+      return t("wizard.existingSignedContracts");
+    case "contractLogFolder":
+      return t("wizard.existingContractLogs");
+    default:
+      return t("wizard.unknownFolderRole");
+  }
+}
+
 type SetupActionResult = {
   kind: "success" | "warning" | "error";
   title: string;
@@ -595,6 +801,38 @@ function WelcomeStep() {
         <InfoCard title={t("wizard.emailChoice")} text={t("wizard.emailChoiceText")} />
         <InfoCard title={t("wizard.confirmFirst")} text={t("wizard.confirmFirstText")} />
         <InfoCard title={t("wizard.guidedSetup")} text={t("wizard.guidedSetupText")} />
+      </div>
+    </SetupStep>
+  );
+}
+
+function FolderModeStep({
+  draft,
+  onChooseMode,
+}: {
+  draft: SetupDraft;
+  onChooseMode: (mode: SetupDraft["setupMode"]) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <SetupStep
+      icon={<FolderTree className="h-6 w-6" />}
+      title={t("wizard.folderModeTitle")}
+      helper={t("wizard.folderModeHelper")}
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        <DeliveryModeCard
+          title={t("wizard.createNewWorkspace")}
+          text={t("wizard.createNewWorkspaceText")}
+          selected={draft.setupMode === "newWorkspace"}
+          onClick={() => onChooseMode("newWorkspace")}
+        />
+        <DeliveryModeCard
+          title={t("wizard.useExistingFolders")}
+          text={t("wizard.useExistingFoldersText")}
+          selected={draft.setupMode === "existingFolders"}
+          onClick={() => onChooseMode("existingFolders")}
+        />
       </div>
     </SetupStep>
   );
@@ -695,6 +933,186 @@ function FolderPreviewStep({ draft }: { draft: SetupDraft }) {
         </div>
       </div>
     </SetupStep>
+  );
+}
+
+const EXISTING_FOLDER_FIELDS: {
+  field: ExistingFolderField;
+  labelKey: TranslationKey;
+  helpKey: TranslationKey;
+  placeholder?: string;
+  chooseCredentialsFolder?: boolean;
+  chooseTokenFolder?: boolean;
+}[] = [
+  { field: "invoiceInputFolder", labelKey: "wizard.existingInvoiceInput", helpKey: "wizard.pathCopyHelp" },
+  { field: "invoiceOutputFolder", labelKey: "wizard.existingInvoiceOutput", helpKey: "wizard.pathCopyHelp" },
+  { field: "invoiceArchiveFolder", labelKey: "wizard.existingInvoiceArchive", helpKey: "wizard.pathCopyHelp" },
+  { field: "invoiceLogFolder", labelKey: "wizard.existingInvoiceLogs", helpKey: "wizard.pathCopyHelp" },
+  { field: "gmailCredentialsFile", labelKey: "wizard.existingGmailCredentialsFolder", helpKey: "wizard.gmailCredentialsFolderHelp", chooseCredentialsFolder: true },
+  { field: "gmailTokenFile", labelKey: "wizard.existingGmailTokenFolder", helpKey: "wizard.gmailTokenFolderHelp", chooseTokenFolder: true },
+  { field: "sharedScanFolder", labelKey: "wizard.existingSharedScans", helpKey: "wizard.pathCopyHelp" },
+  { field: "scansLocalCacheFolder", labelKey: "wizard.existingLocalScanCache", helpKey: "wizard.pathCopyHelp" },
+  { field: "ocrTextOutputFolder", labelKey: "wizard.existingOcrTextOutput", helpKey: "wizard.pathCopyHelp" },
+  { field: "signedContractsOutputFolder", labelKey: "wizard.existingSignedContracts", helpKey: "wizard.pathCopyHelp" },
+  { field: "contractLogFolder", labelKey: "wizard.existingContractLogs", helpKey: "wizard.pathCopyHelp" },
+];
+
+function ExistingFoldersStep({
+  draft,
+  update,
+  inspections,
+  onInspect,
+  onApplySuggestion,
+  onChooseDirectory,
+  onChooseGmailCredentialsFolder,
+  onChooseTokenFolder,
+}: {
+  draft: SetupDraft;
+  update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
+  inspections: Record<string, FolderInspectionState>;
+  onInspect: (field: ExistingFolderField, value: string) => void;
+  onApplySuggestion: (role: string | null | undefined, path: string) => void;
+  onChooseDirectory: (field: PathFieldKey) => void;
+  onChooseGmailCredentialsFolder: () => void;
+  onChooseTokenFolder: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <SetupStep
+      icon={<FolderTree className="h-6 w-6" />}
+      title={t("wizard.existingFoldersTitle")}
+      helper={t("wizard.existingFoldersHelper")}
+    >
+      <div className="mb-4 rounded-lg bg-sky-50/80 p-4 text-sm font-semibold leading-6 text-sky-950">
+        {t("wizard.discoveryReadOnly")}
+      </div>
+      <div className="grid gap-4">
+        {EXISTING_FOLDER_FIELDS.map((item) => {
+          const value = draft[item.field] as string;
+          const inspection = inspections[item.field];
+          const choose = item.chooseCredentialsFolder
+            ? onChooseGmailCredentialsFolder
+            : item.chooseTokenFolder
+              ? onChooseTokenFolder
+              : () => onChooseDirectory(item.field);
+          return (
+            <div key={item.field} className="rounded-lg border border-white/65 bg-white/55 p-4">
+              <PathField
+                label={t(item.labelKey)}
+                value={value}
+                placeholder={item.placeholder}
+                hint={t(item.helpKey)}
+                onChange={(nextValue) => update(item.field, normalizePathInput(nextValue) as SetupDraft[typeof item.field])}
+                onChoose={choose}
+                chooseLabel={t("wizard.chooseFolder")}
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  className="rounded-md border border-white/70 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                  disabled={inspection?.kind === "loading"}
+                  onClick={() => onInspect(item.field, value)}
+                >
+                  {inspection?.kind === "loading" ? t("wizard.inspecting") : t("wizard.inspectFolder")}
+                </button>
+                <span className="text-xs font-semibold text-slate-500">
+                  {t("wizard.discoverySafeNote")}
+                </span>
+              </div>
+              {inspection && (
+                <FolderInspectionPanel
+                  inspection={inspection}
+                  onApplySuggestion={onApplySuggestion}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </SetupStep>
+  );
+}
+
+function FolderInspectionPanel({
+  inspection,
+  onApplySuggestion,
+}: {
+  inspection: FolderInspectionState;
+  onApplySuggestion: (role: string | null | undefined, path: string) => void;
+}) {
+  const { t } = useI18n();
+  if (inspection.kind === "loading") {
+    return (
+      <div className="mt-3 rounded-md bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-900">
+        {t("wizard.inspecting")}
+      </div>
+    );
+  }
+  if (inspection.kind === "error") {
+    return (
+      <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">
+        {inspection.message}
+      </div>
+    );
+  }
+
+  const result = inspection.result;
+  const suggestions = [...result.nearbyFolders, ...result.childFolders]
+    .filter((folder) => folder.suggestedRole)
+    .slice(0, 8);
+  return (
+    <div className="mt-3 rounded-lg border border-white/65 bg-white/70 p-4">
+      <div className="grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-4">
+        <span>{result.readable ? t("wizard.folderReadable") : t("wizard.folderNotReadable")}</span>
+        <span>{result.writable ? t("wizard.folderWritable") : t("wizard.folderMayBeReadOnly")}</span>
+        <span>{t("wizard.pdfCount", { count: result.pdfCount })}</span>
+        <span>{t("wizard.txtCount", { count: result.txtCount })}</span>
+      </div>
+      {result.suggestedRole && (
+        <div className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+          {t("wizard.suggestedRole", {
+            role: roleLabel(result.suggestedRole, t),
+            confidence: result.confidence ?? 0,
+          })}
+        </div>
+      )}
+      {suggestions.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+            {t("wizard.nearbySuggestions")}
+          </p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {suggestions.map((folder) => (
+              <div key={`${folder.suggestedRole}-${folder.path}`} className="rounded-md bg-white/75 p-3">
+                <p className="text-sm font-semibold text-slate-900">{folder.name}</p>
+                <p className="mt-1 break-words text-xs font-medium leading-5 text-slate-600">
+                  {roleLabel(folder.suggestedRole, t)} · {folder.confidence}%
+                </p>
+                <button
+                  className="mt-2 rounded-md border border-white/70 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-white"
+                  type="button"
+                  onClick={() => onApplySuggestion(folder.suggestedRole, folder.path)}
+                >
+                  {t("wizard.useThisFolder")}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {result.recentModifiedPreview.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-bold text-slate-600">
+            {t("wizard.filenamePreview")}
+          </summary>
+          <ul className="mt-2 max-h-36 overflow-auto rounded-md bg-white/65 p-3 text-xs font-medium leading-5 text-slate-600">
+            {result.recentModifiedPreview.map((name) => (
+              <li key={name} className="break-words">{name}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -1367,7 +1785,7 @@ function PathField({
         <input
           className={inputClassName}
           value={value}
-          onChange={(event) => onChange(repairConcatenatedAbsolutePath(event.target.value))}
+          onChange={(event) => onChange(normalizePathInput(event.target.value))}
           placeholder={placeholder}
         />
         <button

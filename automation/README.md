@@ -130,6 +130,8 @@ InnPilot's Setup page can generate and save a local setup from a guided wizard. 
 
 Guided setup does not run these automation scripts, does not create Gmail drafts, and does not send emails. After setup is saved and checked, workflows are still started separately from the InnPilot Automations page.
 
+Setup can either create a new InnPilot workspace or connect folders the hotel already uses. Existing-folder discovery is read-only: InnPilot checks folder metadata, nearby folder names, and file-type counts only. It does not read file contents, run automation scripts, call Gmail, upload data, move files, rename files, or delete files. Confirmed mappings are saved into `automation\config.local.json` as normal path values.
+
 ## Safe Dry Runs
 
 Invoice processing:

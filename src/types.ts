@@ -55,6 +55,21 @@ export type InvoiceFileSelectionMode =
 
 export type AppLanguage = "en" | "it";
 
+export type SetupMode = "newWorkspace" | "existingFolders";
+
+export type ExistingFolderRole =
+  | "invoiceInputFolder"
+  | "invoiceOutputFolder"
+  | "invoiceArchiveFolder"
+  | "invoiceLogFolder"
+  | "gmailCredentialsFolder"
+  | "gmailTokenFolder"
+  | "scansioniNetworkShare"
+  | "scansioniLocalCacheFolder"
+  | "ocrTextOutputFolder"
+  | "contractsOutputFolder"
+  | "contractLogFolder";
+
 export type ModuleReadiness = {
   id: ModuleReadinessId;
   title: string;
@@ -267,4 +282,32 @@ export type ManagedAutomationInstallResult = {
   errors: string[];
   configPath?: string | null;
   preflight?: PreflightReport | null;
+};
+
+export type FolderCandidate = {
+  path: string;
+  name: string;
+  suggestedRole?: ExistingFolderRole | string | null;
+  confidence: number;
+  reason: string;
+};
+
+export type FolderInspection = {
+  selectedPath: string;
+  exists: boolean;
+  isDirectory: boolean;
+  readable: boolean;
+  writable: boolean;
+  parent?: string | null;
+  parentName?: string | null;
+  nearbyFolders: FolderCandidate[];
+  childFolders: FolderCandidate[];
+  fileCountsByExtension: Record<string, number>;
+  pdfCount: number;
+  txtCount: number;
+  jsonCount: number;
+  recentModifiedPreview: string[];
+  warnings: string[];
+  suggestedRole?: ExistingFolderRole | string | null;
+  confidence?: number | null;
 };

@@ -45,6 +45,8 @@ npm run tauri dev
 
 Open InnPilot, go to `Setup`, and start the guided setup.
 
+When the wizard asks whether to create a new workspace or use existing folders, choose **Create a new InnPilot workspace** for this rehearsal. The existing-folder discovery flow is read-only and safe, but this checklist is meant to prove the clean fake-workspace path first.
+
 Before running any dry-run automation, open `Support` / `Advanced details` and check the Python environment card:
 
 - Python should be found.
