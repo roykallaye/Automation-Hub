@@ -3,7 +3,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::Path,
     process::{Command, Output, Stdio},
     thread,
@@ -11,6 +11,7 @@ use std::{
 };
 
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+const DPAPI_SECRET_MAGIC: &[u8] = b"INNPILOT-DPAPI-SECRET-V1\n";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1436,6 +1437,23 @@ fn ocr_language_data_check(config: &HubConfig) -> PreflightItem {
     }
 }
 
+fn is_expected_protected_secret(path: &Path, purpose: &str) -> Result<bool, String> {
+    let expected = [DPAPI_SECRET_MAGIC, purpose.as_bytes(), b"\n"].concat();
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut prefix = vec![0_u8; expected.len()];
+    let mut read = 0;
+    while read < prefix.len() {
+        let count = file
+            .read(&mut prefix[read..])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        read += count;
+    }
+    Ok(read == expected.len() && prefix == expected)
+}
+
 fn token_check(key: &str, label: &str, path: &str) -> PreflightItem {
     if path.trim().is_empty() {
         return PreflightItem {
@@ -1451,32 +1469,64 @@ fn token_check(key: &str, label: &str, path: &str) -> PreflightItem {
     }
 
     let token_path = Path::new(path);
+    if token_path.is_file() {
+        return match is_expected_protected_secret(token_path, "gmail-token") {
+            Ok(true) => PreflightItem {
+                key: key.to_string(),
+                label: label.to_string(),
+                path: Some(path.to_string()),
+                item_type: "token".to_string(),
+                status: ReadinessStatus::Ready,
+                message: "Gmail token uses InnPilot's Windows-protected format. Access is verified when Gmail runs.".to_string(),
+                readable: Some(true),
+                writable: None,
+            },
+            Ok(false) => PreflightItem {
+                key: key.to_string(),
+                label: label.to_string(),
+                path: Some(path.to_string()),
+                item_type: "token".to_string(),
+                status: ReadinessStatus::Warning,
+                message: "Legacy plaintext Gmail token found. InnPilot will encrypt it before the next Gmail API use.".to_string(),
+                readable: Some(true),
+                writable: None,
+            },
+            Err(_) => PreflightItem {
+                key: key.to_string(),
+                label: label.to_string(),
+                path: Some(path.to_string()),
+                item_type: "token".to_string(),
+                status: ReadinessStatus::PermissionProblem,
+                message: "Gmail token file cannot be read. Check its Windows permissions.".to_string(),
+                readable: Some(false),
+                writable: None,
+            },
+        };
+    }
     if token_path.exists() {
-        PreflightItem {
+        return PreflightItem {
             key: key.to_string(),
             label: label.to_string(),
             path: Some(path.to_string()),
             item_type: "token".to_string(),
-            status: ReadinessStatus::Ready,
-            message: "Gmail token file exists.".to_string(),
-            readable: Some(true),
+            status: ReadinessStatus::PermissionProblem,
+            message: "The Gmail token path is not a file.".to_string(),
+            readable: Some(false),
             writable: None,
-        }
-    } else {
-        PreflightItem {
-            key: key.to_string(),
-            label: label.to_string(),
-            path: Some(path.to_string()),
-            item_type: "token".to_string(),
-            status: ReadinessStatus::NotChecked,
-            message: "Gmail token file is missing. Reconnect Gmail may create it later."
-                .to_string(),
-            readable: None,
-            writable: None,
-        }
+        };
+    }
+
+    PreflightItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        path: Some(path.to_string()),
+        item_type: "token".to_string(),
+        status: ReadinessStatus::NotChecked,
+        message: "Gmail token file is missing. Reconnect Gmail may create it later.".to_string(),
+        readable: None,
+        writable: None,
     }
 }
-
 fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
     let automation_config_path = config.automation.automation_config_path.trim();
     if automation_config_path.is_empty() || !Path::new(automation_config_path).is_file() {
@@ -1575,15 +1625,37 @@ fn gmail_credentials_file_check(config: &HubConfig) -> PreflightItem {
         };
     }
 
-    PreflightItem {
-        key: "gmailCredentialsFile".to_string(),
-        label: "Gmail credentials file".to_string(),
-        path: Some(credentials_path.to_string()),
-        item_type: "credentials".to_string(),
-        status: ReadinessStatus::Ready,
-        message: "Gmail credentials file found.".to_string(),
-        readable: Some(true),
-        writable: None,
+    match is_expected_protected_secret(path, "gmail-client-credentials") {
+        Ok(true) => PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: Some(credentials_path.to_string()),
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::Ready,
+            message: "Gmail client credentials use InnPilot's Windows-protected format. Access is verified when Gmail runs.".to_string(),
+            readable: Some(true),
+            writable: None,
+        },
+        Ok(false) => PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: Some(credentials_path.to_string()),
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::Warning,
+            message: "Legacy plaintext Gmail client credentials found. InnPilot will encrypt them before the next Gmail API use.".to_string(),
+            readable: Some(true),
+            writable: None,
+        },
+        Err(_) => PreflightItem {
+            key: "gmailCredentialsFile".to_string(),
+            label: "Gmail credentials file".to_string(),
+            path: Some(credentials_path.to_string()),
+            item_type: "credentials".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message: "Gmail credentials file cannot be read. Check its Windows permissions.".to_string(),
+            readable: Some(false),
+            writable: None,
+        },
     }
 }
 
@@ -2007,10 +2079,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(alignment.status, ReadinessStatus::Ready);
-        assert!(!report
-            .items
-            .iter()
-            .any(|item| item.status == ReadinessStatus::Warning));
     }
 
     #[test]
@@ -2148,7 +2216,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_gmail_credentials_file_is_ready() {
+    fn legacy_plaintext_gmail_credentials_are_reported_for_migration() {
         let config = config_with_temp_paths();
 
         let report = build_preflight_report(&config);
@@ -2158,7 +2226,68 @@ mod tests {
             .find(|item| item.key == "gmailCredentialsFile")
             .unwrap();
 
+        assert_eq!(credentials.status, ReadinessStatus::Warning);
+        assert!(credentials.message.contains("encrypt"));
+    }
+
+    #[test]
+    fn protected_gmail_credentials_are_ready() {
+        let config = config_with_temp_paths();
+        let credentials_path =
+            Path::new(&config.gmail.token_path).with_file_name("gmail_credentials.json");
+        fs::write(
+            &credentials_path,
+            [
+                DPAPI_SECRET_MAGIC,
+                b"gmail-client-credentials\n",
+                b"synthetic-protected-payload\n",
+            ]
+            .concat(),
+        )
+        .unwrap();
+        write_automation_config(
+            &config,
+            None,
+            Some(credentials_path.to_string_lossy().as_ref()),
+            None,
+        );
+
+        let report = build_preflight_report(&config);
+        let credentials = report
+            .items
+            .iter()
+            .find(|item| item.key == "gmailCredentialsFile")
+            .unwrap();
+
         assert_eq!(credentials.status, ReadinessStatus::Ready);
+        assert!(credentials.message.contains("protected"));
+    }
+
+    #[test]
+    fn token_preflight_distinguishes_plaintext_from_dpapi_protected_storage() {
+        let config = config_with_temp_paths();
+        let token_path = Path::new(&config.gmail.token_path);
+        fs::write(token_path, b"{\"token\":\"synthetic\"}").unwrap();
+
+        let plaintext = token_check("gmailTokenPath", "Gmail token", &config.gmail.token_path);
+
+        assert_eq!(plaintext.status, ReadinessStatus::Warning);
+        assert!(plaintext.message.contains("encrypt"));
+
+        fs::write(
+            token_path,
+            [
+                DPAPI_SECRET_MAGIC,
+                b"gmail-token\n",
+                b"synthetic-protected-payload\n",
+            ]
+            .concat(),
+        )
+        .unwrap();
+        let protected = token_check("gmailTokenPath", "Gmail token", &config.gmail.token_path);
+
+        assert_eq!(protected.status, ReadinessStatus::Ready);
+        assert!(protected.message.contains("protected"));
     }
 
     #[test]
@@ -2186,7 +2315,7 @@ mod tests {
             .find(|item| item.key == "gmailCredentialsFile")
             .unwrap();
 
-        assert_eq!(credentials.status, ReadinessStatus::Ready);
+        assert_eq!(credentials.status, ReadinessStatus::Warning);
         assert!(!credentials.message.contains(secret_marker));
         assert!(!credentials.label.contains(secret_marker));
     }

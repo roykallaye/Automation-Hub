@@ -110,6 +110,19 @@ Keep overlapping InnPilot app config values and `automation\config.local.json` a
 
 These must point to the same token file. If they differ, InnPilot blocks Gmail draft/reconnect workflows because the app may check or reset one token file while the Gmail worker uses another. InnPilot also warns when invoice folders, contract folders, or `safety.dryRunDefault` differ between the two config files.
 
+
+### Gmail secret storage on Windows
+
+Before any Gmail API use, InnPilot stores the OAuth token and downloaded desktop
+client configuration with Windows user-scoped DPAPI. Existing plaintext JSON is
+validated and replaced atomically with the protected envelope; no readable
+backup or plaintext temporary file is created. New and refreshed tokens are
+written protected from the start.
+
+Protected files can be unlocked only by the same Windows user on the same PC.
+Each manager/reception PC must complete its own Gmail connection; copying a
+protected token to another PC is intentionally not supported. Dry runs never
+open, migrate, or authenticate with these files.
 When InnPilot runs canonical Python workers, it passes the config path:
 
 ```text
@@ -246,6 +259,9 @@ The tests cover:
 - contract processing dry-run using fake scan PDF names and fake OCR text
 - missing config failures that leave temp fixture files untouched
 - credential/token file contents not appearing in dry-run output
+- plaintext OAuth migration without readable backups or partial files
+- real Windows DPAPI round-trip and token/client-purpose separation
+- Gmail authorization using protected-storage readers and writers only
 
 If PyMuPDF is not installed, PDF-dependent fixture tests are skipped. Install `automation\requirements.txt` to run the full suite and the real local OCR smoke test.
 

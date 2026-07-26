@@ -260,6 +260,15 @@ Then edit:
 
 The two config files must agree where they describe the same operational path. In particular, InnPilot app `gmail.tokenPath` and automation config `paths.gmailTokenFile` must point to the same token file. If they differ, InnPilot blocks Gmail draft/reconnect workflows so setup support can fix the mismatch before token reset or OAuth behavior touches the wrong file.
 
+
+Gmail OAuth material is encrypted at rest with Windows user-scoped DPAPI before
+the Gmail API is used. Legacy plaintext JSON is migrated atomically in place,
+without a readable backup or plaintext temporary file. First-login and refreshed
+tokens are protected from creation. Because the protection is deliberately tied
+to one Windows user and PC, each hotel workstation must connect Gmail separately;
+an encrypted token copied from another computer will fail closed. The OAuth flow
+uses the system browser, and the granted scope remains Gmail Compose (drafts only,
+never automatic send).
 InnPilot also warns when these overlapping values differ:
 
 - invoice input, output, archive, and log folders

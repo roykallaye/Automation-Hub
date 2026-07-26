@@ -87,6 +87,22 @@ def move_verified_atomic(source: Path, destination: Path) -> str:
     return "moved" if result == "copied" else "deduplicated"
 
 
+def atomic_write_bytes(path: Path, contents: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.partial"
+    published = False
+    try:
+        with temporary.open("xb") as output:
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        published = True
+    finally:
+        if not published:
+            temporary.unlink(missing_ok=True)
+
+
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.partial"

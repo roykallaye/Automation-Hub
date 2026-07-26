@@ -10,6 +10,7 @@ if str(AUTOMATION_ROOT) not in sys.path:
     sys.path.insert(0, str(AUTOMATION_ROOT))
 
 from shared.safe_files import (
+    atomic_write_bytes,
     copy_verified_atomic,
     move_verified_atomic,
     same_file_contents,
@@ -46,6 +47,20 @@ class SafeFilesTests(unittest.TestCase):
             self.assertEqual(move_verified_atomic(source, destination), "moved")
             self.assertFalse(source.exists())
             self.assertEqual(destination.read_bytes(), b"fixture")
+
+    def test_atomic_bytes_replace_never_leaves_a_partial_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination = root / "Secrets" / "oauth.dpapi"
+
+            atomic_write_bytes(destination, b"first")
+            atomic_write_bytes(destination, b"second")
+
+            self.assertEqual(destination.read_bytes(), b"second")
+            self.assertEqual(
+                [path for path in destination.parent.iterdir() if path.suffix == ".partial"],
+                [],
+            )
 
 
 if __name__ == "__main__":

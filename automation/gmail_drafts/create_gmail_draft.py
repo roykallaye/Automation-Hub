@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -18,6 +19,10 @@ from shared.config import (  # noqa: E402
 from shared.report import now_iso, report_status, standard_report, write_report  # noqa: E402
 
 from shared.safe_files import move_verified_atomic, same_file_contents  # noqa: E402
+from shared.windows_secrets import (  # noqa: E402
+    read_json_secret,
+    write_json_secret,
+)
 
 ROOT = Path(r"C:\InnPilot\workspace\Invoices")
 SCRIPT_DIR = ROOT / "Script"
@@ -58,19 +63,40 @@ def get_service():
     from google.auth.transport.requests import Request
 
     creds = None
+    client_config = None
+
+    if CREDENTIALS_FILE.exists():
+        client_config = read_json_secret(
+            CREDENTIALS_FILE,
+            purpose="gmail-client-credentials",
+        )
 
     if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        token_info = read_json_secret(TOKEN_FILE, purpose="gmail-token")
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
 
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
+        write_json_secret(
+            TOKEN_FILE,
+            json.loads(creds.to_json()),
+            purpose="gmail-token",
+        )
 
     if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+        if client_config is None:
+            raise RuntimeError(
+                "Gmail client credentials are missing. Reconnect Gmail after setup is completed."
+            )
+        flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
         creds = flow.run_local_server(port=0)
-        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+        write_json_secret(
+            TOKEN_FILE,
+            json.loads(creds.to_json()),
+            purpose="gmail-token",
+        )
 
-    return build("gmail", "v1", credentials=creds)
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
 def is_valid_email_folder(path: Path) -> bool:
