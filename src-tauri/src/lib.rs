@@ -8,6 +8,8 @@ mod logs;
 mod paths;
 mod preflight;
 mod redaction;
+mod runner_identity;
+mod runner_protocol;
 mod setup;
 mod templates;
 mod workflows;
@@ -53,10 +55,33 @@ pub fn run() {
             save_app_language,
             inspect_existing_folder,
             create_discovery_request,
-            get_discovery_requests
+            get_discovery_requests,
+            get_lifedesk_connection,
+            pair_with_lifedesk,
+            sync_with_lifedesk
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
+}
+
+#[tauri::command]
+fn get_lifedesk_connection(
+    app: AppHandle,
+) -> Result<runner_protocol::RunnerConnectionStatus, String> {
+    runner_protocol::connection_status(&app)
+}
+
+#[tauri::command]
+async fn pair_with_lifedesk(
+    app: AppHandle,
+    pairing_code: String,
+) -> Result<runner_protocol::RunnerConnectionStatus, String> {
+    runner_protocol::pair(&app, &pairing_code).await
+}
+
+#[tauri::command]
+async fn sync_with_lifedesk(app: AppHandle) -> Result<runner_protocol::RunnerSyncResult, String> {
+    runner_protocol::sync(&app).await
 }
 
 #[tauri::command]

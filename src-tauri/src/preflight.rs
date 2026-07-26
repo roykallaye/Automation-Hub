@@ -1751,7 +1751,7 @@ pub(crate) fn ensure_workflow_can_run(
     }
 }
 
-fn can_write_to_folder(path: &Path) -> bool {
+pub(crate) fn can_write_to_folder(path: &Path) -> bool {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())

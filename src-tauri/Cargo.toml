@@ -13,8 +13,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+getrandom = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+zeroize = "1"
 tauri-plugin-dialog = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory"] }

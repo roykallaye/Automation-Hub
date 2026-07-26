@@ -13,6 +13,7 @@ import {
 
 import { BrandingPanel } from "../components/BrandingPanel";
 import { InfoHint } from "../components/InfoHint";
+import { LifeDeskConnectionPanel } from "../components/LifeDeskConnectionPanel";
 import { PageHeader } from "../components/PageHeader";
 import { TemplateEditor } from "../components/TemplateEditor";
 import { useI18n, type Language } from "../i18n";
@@ -54,9 +55,12 @@ export function SettingsPage({
     }
   }
 
+
   return (
     <div className="space-y-5">
       <PageHeader title={t("settings.title")} eyebrow={t("settings.eyebrow")} />
+
+      <LifeDeskConnectionPanel />
 
       <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <div className="flex items-center gap-3">

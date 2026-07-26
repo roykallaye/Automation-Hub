@@ -63,3 +63,14 @@ absolute hotel path, local configuration, raw report, or token is present in Git
 or a packaged resource. It also fails if replay, signature, revocation,
 idempotency, crash recovery, unavailable-share, locked-file, or disk-full tests
 do not pass.
+
+## Current implementation
+
+Pairing and signed manual heartbeat are implemented. Workflow leasing remains
+fail-closed until the durable executor milestone is complete.
+
+- The release endpoint is fixed to the LifeDesk Supabase project and redirects are disabled.
+- Ed25519 private seed material is protected with current-user Windows DPAPI.
+- The one-time pairing token is never written to disk or logs.
+- Public connection metadata is written with an interrupted-write backup path.
+- Sync uses a fresh nonce, timestamp, exact-body SHA-256, and Ed25519 signature.
