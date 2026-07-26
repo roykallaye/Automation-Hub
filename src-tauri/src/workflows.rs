@@ -429,6 +429,7 @@ fn run_step(
     output_tail: &mut VecDeque<String>,
     redact_logs: bool,
 ) -> Result<i32, String> {
+    crate::worker_runtime::verify_worker(&step.program)?;
     let mut command = Command::new(&step.program);
     command
         .args(&step.args)

@@ -14,6 +14,7 @@ mod runner_protocol;
 mod runner_service;
 mod setup;
 mod templates;
+mod worker_runtime;
 mod workflows;
 
 use std::{process::Command, sync::Mutex};

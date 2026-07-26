@@ -62,6 +62,8 @@ export function SupportPage({
     configStatus?.preflight.dependencies.filter((item) => item.key.startsWith("pythonPackage")) ??
     [];
   const pythonInstallCommand = config ? buildPythonInstallCommand(config) : "";
+  const packagedWorker =
+    config?.automation.pythonExecutable.toLowerCase().includes("innpilot-worker") ?? false;
 
   const scriptItems = items.filter((item) => item.itemType === "script");
   const folderItems = items.filter((item) => item.itemType === "folder");
@@ -92,7 +94,7 @@ export function SupportPage({
     ? [
         ["Automation scripts folder", config.automation.automationRootFolder],
         ["Automation setup file", config.automation.automationConfigPath],
-        ["Python", config.automation.pythonExecutable],
+        ["Automation engine", config.automation.pythonExecutable],
         ["Invoice script", config.scripts.invoiceWorkflowScript],
         ["Gmail draft script", config.scripts.gmailDraftScript],
         ["Copy scanned documents script", config.scripts.copyScansioniScript],
@@ -275,7 +277,7 @@ export function SupportPage({
             ))}
           </div>
 
-          {pythonPackagesItem?.status !== "ready" && pythonInstallCommand && (
+          {!packagedWorker && pythonPackagesItem?.status !== "ready" && pythonInstallCommand && (
             <div className="mt-4 rounded-md border border-amber-100 bg-amber-50/80 p-3">
               <p className="text-sm font-semibold text-amber-950">{t("support.installPackages")}</p>
               <p className="mt-1 text-sm font-medium leading-6 text-amber-800">

@@ -60,50 +60,29 @@ Check that the Tauri automation resource bundle cannot include generated or sens
 npm run doctor:resources
 ```
 
-Install Python packages for the canonical automation scripts into the active Python environment:
+Run the canonical automation tests during development:
 
 ```powershell
 npm run install:automation
+npm run test:automation
 ```
 
-Print basic Python diagnostics:
+### Self-contained automation engine
 
-```powershell
-npm run doctor:python
-```
+Windows release installers include a private `innpilot-worker.exe`. Hotel PCs do not need Python, pip, virtual environments, or package installation. The app automatically selects the included engine for new installs and migrates the old default `python` / `C:\InnPilot\.venv` selection while preserving an explicitly configured external interpreter for legacy workflows.
 
-### Python Environment Setup
+The release pipeline:
 
-InnPilot does not bundle Python yet. Canonical automation scripts require an external Python executable plus the packages in `automation\requirements.txt`.
+- builds only on Windows with Python 3.14.2;
+- creates an isolated build-only environment under ignored `build\worker-env`;
+- installs the exact versions in `automation\requirements-build.lock.txt`;
+- rejects arbitrary `-c` execution and dispatches only five allowlisted workflows;
+- emits a SHA-256 checksum and resolved dependency manifest;
+- bundles the worker, checksum, and manifest in the installer;
+- verifies the checksum before preflight and again before every workflow process starts;
+- runs a compiled dry-run fixture proving that no hotel file is copied.
 
-Recommended short-term managed environment for controlled dry-runs:
-
-```powershell
-python -m venv C:\InnPilot\.venv
-C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
-C:\InnPilot\.venv\Scripts\python.exe --version
-```
-
-Then set InnPilot app config:
-
-```text
-automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
-```
-
-If using the app-managed automation folder after `Install/refresh managed scripts`, install requirements from that managed folder instead. Support / Advanced shows the exact PowerShell command based on the current InnPilot setup, for example:
-
-```powershell
-& "C:\InnPilot\.venv\Scripts\python.exe" -m pip install -r "C:\InnPilot\automation\requirements.txt"
-```
-
-This setup only installs Python packages. It does not run workflows, does not call Gmail, does not create drafts, and does not touch hotel folders.
-
-InnPilot checks:
-
-- Python executable is available.
-- PyMuPDF / `fitz` is installed for invoice PDF reading.
-- `googleapiclient` is installed for Gmail draft creation.
-- `google_auth_oauthlib` is installed for Gmail sign-in.
+Development can still run the source scripts with an external Python. That compatibility path is not required on hotel PCs.
 
 Print local Windows toolchain diagnostics:
 
@@ -116,7 +95,7 @@ The doctor command is read-only. It prints Rust versions, installed Rust targets
 Build the Windows installer:
 
 ```powershell
-npm run tauri build
+npm run release:windows
 ```
 
 The NSIS installer is created under:
@@ -333,37 +312,15 @@ InnPilot passes app-controlled `--json-report` paths to the canonical Python scr
 
 ## Managed Automation Deployment
 
-InnPilot does not bundle Python yet and does not freeze the automation scripts into executables yet.
+InnPilot Windows releases bundle the private, checksum-verified automation engine and the canonical script allowlist. The script files remain visible and versioned for auditability, but installed workflows execute through the private engine instead of a system Python.
 
 Current supported locations:
 
 - Development: repo-local `automation/`
-- Controlled hotel dry-run: `C:\InnPilot\automation`
 - Installed app: app-managed automation folder under the Tauri app data directory
+- Installed engine: the packaged `worker\innpilot-worker.exe` beside its checksum and dependency manifest
 
-Manual dry-run deployment checklist:
-
-```powershell
-New-Item -ItemType Directory -Force C:\InnPilot | Out-Null
-Copy-Item -Recurse -Force automation C:\InnPilot\automation
-python -m venv C:\InnPilot\.venv
-C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
-C:\InnPilot\.venv\Scripts\python.exe --version
-```
-
-Then set InnPilot app config:
-
-```text
-automation.automationRootFolder = C:\InnPilot\automation
-automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
-scripts.invoiceWorkflowScript = C:\InnPilot\automation\invoices\process_fatture.py
-scripts.gmailDraftScript = C:\InnPilot\automation\gmail_drafts\create_gmail_draft.py
-scripts.copyScansioniScript = C:\InnPilot\automation\scans\copy_scans.py
-scripts.ocrPreprocessingScript = C:\InnPilot\automation\ocr\extract_scan_text.py
-scripts.contractProcessingScript = C:\InnPilot\automation\contracts\process_contratti.py
-```
-
-The canonical scan-copy and document-reading workers support configuration, structured reports, and true dry-run mode. Document reading currently extracts embedded text from searchable PDFs; image-only PDFs are explicitly reported for follow-up OCR.
+The canonical scan-copy and document-reading workers support configuration, structured reports, true dry-run mode, embedded PDF text, and local Italian/English/German OCR for image-only pages.
 
 ### App-Managed Automation Scripts
 
@@ -394,14 +351,12 @@ It does not run workflows, does not call Gmail, does not create drafts, and does
 
 After a successful refresh, InnPilot updates `automation.automationRootFolder` and canonical Python script paths to the managed app data folder. Explicit legacy script paths remain supported for `.cmd` and `.ps1` workflows.
 
-Python is still separate. Install or configure Python manually, then install automation requirements into the selected Python environment.
-
 Before building an installer, run:
 
 ```powershell
 npm run doctor:resources
 npm run build
-npm run tauri build
+npm run release:windows
 ```
 
 `doctor:resources` fails if generated or sensitive files are found under `automation/`, including local config, tokens, credentials, bytecode, logs, reports, PDFs, or real input/output/archive folders.

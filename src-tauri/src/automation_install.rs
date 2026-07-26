@@ -13,6 +13,7 @@ use tauri::{AppHandle, Manager};
 
 const CANONICAL_FILES: &[&str] = &[
     "invoices/process_fatture.py",
+    "worker.py",
     "gmail_drafts/create_gmail_draft.py",
     "gmail_drafts/draft_safety.py",
     "scans/copy_scans.py",

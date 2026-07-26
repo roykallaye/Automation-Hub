@@ -1507,6 +1507,7 @@ function SafetyStep({
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
 }) {
   const { t } = useI18n();
+  const packagedWorker = draft.pythonExecutable.toLowerCase().includes("innpilot-worker");
   return (
     <SetupStep
       icon={<ShieldCheck className="h-6 w-6" />}
@@ -1519,24 +1520,36 @@ function SafetyStep({
             label={t("wizard.pythonUsed")}
             help={t("wizard.pythonHelp")}
           >
-            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-              <input
-                className={inputClassName}
-                value={draft.pythonExecutable}
-                onChange={(event) => update("pythonExecutable", event.target.value)}
-                placeholder={managedPythonExecutable()}
-              />
-              <button
-                className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
-                type="button"
-                onClick={() => update("pythonExecutable", managedPythonExecutable())}
-              >
-                {t("wizard.useManagedPython")}
-              </button>
-            </div>
-            <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
-              {t("wizard.recommendedPath", { path: managedPythonExecutable() })}
-            </p>
+            {packagedWorker ? (
+              <div className="flex items-center gap-3 rounded-md border border-emerald-100 bg-emerald-50/80 px-4 py-3">
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-emerald-950">{t("support.pythonFound")}</p>
+                  <p className="mt-1 text-xs font-medium text-emerald-800">{t("wizard.pythonHelp")}</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                  <input
+                    className={inputClassName}
+                    value={draft.pythonExecutable}
+                    onChange={(event) => update("pythonExecutable", event.target.value)}
+                    placeholder={managedPythonExecutable()}
+                  />
+                  <button
+                    className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                    type="button"
+                    onClick={() => update("pythonExecutable", managedPythonExecutable())}
+                  >
+                    {t("wizard.useManagedPython")}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs font-medium leading-5 text-slate-600">
+                  {t("wizard.recommendedPath", { path: managedPythonExecutable() })}
+                </p>
+              </>
+            )}
           </FieldLabel>
         </div>
         <ToggleCard

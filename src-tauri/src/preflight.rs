@@ -730,16 +730,37 @@ fn invoice_delivery_mode_check(mode: &InvoiceDeliveryMode) -> PreflightItem {
     }
 }
 
+fn is_innpilot_worker(executable: &str) -> bool {
+    crate::worker_runtime::is_innpilot_worker(executable)
+}
+
 fn python_check(python_executable: &str) -> PreflightItem {
+    let bundled_worker = is_innpilot_worker(python_executable);
+
+    if bundled_worker && crate::worker_runtime::verify_worker(python_executable).is_err() {
+        return PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Automation engine".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message:
+                "The private automation engine failed its integrity check. Reinstall InnPilot."
+                    .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
     if python_executable.trim().is_empty() {
         return PreflightItem {
             key: "pythonExecutable".to_string(),
-            label: "Python".to_string(),
+            label: "Automation engine".to_string(),
             path: None,
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
             message:
-                "Python is not configured. Ask setup support to update InnPilot configuration."
+                "The automation engine is not configured. Ask setup support to repair InnPilot."
                     .to_string(),
             readable: None,
             writable: None,
@@ -754,32 +775,36 @@ fn python_check(python_executable: &str) -> PreflightItem {
             let version = python_version_from_output(&output.stdout, &output.stderr);
             PreflightItem {
                 key: "pythonExecutable".to_string(),
-                label: "Python".to_string(),
+                label: "Automation engine".to_string(),
                 path: Some(python_executable.to_string()),
                 item_type: "dependency".to_string(),
                 status: ReadinessStatus::Ready,
-                message: format!("Python found: {version}."),
+                message: if bundled_worker {
+                    format!("Private InnPilot automation engine ready: {version}.")
+                } else {
+                    format!("External Python found: {version}.")
+                },
                 readable: None,
                 writable: None,
             }
         }
         Err(TimedCommandError::Timeout) => PreflightItem {
             key: "pythonExecutable".to_string(),
-            label: "Python".to_string(),
+            label: "Automation engine".to_string(),
             path: Some(python_executable.to_string()),
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Python check timed out. Choose a working Python executable.".to_string(),
+            message: "Automation engine check timed out. Ask setup support to repair InnPilot.".to_string(),
             readable: None,
             writable: None,
         },
         _ => PreflightItem {
             key: "pythonExecutable".to_string(),
-            label: "Python".to_string(),
+            label: "Automation engine".to_string(),
             path: Some(python_executable.to_string()),
             item_type: "dependency".to_string(),
             status: ReadinessStatus::MissingConfiguration,
-            message: "Python was not found at the selected path. Choose a Python executable or ask setup support to install Python."
+            message: "The automation engine was not found. Reinstall InnPilot or ask setup support to repair it."
                 .to_string(),
             readable: None,
             writable: None,
@@ -881,8 +906,11 @@ fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
     let script = format!(
         "import importlib.util, sys; required=[{required_modules}]; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)"
     );
-    let output =
-        command_output_with_timeout(python_executable, &["-c", &script], PYTHON_CHECK_TIMEOUT);
+    let output = if is_innpilot_worker(python_executable) {
+        command_output_with_timeout(python_executable, &["--health-check"], PYTHON_CHECK_TIMEOUT)
+    } else {
+        command_output_with_timeout(python_executable, &["-c", &script], PYTHON_CHECK_TIMEOUT)
+    };
 
     match output {
         Ok(output) if output.status.success() => PythonPackageProbe::Ready,

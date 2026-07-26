@@ -10,12 +10,14 @@ These are the versionable InnPilot automation workers. The legacy `Script/` fold
 - `ocr/extract_scan_text.py` extracts embedded text and locally OCRs image-only pages in Italian, English, and German without uploading documents.
 - `contracts/process_contratti.py` reads OCR text for scanned PDFs, identifies signed contract documents, and can rename/move them into the contracts folder.
 - `shared/config.py` loads the shared JSON config.
+- `worker.py` is the allowlisted entry point frozen into the private Windows automation engine. It rejects arbitrary code execution.
 - `config.example.json` documents the local configuration shape.
-- `requirements.txt` lists the Python packages currently needed by the available scripts.
+- `requirements.txt` pins direct development dependencies.
+- `requirements-build.lock.txt` pins the complete isolated Windows worker build environment.
 
 The installer bundles the official Apache-2.0 `tessdata_fast` Italian, English, and German language models. OCR runs locally on the hotel PC.
 
-## Install Dependencies
+## Development dependencies
 
 Create and activate a Python virtual environment, then install:
 
@@ -25,27 +27,11 @@ python -m venv .venv
 python -m pip install -r automation\requirements.txt
 ```
 
-The optional `.cmd` wrappers under `automation/` use `python` from `PATH`. InnPilot itself calls the configured Python executable directly.
+The optional `.cmd` wrappers use `python` from `PATH` only for development and legacy compatibility. Windows release installers include a private automation engine, its SHA-256 checksum, and a resolved dependency manifest. Reception and manager PCs do not install Python or packages.
 
-For a controlled manual hotel dry-run, the recommended managed layout is:
+Build and validate that engine with `npm run build:worker` followed by `npm run test:worker-binary`. The full installer gate is `npm run release:windows`.
 
-```text
-C:\InnPilot\automation
-C:\InnPilot\.venv
-```
-
-Example setup:
-
-```powershell
-New-Item -ItemType Directory -Force C:\InnPilot | Out-Null
-Copy-Item -Recurse -Force automation C:\InnPilot\automation
-python -m venv C:\InnPilot\.venv
-C:\InnPilot\.venv\Scripts\python.exe -m pip install -r C:\InnPilot\automation\requirements.txt
-```
-
-Then set InnPilot app config `automation.automationRootFolder` to `C:\InnPilot\automation` and `automation.pythonExecutable` to `C:\InnPilot\.venv\Scripts\python.exe`.
-
-Installed InnPilot builds also include a Support / Advanced action named `Install/refresh managed scripts`. That action copies only the versioned canonical automation files into InnPilot's app data automation folder and updates the app config to point there. It does not run workflows, does not call Gmail, and does not touch hotel folders.
+Installed InnPilot builds include a Support / Advanced action named `Install/refresh managed scripts`. It copies only versioned canonical automation files into InnPilot's app data folder and updates script paths. It never replaces the private engine, runs workflows, calls Gmail, or touches hotel files.
 
 Expected installed app data location:
 

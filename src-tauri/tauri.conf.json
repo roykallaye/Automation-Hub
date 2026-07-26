@@ -45,6 +45,7 @@
       "icons/icon.ico"
     ],
     "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../automation/invoices/process_fatture.py": "automation/invoices/process_fatture.py",
       "../automation/gmail_drafts/create_gmail_draft.py": "automation/gmail_drafts/create_gmail_draft.py",
       "../automation/gmail_drafts/draft_safety.py": "automation/gmail_drafts/draft_safety.py",
@@ -61,6 +62,7 @@
       "../automation/shared/report.py": "automation/shared/report.py",
       "../automation/shared/safe_files.py": "automation/shared/safe_files.py",
       "../automation/shared/windows_secrets.py": "automation/shared/windows_secrets.py",
+      "../automation/worker.py": "automation/worker.py",
       "../automation/requirements.txt": "automation/requirements.txt",
       "../automation/README.md": "automation/README.md",
       "../automation/config.example.json": "automation/config.example.json"

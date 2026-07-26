@@ -309,16 +309,56 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
     if config_path.exists() {
         let contents = fs::read_to_string(&config_path)
             .map_err(|error| format!("Could not read config file: {error}"))?;
-        let (config, should_rewrite) = parse_config_with_migration(&contents)?;
-        if should_rewrite {
+        let (mut config, should_rewrite) = parse_config_with_migration(&contents)?;
+        let worker_changed = prefer_packaged_worker(app, &mut config);
+        if should_rewrite || worker_changed {
             write_config(&config_path, &config)?;
         }
         Ok((config, config_path))
     } else {
-        let config = default_config_for_app_data(&app_data_dir);
+        let mut config = default_config_for_app_data(&app_data_dir);
+        prefer_packaged_worker(app, &mut config);
         write_config(&config_path, &config)?;
         Ok((config, config_path))
     }
+}
+
+fn prefer_packaged_worker(app: &AppHandle, config: &mut HubConfig) -> bool {
+    let Some(worker) = packaged_worker_path(app) else {
+        return false;
+    };
+    if !should_replace_python_selection(&config.automation.python_executable) {
+        return false;
+    }
+    let worker = worker.to_string_lossy().to_string();
+    if config.automation.python_executable == worker {
+        return false;
+    }
+    config.automation.python_executable = worker;
+    true
+}
+
+fn packaged_worker_path(app: &AppHandle) -> Option<PathBuf> {
+    let worker = app
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("worker")
+        .join(if cfg!(windows) {
+            "innpilot-worker.exe"
+        } else {
+            "innpilot-worker"
+        });
+    worker.is_file().then_some(worker)
+}
+
+fn should_replace_python_selection(value: &str) -> bool {
+    let normalized = value.trim().replace('/', "\\").to_ascii_lowercase();
+    normalized.is_empty()
+        || normalized == "python"
+        || normalized == "python.exe"
+        || normalized.ends_with("\\innpilot\\.venv\\scripts\\python.exe")
+        || normalized.ends_with("\\worker\\innpilot-worker.exe")
 }
 
 pub(crate) fn save_config_for_app(app: &AppHandle, config: &HubConfig) -> Result<PathBuf, String> {
@@ -618,6 +658,20 @@ mod tests {
         assert!(config.safety.redact_logs);
     }
 
+    #[test]
+    fn packaged_worker_replaces_only_default_or_old_managed_python() {
+        assert!(should_replace_python_selection("python"));
+        assert!(should_replace_python_selection("python.exe"));
+        assert!(should_replace_python_selection(
+            r"C:\InnPilot\.venv\Scripts\python.exe"
+        ));
+        assert!(should_replace_python_selection(
+            r"C:\Program Files\InnPilot\worker\innpilot-worker.exe"
+        ));
+        assert!(!should_replace_python_selection(
+            r"D:\HotelTools\approved-python.exe"
+        ));
+    }
     #[test]
     fn legacy_config_is_migrated_to_new_shape() {
         let old = r#"{

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(
+    os.environ.get("INNPILOT_AUTOMATION_ROOT", Path(__file__).resolve().parent.parent)
+) / "ocr"
 AUTOMATION_ROOT = SCRIPT_DIR.parent
 if str(AUTOMATION_ROOT) not in sys.path:
     sys.path.insert(0, str(AUTOMATION_ROOT))
