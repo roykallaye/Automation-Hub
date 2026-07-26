@@ -1,0 +1,11 @@
+{
+  "productName": "InnPilot Validation",
+  "identifier": "com.innpilot.validation",
+  "bundle": {
+    "resources": {
+      "../build/worker/innpilot-worker.exe": "worker/innpilot-worker.exe",
+      "../build/worker/innpilot-worker.sha256": "worker/innpilot-worker.sha256",
+      "../build/worker/requirements-resolved.txt": "worker/requirements-resolved.txt"
+    }
+  }
+}

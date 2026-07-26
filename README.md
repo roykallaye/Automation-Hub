@@ -90,7 +90,7 @@ Release engineering can compile a test-only InnPilot client that exercises the
 deployed LifeDesk queue without touching production InnPilot app data:
 
 ```powershell
-cargo build --manifest-path src-tauri/Cargo.toml --features cloud-e2e-probe --bin innpilot-cloud-probe
+cargo build --manifest-path src-tauri/Cargo.toml --features cloud-e2e-probe --example innpilot-cloud-probe
 ```
 
 The companion LifeDesk cloud acceptance script receives the absolute debug

@@ -15,9 +15,9 @@ tauri-build = { version = "2", features = [] }
 [features]
 cloud-e2e-probe = []
 
-[[bin]]
+[[example]]
 name = "innpilot-cloud-probe"
-path = "src/bin/innpilot-cloud-probe.rs"
+path = "examples/innpilot-cloud-probe.rs"
 required-features = ["cloud-e2e-probe"]
 
 [dependencies]

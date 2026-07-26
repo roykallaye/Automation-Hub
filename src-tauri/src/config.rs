@@ -330,7 +330,7 @@ fn prefer_packaged_worker(app: &AppHandle, config: &mut HubConfig) -> bool {
     if !should_replace_python_selection(&config.automation.python_executable) {
         return false;
     }
-    let worker = worker.to_string_lossy().to_string();
+    let worker = user_visible_path(&worker);
     if config.automation.python_executable == worker {
         return false;
     }
@@ -350,6 +350,20 @@ fn packaged_worker_path(app: &AppHandle) -> Option<PathBuf> {
             "innpilot-worker"
         });
     worker.is_file().then_some(worker)
+}
+
+fn user_visible_path(path: &Path) -> String {
+    let value = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{unc}");
+        }
+        if let Some(local) = value.strip_prefix(r"\\?\") {
+            return local.to_string();
+        }
+    }
+    value
 }
 
 fn should_replace_python_selection(value: &str) -> bool {
@@ -671,6 +685,21 @@ mod tests {
         assert!(!should_replace_python_selection(
             r"D:\HotelTools\approved-python.exe"
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn packaged_paths_are_saved_without_windows_extended_prefixes() {
+        assert_eq!(
+            user_visible_path(Path::new(
+                r"\\?\C:\Program Files\InnPilot\worker\innpilot-worker.exe"
+            )),
+            r"C:\Program Files\InnPilot\worker\innpilot-worker.exe"
+        );
+        assert_eq!(
+            user_visible_path(Path::new(r"\\?\UNC\server\share")),
+            r"\\server\share"
+        );
     }
     #[test]
     fn legacy_config_is_migrated_to_new_shape() {
