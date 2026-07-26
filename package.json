@@ -11,6 +11,7 @@
     "build:validation": "tauri build --config src-tauri/tauri.validation.conf.json",
     "test:worker-binary": "node scripts/smoke-worker.mjs",
     "test:clean-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-clean-install.ps1",
+    "verify:release": "node scripts/validate-release.mjs",
     "release:windows": "npm run build:worker && npm run test:worker-binary && tauri build --config src-tauri/tauri.release.conf.json && npm run release:manifest",
     "release:manifest": "node scripts/create-release-manifest.mjs",
     "install:automation": "python -m pip install -r automation/requirements.txt",

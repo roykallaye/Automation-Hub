@@ -139,6 +139,12 @@ Operational recovery, first-hotel rollout, failure playbooks, and the complete
 release checklist are documented in
 [docs/OPERATIONS_AND_RECOVERY.md](docs/OPERATIONS_AND_RECOVERY.md).
 
+Release evidence and the commercial go/no-go decision are recorded in
+[docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md). The security boundary
+for the later Relay and company-knowledge milestone is documented in
+[docs/RELAY_INTEGRATION_BOUNDARY.md](docs/RELAY_INTEGRATION_BOUNDARY.md).
+
+
 
 ### Windows MSVC Linker Setup
 
