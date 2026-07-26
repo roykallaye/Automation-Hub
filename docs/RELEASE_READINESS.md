@@ -35,7 +35,7 @@ The gate proves:
 - packaged resource inventory;
 - compiled worker checksum and synthetic smoke test;
 - 46 Python workflow and safe-file tests;
-- Rust formatting, strict lint, and 135 all-feature/all-target tests;
+- Rust formatting, strict lint, and 137 all-feature/all-target tests;
 - installer contains no recognized hotel documents, credentials, tokens, or
   connection/device-key files;
 - first launch creates generic settings and selects the packaged worker;
@@ -48,17 +48,17 @@ The gate proves:
 | --- | --- |
 | LifeDesk cloud acceptance | 8/8 stages passed; synthetic tenant deleted and verified |
 | LifeDesk tests | 78/78 passed; typecheck and production build passed |
-| InnPilot Rust | 135/135 passed across all features and targets |
+| InnPilot Rust | 137/137 passed across all features and targets |
 | InnPilot automation | 46/46 passed |
 | Strict Clippy | Passed with warnings denied |
 | Windows lifecycle | Clean install, upgrade preservation, and safe uninstall passed |
-| Packaged worker SHA-256 | 06e7168c941535e2187524a4d11daf08a333d14f4378bdc980de37d2c7f2a2b1 |
+| Packaged worker SHA-256 | 0e2423a47f4c0cf197b7f5519ce804fb8cc00cde8626f149f4000145238cf7e8 |
 | Installer data-leak scan | 0 forbidden operational files |
 
 Relevant source commits:
 
-- LifeDesk: 8b19661 on dev
-- InnPilot: 4d02207 on codex/lifedesk-integration
+- LifeDesk: 58d8e35 on dev and production main
+- InnPilot lifecycle evidence: 4d02207; release controls: 69deacd
 
 ## Failure-mode coverage
 

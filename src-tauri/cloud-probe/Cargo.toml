@@ -1,0 +1,12 @@
+[package]
+name = "innpilot-cloud-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+innpilot_lib = { package = "innpilot", path = "..", features = ["cloud-e2e-probe"] }
+tokio = { version = "1", features = ["rt", "time"] }
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3"

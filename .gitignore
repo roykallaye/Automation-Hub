@@ -2,6 +2,7 @@
 /dist/
 /build/
 /src-tauri/target/
+/src-tauri/cloud-probe/target/
 /src-tauri/gen/
 /.idea/
 /.vscode/

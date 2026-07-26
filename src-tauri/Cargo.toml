@@ -15,11 +15,6 @@ tauri-build = { version = "2", features = [] }
 [features]
 cloud-e2e-probe = []
 
-[[example]]
-name = "innpilot-cloud-probe"
-path = "examples/innpilot-cloud-probe.rs"
-required-features = ["cloud-e2e-probe"]
-
 [dependencies]
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["zeroize"] }

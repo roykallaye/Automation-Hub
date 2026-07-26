@@ -8,6 +8,7 @@ use std::{
 };
 use tauri::Manager;
 
+const PROBE_IDENTIFIER: &str = "com.innpilot.cloud-e2e-probe";
 const CAPABILITIES: [&str; 3] = ["invoices", "scan_import", "signed_contracts"];
 const JOB_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -54,6 +55,34 @@ impl Drop for ProbeWorkspace {
     }
 }
 
+fn prepare_probe_profile(path: &Path) -> Result<(), String> {
+    if path.file_name().and_then(|name| name.to_str()) != Some(PROBE_IDENTIFIER) {
+        return Err("Refusing to reset an unexpected probe profile.".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The probe profile has no safe parent.".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|_| "Could not prepare the probe profile parent.".to_string())?;
+
+    if path.exists() {
+        let canonical_parent = fs::canonicalize(parent)
+            .map_err(|_| "Could not verify the probe profile parent.".to_string())?;
+        let canonical_profile = fs::canonicalize(path)
+            .map_err(|_| "Could not verify the existing probe profile.".to_string())?;
+        let is_exact_child = canonical_profile.parent() == Some(canonical_parent.as_path())
+            && canonical_profile.file_name().and_then(|name| name.to_str())
+                == Some(PROBE_IDENTIFIER);
+        if !is_exact_child {
+            return Err("Refusing to reset an untrusted probe profile.".to_string());
+        }
+        fs::remove_dir_all(&canonical_profile)
+            .map_err(|_| "Could not reset the isolated probe profile.".to_string())?;
+    }
+
+    fs::create_dir(path).map_err(|_| "Could not create the isolated probe profile.".to_string())
+}
+
 fn record_diagnostic(app_data: &Path, code: &str) {
     if code
         .chars()
@@ -71,7 +100,7 @@ pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<()
     }
 
     let mut context = tauri::generate_context!();
-    context.config_mut().identifier = "com.innpilot.cloud-e2e-probe".to_string();
+    context.config_mut().identifier = PROBE_IDENTIFIER.to_string();
     context.config_mut().app.windows.clear();
     let app = tauri::Builder::default()
         .build(context)
@@ -81,8 +110,7 @@ pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<()
         .path()
         .app_data_dir()
         .map_err(|_| "Could not locate the isolated probe data.".to_string())?;
-    fs::create_dir_all(&app_data)
-        .map_err(|_| "Could not prepare the isolated probe data.".to_string())?;
+    prepare_probe_profile(&app_data)?;
     let workspace = ProbeWorkspace::create(&app_data)?;
 
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -214,18 +242,83 @@ pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<()
     }
     record_diagnostic(&app_data, "LOCAL_WORKFLOW_PASSED");
 
-    runner_protocol::pair(app_handle, pairing_code).await?;
+    if runner_protocol::pair(app_handle, pairing_code)
+        .await
+        .is_err()
+    {
+        record_diagnostic(&app_data, "PAIRING_FAILED");
+        return Err("The isolated cloud pairing failed.".to_string());
+    }
+    record_diagnostic(&app_data, "PAIRING_PASSED");
     let deadline = Instant::now() + JOB_WAIT_TIMEOUT;
     while Instant::now() < deadline {
-        let exchange = runner_protocol::sync_exchange(app_handle, &CAPABILITIES, None).await?;
+        let exchange = match runner_protocol::sync_exchange(app_handle, &CAPABILITIES, None).await {
+            Ok(exchange) => exchange,
+            Err(_) => {
+                record_diagnostic(&app_data, "SYNC_FAILED");
+                return Err("The isolated cloud sync failed.".to_string());
+            }
+        };
+        record_diagnostic(&app_data, "SYNC_PASSED");
         if let Some(job) = exchange.job {
             if job.workflow != "scan_import" || job.mode != "dry_run" {
+                record_diagnostic(&app_data, "UNEXPECTED_JOB");
                 return Err("The probe received an unexpected cloud job.".to_string());
             }
-            runner_service::process_job(app_handle, job).await?;
+            if runner_service::process_job(app_handle, job).await.is_err() {
+                record_diagnostic(&app_data, "JOB_PROCESSING_FAILED");
+                return Err("The isolated cloud job failed safely.".to_string());
+            }
+            record_diagnostic(&app_data, "JOB_COMPLETED");
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
+    record_diagnostic(&app_data, "JOB_TIMEOUT");
     Err("The probe did not receive a cloud job before the timeout.".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_parent() -> PathBuf {
+        let mut random = [0_u8; 8];
+        fill(&mut random).unwrap();
+        let suffix = random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        std::env::temp_dir().join(format!("innpilot-cloud-probe-profile-{suffix}"))
+    }
+
+    #[test]
+    fn probe_profile_reset_removes_only_the_exact_synthetic_profile() {
+        let parent = test_parent();
+        let profile = parent.join(PROBE_IDENTIFIER);
+        let sibling = parent.join("keep-me");
+        fs::create_dir_all(profile.join("runner")).unwrap();
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(profile.join("runner/connection.json"), b"synthetic").unwrap();
+        fs::write(sibling.join("sentinel.txt"), b"keep").unwrap();
+
+        prepare_probe_profile(&profile).unwrap();
+
+        assert!(profile.is_dir());
+        assert!(fs::read_dir(&profile).unwrap().next().is_none());
+        assert_eq!(fs::read(sibling.join("sentinel.txt")).unwrap(), b"keep");
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn probe_profile_reset_rejects_an_unexpected_directory_name() {
+        let parent = test_parent();
+        let unexpected = parent.join("real-profile");
+        fs::create_dir_all(&unexpected).unwrap();
+        fs::write(unexpected.join("sentinel.txt"), b"keep").unwrap();
+
+        assert!(prepare_probe_profile(&unexpected).is_err());
+        assert_eq!(fs::read(unexpected.join("sentinel.txt")).unwrap(), b"keep");
+        fs::remove_dir_all(parent).unwrap();
+    }
 }

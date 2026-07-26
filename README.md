@@ -90,7 +90,7 @@ Release engineering can compile a test-only InnPilot client that exercises the
 deployed LifeDesk queue without touching production InnPilot app data:
 
 ```powershell
-cargo build --manifest-path src-tauri/Cargo.toml --features cloud-e2e-probe --example innpilot-cloud-probe
+cargo build --manifest-path src-tauri/cloud-probe/Cargo.toml
 ```
 
 The companion LifeDesk cloud acceptance script receives the absolute debug
@@ -102,7 +102,7 @@ terminal evidence and audit events, and then deletes and verifies the fixture.
 
 The probe uses Tauri identifier `com.innpilot.cloud-e2e-probe`, a separate
 DPAPI-protected device identity, synthetic folders under that probe's app-data
-directory, and a feature-gated binary that is absent from normal builds. The
+directory, and a test-only crate that is absent from normal builds. The
 service-role and publishable Supabase credentials are deliberately removed from
 the child environment. The local synthetic workspace is canonicalized and
 verified before its test-only cleanup.
