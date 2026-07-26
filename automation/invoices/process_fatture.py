@@ -59,14 +59,16 @@ COMMITTENTE_EMAIL_RULES = [
 ]
 
 
-def get_pymupdf():
+def get_pdf_libraries():
     try:
-        import pymupdf
+        import pypdf
+        import pypdfium2
     except ImportError as error:
         raise RuntimeError(
-            "PyMuPDF is required to process invoice PDFs. Install automation requirements first."
+            "The managed PDF libraries are required to process invoice PDFs. "
+            "Install the automation requirements first."
         ) from error
-    return pymupdf
+    return pypdf, pypdfium2
 
 
 def log(message: str) -> None:
@@ -307,51 +309,55 @@ def extract_fields(text: str) -> dict:
 
 
 def create_single_copy_pdf_and_text(input_pdf: Path, output_pdf: Path) -> str:
-    pymupdf = get_pymupdf()
-    doc = pymupdf.open(input_pdf)
-    page = doc[0]
+    pypdf, pdfium = get_pdf_libraries()
+    reader = pypdf.PdfReader(str(input_pdf), strict=False)
+    if reader.is_encrypted:
+        raise RuntimeError("Encrypted invoice PDFs cannot be processed.")
+    if not reader.pages:
+        raise RuntimeError("The invoice PDF does not contain a page.")
+    page = reader.pages[0]
+    rotation = int(page.rotation or 0) % 360
+    left = float(page.mediabox.left)
+    bottom = float(page.mediabox.bottom)
+    right = float(page.mediabox.right)
+    top = float(page.mediabox.top)
+    middle_x = left + ((right - left) / 2)
+    middle_y = bottom + ((top - bottom) / 2)
 
-    rotation = page.rotation
-
-    # Hotel invoices are usually internally portrait with rotation=90,
-    # visually landscape with duplicated invoice left/right.
+    # Hotel invoices contain two copies on one physical sheet. Rotated portrait
+    # source pages store the selected copy in the corresponding top/bottom half;
+    # unrotated pages store it in the left half.
     if rotation == 90:
-        mb = page.mediabox
-        clip = pymupdf.Rect(mb.x0, mb.y0, mb.x1, mb.y0 + (mb.height / 2))
-        output_width = clip.height
-        output_height = clip.width
-        output_rotation = 90
-
+        selected_box = (left, middle_y, right, top)
     elif rotation == 270:
-        mb = page.mediabox
-        clip = pymupdf.Rect(mb.x0, mb.y0 + (mb.height / 2), mb.x1, mb.y1)
-        output_width = clip.height
-        output_height = clip.width
-        output_rotation = 270
-
+        selected_box = (left, bottom, right, middle_y)
+    elif rotation == 180:
+        selected_box = (middle_x, bottom, right, top)
     else:
-        rect = page.rect
-        clip = pymupdf.Rect(rect.x0, rect.y0, rect.x0 + (rect.width / 2), rect.y1)
-        output_width = clip.width
-        output_height = clip.height
-        output_rotation = 0
+        selected_box = (left, bottom, middle_x, top)
 
-    new_doc = pymupdf.open()
-    new_page = new_doc.new_page(width=output_width, height=output_height)
-    new_page.show_pdf_page(new_page.rect, doc, 0, clip=clip)
+    page.cropbox.lower_left = (selected_box[0], selected_box[1])
+    page.cropbox.upper_right = (selected_box[2], selected_box[3])
+    page.mediabox.lower_left = page.cropbox.lower_left
+    page.mediabox.upper_right = page.cropbox.upper_right
+    writer = pypdf.PdfWriter()
+    writer.add_page(page)
+    with output_pdf.open("wb") as stream:
+        writer.write(stream)
 
-    if output_rotation:
-        new_page.set_rotation(output_rotation)
-
-    new_doc.save(output_pdf)
-    new_doc.close()
-    doc.close()
-
-    single_doc = pymupdf.open(output_pdf)
-    text = single_doc[0].get_text("text")
-    single_doc.close()
-
-    return text
+    document = pdfium.PdfDocument(str(output_pdf))
+    try:
+        output_page = document[0]
+        try:
+            text_page = output_page.get_textpage()
+            try:
+                return text_page.get_text_bounded().strip()
+            finally:
+                text_page.close()
+        finally:
+            output_page.close()
+    finally:
+        document.close()
 
 
 def render_email_body(

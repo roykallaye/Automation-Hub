@@ -21,7 +21,9 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 pyinstaller==6.21.0
 pyinstaller-hooks-contrib==2026.6
-pymupdf==1.28.0
+pillow==12.3.0
+pypdf==6.14.2
+pypdfium2==5.12.1
 pyparsing==3.3.2
 pywin32-ctypes==0.2.3
 requests==2.34.2

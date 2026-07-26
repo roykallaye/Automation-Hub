@@ -240,7 +240,7 @@ The tests cover:
 
 - embedded-text fast-path behavior and local image-page OCR routing
 - stale OCR output detection using a SHA-256 source sidecar
-- invoice dry-run behavior with a generated fake PDF when PyMuPDF is installed
+- invoice dry-run and copy-selection behavior with generated PDFs across supported rotations
 - Gmail draft dry-run reporting without authentication or file moves
 - contract processing dry-run using fake scan PDF names and fake OCR text
 - missing config failures that leave temp fixture files untouched
@@ -249,7 +249,7 @@ The tests cover:
 - real Windows DPAPI round-trip and token/client-purpose separation
 - Gmail authorization using protected-storage readers and writers only
 
-If PyMuPDF is not installed, PDF-dependent fixture tests are skipped. Install `automation\requirements.txt` to run the full suite and the real local OCR smoke test.
+Install `automation\requirements.txt` to run the complete PDF suite. Release verification also executes a generated image through the pinned local Tesseract runtime inside the compiled worker; no document content is sent to a cloud OCR service.
 
 ## Files That Must Never Be Committed
 

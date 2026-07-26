@@ -77,13 +77,17 @@ Relevant source commits:
 
 ## External gates before commercial distribution
 
-1. Replace PyMuPDF with a verified permissive implementation, or purchase and
-   document the appropriate Artifex commercial license. Current packaging must
-   not be sold while this is unresolved.
-2. Obtain a trusted Windows code-signing certificate, sign the installer and
+The former PyMuPDF/AGPL packaging blocker has been removed: invoice cropping now
+uses BSD-licensed `pypdf`, while embedded text and rendering use the permissively
+licensed `pypdfium2`/PDFium stack. The build and tests must continue to reject any
+reintroduction of `PyMuPDF` or `fitz`.
+
+1. Obtain a trusted Windows code-signing certificate, sign the installer and
    application, and verify signatures in the release pipeline.
-3. Configure a signed update channel with staged rollout and rollback. Do not
+2. Configure a signed update channel with staged rollout and rollback. Do not
    ship an unsigned auto-updater.
+3. Preserve and formally approve notices for the exact pinned Tesseract runtime
+   and all DLLs recorded in its generated runtime manifest.
 4. Complete a mapping and synthetic rehearsal on each manager/reception PC,
    because the shared Scansioni path can differ by machine.
 5. Approve GDPR roles, retention, incident response, backup ownership, and the

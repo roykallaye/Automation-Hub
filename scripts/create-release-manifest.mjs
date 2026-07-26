@@ -23,7 +23,7 @@ const distributionMode =
   process.env.INNPILOT_DISTRIBUTION_MODE || "internal-evaluation";
 if (distributionMode !== "internal-evaluation") {
   throw new Error(
-    "Commercial release is intentionally blocked until the PyMuPDF licensing path is removed or formally approved in source.",
+    "Commercial release is intentionally blocked until Windows signing, signed updates, and the pinned OCR runtime notices are formally approved.",
   );
 }
 
@@ -99,7 +99,7 @@ const manifest = {
     mode: distributionMode,
     commercialDistributionApproved: false,
     reason:
-      "PyMuPDF requires AGPL-compliant distribution or a commercial Artifex license. This build is for controlled internal evaluation only.",
+      "This unsigned build is for controlled internal evaluation only; commercial release also requires a signed update channel and formal approval of the pinned OCR runtime notices.",
   },
   platform: { os: "windows", architecture: "x86_64", package: "nsis" },
   security: {

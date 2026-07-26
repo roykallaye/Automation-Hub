@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(
@@ -18,9 +21,9 @@ from shared.report import now_iso, report_status, standard_report, write_report
 from shared.safe_files import atomic_write_text, sha256_file
 
 try:
-    import fitz
+    import pypdfium2 as pdfium
 except ImportError:
-    fitz = None
+    pdfium = None
 
 
 DEFAULT_LANGUAGES = ["ita", "eng", "deu"]
@@ -28,6 +31,9 @@ DEFAULT_MAX_PAGES = 20
 DEFAULT_DPI = 300
 DEFAULT_MIN_EMBEDDED_CHARS = 24
 DEFAULT_MAX_FILE_MB = 50
+TESSERACT_VERSION = "5.5.3"
+OCR_PAGE_TIMEOUT_SECONDS = 90
+MAX_OCR_TEXT_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -157,37 +163,166 @@ def validate_tessdata(settings: OcrSettings) -> None:
         )
 
 
+def find_tesseract_executable() -> Path:
+    candidates: list[Path] = []
+    configured = os.environ.get("INNPILOT_TESSERACT_EXE", "").strip()
+    if configured:
+        candidates.append(Path(configured))
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "tesseract" / "tesseract.exe")
+    candidates.extend(
+        [
+            Path(__file__).resolve().parents[2]
+            / "build"
+            / "tesseract-runtime"
+            / "tesseract.exe",
+            SCRIPT_DIR / "tesseract" / "tesseract.exe",
+        ]
+    )
+    discovered = shutil.which("tesseract")
+    if discovered:
+        candidates.append(Path(discovered))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise RuntimeError("The verified local OCR engine is missing. Reinstall InnPilot.")
+
+
+def minimal_tesseract_environment(runtime_dir: Path, temporary_dir: Path) -> dict[str, str]:
+    return {
+        "PATH": str(runtime_dir),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", r"C:\Windows"),
+        "WINDIR": os.environ.get("WINDIR", r"C:\Windows"),
+        "TEMP": str(temporary_dir),
+        "TMP": str(temporary_dir),
+    }
+
+
+def run_tesseract(arguments: list[str], temporary_dir: Path) -> subprocess.CompletedProcess[str]:
+    executable = find_tesseract_executable()
+    try:
+        return subprocess.run(
+            [str(executable), *arguments],
+            cwd=executable.parent,
+            env=minimal_tesseract_environment(executable.parent, temporary_dir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=OCR_PAGE_TIMEOUT_SECONDS,
+            check=False,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Local OCR timed out while reading a page.") from error
+    except OSError as error:
+        raise RuntimeError("The verified local OCR engine could not start.") from error
+
+
+def tesseract_version() -> str:
+    with tempfile.TemporaryDirectory(prefix="innpilot-ocr-health-") as temporary:
+        result = run_tesseract(["--version"], Path(temporary))
+    lines = (result.stdout or result.stderr).splitlines()
+    version = lines[0].strip() if lines else ""
+    if result.returncode != 0 or not version.startswith(f"tesseract v{TESSERACT_VERSION}"):
+        raise RuntimeError("The local OCR engine failed its version integrity check.")
+    return version
+
+
+def ocr_page_image(image: object, settings: OcrSettings) -> str:
+    validate_tessdata(settings)
+    with tempfile.TemporaryDirectory(prefix="innpilot-ocr-page-") as temporary:
+        temporary_dir = Path(temporary)
+        image_path = temporary_dir / "page.png"
+        output_base = temporary_dir / "recognized"
+        image.save(image_path, format="PNG")
+        result = run_tesseract(
+            [
+                str(image_path),
+                str(output_base),
+                "--tessdata-dir",
+                str(settings.tessdata_dir.resolve()),
+                "-l",
+                settings.language_spec,
+                "--dpi",
+                str(settings.dpi),
+            ],
+            temporary_dir,
+        )
+        output_path = output_base.with_suffix(".txt")
+        if result.returncode != 0 or not output_path.is_file():
+            raise RuntimeError("Local OCR could not recognize this page.")
+        if output_path.stat().st_size > MAX_OCR_TEXT_BYTES:
+            raise RuntimeError("Local OCR output exceeded the safety limit.")
+        return output_path.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def run_ocr_self_test(tessdata_dir: Path) -> bool:
+    from PIL import Image, ImageDraw, ImageFont
+
+    settings = OcrSettings(
+        languages=("eng",),
+        tessdata_dir=tessdata_dir,
+        max_pages=1,
+        dpi=300,
+        min_embedded_chars=24,
+        max_file_bytes=1024 * 1024,
+    )
+    image = Image.new("L", (1600, 360), color=255)
+    try:
+        font_path = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "arial.ttf"
+        font = ImageFont.truetype(str(font_path), 110)
+        ImageDraw.Draw(image).text((70, 90), "INNPILOT OCR 2026", fill=0, font=font)
+        recognized = ocr_page_image(image, settings).upper()
+        return "INNPILOT" in recognized and "2026" in recognized
+    finally:
+        image.close()
+
+
 def extract_text(pdf: Path, settings: OcrSettings) -> ExtractionResult:
-    if fitz is None:
-        raise RuntimeError("PyMuPDF is not installed. Install the managed automation requirements.")
+    if pdfium is None:
+        raise RuntimeError("The managed PDF renderer is not installed. Reinstall InnPilot.")
     if pdf.stat().st_size > settings.max_file_bytes:
         raise RuntimeError("PDF exceeds the configured local OCR size limit.")
 
     text_pages: list[str] = []
     embedded_pages = 0
     ocr_pages = 0
-    with fitz.open(pdf) as document:
-        if getattr(document, "is_encrypted", False):
-            raise RuntimeError("Encrypted PDFs cannot be read by the local OCR worker.")
-        for page_number, page in enumerate(document):
-            if page_number >= settings.max_pages:
-                break
-            embedded = page.get_text("text").strip()
-            if len(embedded) >= settings.min_embedded_chars:
-                text_pages.append(embedded)
-                embedded_pages += 1
-                continue
+    try:
+        document = pdfium.PdfDocument(str(pdf))
+    except Exception as error:
+        raise RuntimeError("The PDF is invalid, encrypted, or unsupported.") from error
+    try:
+        for page_number in range(min(len(document), settings.max_pages)):
+            page = document[page_number]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    embedded = text_page.get_text_bounded().strip()
+                finally:
+                    text_page.close()
+                if len(embedded) >= settings.min_embedded_chars:
+                    text_pages.append(embedded)
+                    embedded_pages += 1
+                    continue
 
-            validate_tessdata(settings)
-            text_page = page.get_textpage_ocr(
-                language=settings.language_spec,
-                dpi=settings.dpi,
-                full=True,
-                tessdata=str(settings.tessdata_dir),
-            )
-            recognized = page.get_text("text", textpage=text_page).strip()
-            text_pages.append(recognized)
-            ocr_pages += 1
+                bitmap = page.render(scale=settings.dpi / 72, grayscale=True)
+                try:
+                    image = bitmap.to_pil()
+                    try:
+                        recognized = ocr_page_image(image, settings)
+                    finally:
+                        image.close()
+                finally:
+                    bitmap.close()
+                text_pages.append(recognized)
+                ocr_pages += 1
+            finally:
+                page.close()
+    finally:
+        document.close()
 
     return ExtractionResult(
         text="\n\n".join(text for text in text_pages if text).strip(),

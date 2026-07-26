@@ -6,41 +6,93 @@ import unittest
 from pathlib import Path
 
 from helpers import InnPilotWorkspace, count_files, run_script
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, NumberObject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "invoices"))
 
 import process_fatture  # noqa: E402
 
 
-def create_invoice_pdf(path: Path) -> None:
-    try:
-        import pymupdf
-    except ImportError as error:
-        raise unittest.SkipTest("PyMuPDF is not installed; skipping PDF fixture test.") from error
+def pdf_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
-    document = pymupdf.open()
-    page = document.new_page(width=595, height=842)
-    page.insert_text(
-        (50, 72),
-        "\n".join(
-            [
-                "Your Hotel",
-                "123",
-                "01/02/2026",
-                "Eurotours Fixture",
-                "Committente",
-                "Cliente",
-                "Mario Rossi",
-                "Camera n.",
-            ]
-        ),
-        fontsize=12,
+
+def create_text_pdf(
+    path: Path,
+    entries: list[tuple[float, float, str]],
+    *,
+    rotation: int = 0,
+) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=595, height=842)
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
     )
-    document.save(path)
-    document.close()
+    page[NameObject("/Resources")] = DictionaryObject(
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})}
+    )
+    commands = ["BT", "/F1 12 Tf"]
+    commands.extend(
+        f"1 0 0 1 {x} {y} Tm ({pdf_string(text)}) Tj" for x, y, text in entries
+    )
+    commands.append("ET")
+    content = DecodedStreamObject()
+    content.set_data(("\n".join(commands) + "\n").encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(content)
+    if rotation:
+        page[NameObject("/Rotate")] = NumberObject(rotation)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def create_invoice_pdf(path: Path) -> None:
+    lines = [
+        "Your Hotel", "123", "01/02/2026", "Eurotours Fixture",
+        "Committente", "Cliente", "Mario Rossi", "Camera n.",
+    ]
+    create_text_pdf(path, [(50, 790 - index * 22, line) for index, line in enumerate(lines)])
 
 
 class ProcessFattureTests(unittest.TestCase):
+    def test_single_copy_crop_preserves_the_expected_half_for_supported_rotations(self) -> None:
+        cases = [
+            (
+                0,
+                [(50, 700, "SELECTED LEFT COPY"), (380, 700, "REJECTED RIGHT COPY")],
+                "SELECTED LEFT COPY",
+                "REJECTED RIGHT COPY",
+            ),
+            (
+                90,
+                [(50, 700, "SELECTED TOP COPY"), (50, 120, "REJECTED BOTTOM COPY")],
+                "SELECTED TOP COPY",
+                "REJECTED BOTTOM COPY",
+            ),
+            (
+                270,
+                [(50, 700, "REJECTED TOP COPY"), (50, 120, "SELECTED BOTTOM COPY")],
+                "SELECTED BOTTOM COPY",
+                "REJECTED TOP COPY",
+            ),
+        ]
+        with InnPilotWorkspace() as workspace:
+            for rotation, entries, selected, rejected in cases:
+                with self.subTest(rotation=rotation):
+                    source = workspace.root / f"source-{rotation}.pdf"
+                    output = workspace.root / f"output-{rotation}.pdf"
+                    create_text_pdf(source, entries, rotation=rotation)
+
+                    text = process_fatture.create_single_copy_pdf_and_text(source, output)
+
+                    self.assertIn(selected, text)
+                    self.assertNotIn(rejected, text)
+                    self.assertTrue(output.is_file())
+
     def test_dry_run_invalid_pdf_keeps_original_and_writes_temp_report(self) -> None:
         with InnPilotWorkspace() as workspace:
             invoice = workspace.invoice_input / "Funzione Pubblica amministrazione invalid.pdf"

@@ -2,18 +2,38 @@
 
 The Windows automation engine contains open-source components. Exact versions for a built installer are recorded in its bundled `worker/requirements-resolved.txt` manifest.
 
-## PDF and local OCR engine
+## PDF processing
 
-InnPilot currently uses PyMuPDF 1.28.0 for PDF cropping, embedded-text extraction, rendering, and local OCR integration. PyMuPDF is offered under GNU AGPL v3 or a commercial Artifex license. The current build is suitable for internal evaluation only until the distributor has deliberately selected and documented one of those licensing paths, or replaced this dependency with an approved permissive alternative. Do not treat a successful technical build as commercial-distribution approval.
+InnPilot uses `pypdf` 6.14.2 to crop and write invoice copies. `pypdf` is provided under the BSD 3-Clause license.
 
-- Project: https://pymupdf.readthedocs.io/
-- License information: https://pymupdf.readthedocs.io/en/latest/about.html#license
+- Project and license: https://github.com/py-pdf/pypdf
 
-## Tesseract language data
+InnPilot uses `pypdfium2` 5.12.1 for local PDF text extraction and page rendering. The Python bindings are offered under Apache-2.0 or BSD-3-Clause; the bundled PDFium binaries use a BSD-style license. The package's build-license files are collected into the worker by the release build.
+
+- Project and licensing: https://github.com/pypdfium2-team/pypdfium2
+
+Pillow 12.3.0 is used only for in-memory image handling in local OCR and is provided under the HPND license.
+
+- Project and license: https://github.com/python-pillow/Pillow
+
+## Tesseract OCR runtime and language data
+
+The offline OCR executable is Tesseract 5.5.3, provided under Apache License 2.0. The Windows runtime is prepared only from the exact official release asset recorded in `scripts/prepare-tesseract-runtime.mjs`; its byte size and SHA-256 are checked before extraction, its version is executed and checked, and every shipped runtime file is recorded in `runtime-manifest.json`. `TESSERACT-LICENSE.txt` is bundled beside the runtime.
+
+- Project and license: https://github.com/tesseract-ocr/tesseract
+
+The official Windows runtime also dynamically links third-party libraries supplied by that release, including Leptonica and image, text, compression, and C/C++ runtime libraries. Their exact DLL inventory and hashes are captured in the runtime manifest. Commercial approval still requires the release owner to preserve all applicable notices and complete formal license review of that exact pinned runtime; replacement of PyMuPDF removes the known AGPL dependency but does not waive this final review.
 
 The Italian, English, and German `tessdata_fast` models are from the official Tesseract OCR project and are provided under Apache License 2.0. Their license is bundled beside the models at `automation/ocr/tessdata/LICENSE`.
 
-- Project: https://github.com/tesseract-ocr/tessdata_fast
+- Language models: https://github.com/tesseract-ocr/tessdata_fast
+
+## Build-only extraction tool
+
+The release build uses `7zip-bin` 5.2.0 and a SHA-256-pinned official 7-Zip 26.02 executable only to extract the official Tesseract package. Neither extraction tool is included in the InnPilot installer. `7zip-bin` is MIT-licensed; 7-Zip licensing is documented by its publisher.
+
+- 7zip-bin: https://github.com/develar/7zip-bin
+- 7-Zip license: https://www.7-zip.org/license.txt
 
 ## Google client libraries
 

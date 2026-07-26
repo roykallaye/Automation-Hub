@@ -874,11 +874,25 @@ struct RequiredPythonPackage {
 
 const REQUIRED_PYTHON_PACKAGES: &[RequiredPythonPackage] = &[
     RequiredPythonPackage {
-        key: "pythonPackageFitz",
-        module: "fitz",
-        label: "Invoice PDF reader",
-        ready_message: "Invoice PDF reader installed.",
-        missing_message: "PyMuPDF is needed to read invoice PDFs.",
+        key: "pythonPackagePypdf",
+        module: "pypdf",
+        label: "Invoice PDF tools",
+        ready_message: "Invoice PDF tools installed.",
+        missing_message: "The managed PDF tools are needed to prepare invoice copies.",
+    },
+    RequiredPythonPackage {
+        key: "pythonPackagePdfium",
+        module: "pypdfium2",
+        label: "Local PDF renderer",
+        ready_message: "Local PDF renderer installed.",
+        missing_message: "The local PDF renderer is needed to read invoices and scanned pages.",
+    },
+    RequiredPythonPackage {
+        key: "pythonPackagePillow",
+        module: "PIL",
+        label: "Local OCR image tools",
+        ready_message: "Local OCR image tools installed.",
+        missing_message: "The local OCR image tools are needed to read scanned pages.",
     },
     RequiredPythonPackage {
         key: "pythonPackageGoogleApi",
@@ -2578,12 +2592,12 @@ mod tests {
     fn missing_python_package_summary_is_operator_friendly() {
         let item = python_package_summary_check(
             "python",
-            &PythonPackageProbe::Missing(vec!["fitz".to_string()]),
+            &PythonPackageProbe::Missing(vec!["pypdf".to_string()]),
         );
 
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
         assert!(item.message.contains("Install the Python packages"));
-        assert!(item.message.contains("fitz"));
+        assert!(item.message.contains("pypdf"));
     }
 
     #[test]
@@ -2596,15 +2610,15 @@ mod tests {
             .iter()
             .find(|item| item.key == "pythonPackageGoogleApi")
             .unwrap();
-        let fitz = checks
+        let pdf_tools = checks
             .iter()
-            .find(|item| item.key == "pythonPackageFitz")
+            .find(|item| item.key == "pythonPackagePypdf")
             .unwrap();
 
         assert_eq!(gmail.label, "Gmail draft library");
         assert_eq!(gmail.status, ReadinessStatus::MissingConfiguration);
         assert!(gmail.message.contains("Gmail drafts"));
-        assert_eq!(fitz.status, ReadinessStatus::Ready);
+        assert_eq!(pdf_tools.status, ReadinessStatus::Ready);
     }
 
     #[test]

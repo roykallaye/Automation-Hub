@@ -7,7 +7,30 @@ const root = process.cwd();
 const worker = resolve(root, "build", "worker", "innpilot-worker.exe");
 const fixtureRoot = mkdtempSync(join(tmpdir(), "innpilot-worker-smoke-"));
 
+function runWorker(args, failureMessage) {
+  const result = spawnSync(worker, args, {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    console.error(result.stderr || result.stdout || failureMessage);
+    process.exit(1);
+  }
+  return result;
+}
+
 try {
+  runWorker(["--health-check"], "Compiled worker health check failed.");
+  const ocrCheck = runWorker(
+    ["--ocr-self-test", resolve(root, "automation", "ocr", "tessdata")],
+    "Compiled worker local OCR self-test failed.",
+  );
+  if (!ocrCheck.stdout.includes("local OCR self-test passed")) {
+    console.error("Compiled worker did not confirm its local OCR self-test.");
+    process.exit(1);
+  }
+
   const source = join(fixtureRoot, "network-scans");
   const destination = join(fixtureRoot, "local-cache");
   const configPath = join(fixtureRoot, "config.json");
@@ -27,8 +50,7 @@ try {
     ),
   );
 
-  const result = spawnSync(
-    worker,
+  const result = runWorker(
     [
       resolve(root, "automation", "scans", "copy_scans.py"),
       "--config",
@@ -37,12 +59,8 @@ try {
       "--json-report",
       reportPath,
     ],
-    { cwd: root, encoding: "utf8" },
+    "Compiled worker smoke test failed.",
   );
-  if (result.status !== 0) {
-    console.error(result.stderr || result.stdout || "Compiled worker smoke test failed.");
-    process.exit(1);
-  }
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
   if (report.workflow !== "scan_copy" || report.mode !== "dry_run") {
     console.error("Compiled worker returned the wrong structured report.");
@@ -52,6 +70,7 @@ try {
     console.error("Compiled worker did not preserve dry-run behavior.");
     process.exit(1);
   }
+  console.log("Compiled worker local OCR self-test passed.");
   console.log("Compiled worker fixture passed: one scan planned, no hotel file copied.");
 } finally {
   const ownedPrefix = resolve(tmpdir()) + "\\innpilot-worker-smoke-";

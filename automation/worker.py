@@ -14,7 +14,7 @@ WORKFLOWS = {
     "extract_scan_text.py": ("ocr.extract_scan_text", "run"),
     "process_contratti.py": ("contracts.process_contratti", "process"),
 }
-REQUIRED_MODULES = ("fitz", "googleapiclient", "google_auth_oauthlib")
+REQUIRED_MODULES = ("PIL", "pypdf", "pypdfium2", "googleapiclient", "google_auth_oauthlib")
 
 
 def health_check() -> int:
@@ -26,6 +26,13 @@ def health_check() -> int:
             missing.append(module_name)
     if missing:
         print("Missing bundled modules: " + ", ".join(missing), file=sys.stderr)
+        return 2
+    try:
+        from ocr.extract_scan_text import tesseract_version
+
+        tesseract_version()
+    except (ImportError, OSError, RuntimeError):
+        print("The bundled local OCR engine failed its health check.", file=sys.stderr)
         return 2
     print(f"InnPilot automation worker {WORKER_VERSION} ready")
     return 0
@@ -74,6 +81,14 @@ def main() -> int:
         return 0
     if len(sys.argv) == 2 and sys.argv[1] == "--health-check":
         return health_check()
+    if len(sys.argv) == 3 and sys.argv[1] == "--ocr-self-test":
+        from ocr.extract_scan_text import run_ocr_self_test
+
+        if run_ocr_self_test(Path(sys.argv[2]).resolve()):
+            print("InnPilot local OCR self-test passed")
+            return 0
+        print("InnPilot local OCR self-test failed.", file=sys.stderr)
+        return 2
     if len(sys.argv) < 2:
         print("A managed InnPilot automation must be selected.", file=sys.stderr)
         return 2

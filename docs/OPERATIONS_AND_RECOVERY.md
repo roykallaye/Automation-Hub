@@ -173,13 +173,14 @@ NSIS build, and release-manifest generation. The manifest hashes the installer,
 worker, worker checksum, resolved dependency list, and third-party notices.
 
 The current release path deliberately emits an **internal-evaluation** manifest.
-Commercial distribution remains blocked in source until both conditions are
-met:
+The former PyMuPDF licensing blocker has been removed from the runtime. Commercial
+distribution remains blocked in source until all of these conditions are met:
 
-1. PyMuPDF is replaced by an approved permissive implementation or a suitable
-   commercial Artifex license is formally selected and documented.
-2. The Windows installer and updater are signed with the product publisher's
-   trusted code-signing certificate.
+1. The Windows installer and application are signed with the product publisher's
+   trusted code-signing certificate and the release pipeline verifies the signer.
+2. Updates are distributed through a signed, rollback-capable channel.
+3. The notices for the exact pinned Tesseract runtime and the DLL inventory in
+   its generated runtime manifest have received formal release approval.
 
 A successful build is not commercial approval. Do not rename or remove this
 gate to prepare a client release.

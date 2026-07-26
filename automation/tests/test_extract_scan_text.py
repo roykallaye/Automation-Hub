@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -16,52 +17,85 @@ from ocr import extract_scan_text  # noqa: E402
 class FakeTextPage:
     def __init__(self, text: str) -> None:
         self.text = text
+        self.closed = False
+
+    def get_text_bounded(self) -> str:
+        return self.text
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeImage:
+    def __init__(self, recognized: str) -> None:
+        self.recognized = recognized
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeBitmap:
+    def __init__(self, recognized: str) -> None:
+        self.image = FakeImage(recognized)
+        self.closed = False
+
+    def to_pil(self) -> FakeImage:
+        return self.image
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakePage:
     def __init__(self, embedded: str, recognized: str = "") -> None:
         self.embedded = embedded
         self.recognized = recognized
-        self.ocr_calls: list[dict] = []
+        self.render_calls: list[dict] = []
+        self.closed = False
 
-    def get_text(self, _kind: str, textpage: FakeTextPage | None = None) -> str:
-        return textpage.text if textpage else self.embedded
+    def get_textpage(self) -> FakeTextPage:
+        return FakeTextPage(self.embedded)
 
-    def get_textpage_ocr(self, **kwargs) -> FakeTextPage:
-        self.ocr_calls.append(kwargs)
-        return FakeTextPage(self.recognized)
+    def render(self, **kwargs) -> FakeBitmap:
+        self.render_calls.append(kwargs)
+        return FakeBitmap(self.recognized)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeDocument:
-    is_encrypted = False
-
     def __init__(self, pages: list[FakePage]) -> None:
         self.pages = pages
+        self.closed = False
 
-    def __enter__(self) -> "FakeDocument":
-        return self
+    def __len__(self) -> int:
+        return len(self.pages)
 
-    def __exit__(self, *_args: object) -> None:
-        return None
+    def __getitem__(self, index: int) -> FakePage:
+        return self.pages[index]
 
-    def __iter__(self):
-        return iter(self.pages)
+    def close(self) -> None:
+        self.closed = True
 
 
-class FakeFitz:
+class FakePdfium:
     def __init__(self, document: FakeDocument) -> None:
         self.document = document
 
-    def open(self, _path: Path) -> FakeDocument:
+    def PdfDocument(self, _path: str) -> FakeDocument:
         return self.document
 
 
 class ExtractScanTextTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.original_fitz = extract_scan_text.fitz
+        self.original_pdfium = extract_scan_text.pdfium
+        self.original_ocr_page_image = extract_scan_text.ocr_page_image
 
     def tearDown(self) -> None:
-        extract_scan_text.fitz = self.original_fitz
+        extract_scan_text.pdfium = self.original_pdfium
+        extract_scan_text.ocr_page_image = self.original_ocr_page_image
 
     def test_embedded_text_is_used_without_ocr(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -69,13 +103,13 @@ class ExtractScanTextTests(unittest.TestCase):
             pdf = root / "scan.pdf"
             pdf.write_bytes(b"fixture")
             page = FakePage("This page already contains enough embedded text.")
-            extract_scan_text.fitz = FakeFitz(FakeDocument([page]))
+            extract_scan_text.pdfium = FakePdfium(FakeDocument([page]))
 
             result = extract_scan_text.extract_text(pdf, settings(root))
 
             self.assertEqual(result.embedded_pages, 1)
             self.assertEqual(result.ocr_pages, 0)
-            self.assertEqual(page.ocr_calls, [])
+            self.assertEqual(page.render_calls, [])
 
     def test_image_page_uses_local_three_language_ocr(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -84,25 +118,56 @@ class ExtractScanTextTests(unittest.TestCase):
             pdf = root / "scan.pdf"
             pdf.write_bytes(b"fixture")
             page = FakePage("", "Contratto riconosciuto localmente")
-            extract_scan_text.fitz = FakeFitz(FakeDocument([page]))
+            extract_scan_text.pdfium = FakePdfium(FakeDocument([page]))
+            extract_scan_text.ocr_page_image = (
+                lambda image, _settings: image.recognized
+            )
 
             result = extract_scan_text.extract_text(pdf, settings(root))
 
             self.assertEqual(result.ocr_pages, 1)
             self.assertEqual(result.text, "Contratto riconosciuto localmente")
-            self.assertEqual(page.ocr_calls[0]["language"], "ita+eng+deu")
-            self.assertEqual(page.ocr_calls[0]["tessdata"], str(root))
-            self.assertTrue(page.ocr_calls[0]["full"])
+            self.assertAlmostEqual(page.render_calls[0]["scale"], 300 / 72)
+            self.assertTrue(page.render_calls[0]["grayscale"])
+            self.assertTrue(page.closed)
 
     def test_missing_language_data_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             pdf = root / "scan.pdf"
             pdf.write_bytes(b"fixture")
-            extract_scan_text.fitz = FakeFitz(FakeDocument([FakePage("", "text")]))
+            extract_scan_text.pdfium = FakePdfium(FakeDocument([FakePage("", "text")]))
 
             with self.assertRaisesRegex(RuntimeError, "language data"):
                 extract_scan_text.extract_text(pdf, settings(root))
+
+    def test_tesseract_subprocess_is_argument_safe_and_gets_a_minimal_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "tesseract.exe"
+            executable.write_bytes(b"fixture")
+            os_secret = "INNPILOT_SECRET_TEST_VALUE"
+            extract_scan_text.os.environ[os_secret] = "must-not-be-forwarded"
+            try:
+                with mock.patch.object(
+                    extract_scan_text, "find_tesseract_executable", return_value=executable
+                ), mock.patch.object(
+                    extract_scan_text.subprocess,
+                    "run",
+                    return_value=extract_scan_text.subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout="tesseract 5.5.3\n", stderr=""
+                    ),
+                ) as runner:
+                    result = extract_scan_text.run_tesseract(["--version"], root)
+            finally:
+                extract_scan_text.os.environ.pop(os_secret, None)
+
+            self.assertEqual(result.returncode, 0)
+            command = runner.call_args.args[0]
+            options = runner.call_args.kwargs
+            self.assertEqual(command, [str(executable), "--version"])
+            self.assertFalse(options["shell"])
+            self.assertNotIn(os_secret, options["env"])
 
     def test_invalid_cli_limit_is_rejected_instead_of_falling_back(self) -> None:
         args = extract_scan_text.argparse.Namespace(
