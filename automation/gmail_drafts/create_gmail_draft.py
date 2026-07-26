@@ -1,13 +1,12 @@
 import argparse
 from pathlib import Path
-import base64
 import re
-import shutil
 import sys
 from datetime import datetime
-from email.message import EmailMessage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from draft_safety import load_receipt, prepare_draft_once  # noqa: E402
 
 from shared.config import (  # noqa: E402
     ConfigError,
@@ -16,8 +15,9 @@ from shared.config import (  # noqa: E402
     config_str,
     load_config,
 )
-from shared.report import now_iso, standard_report, write_report  # noqa: E402
+from shared.report import now_iso, report_status, standard_report, write_report  # noqa: E402
 
+from shared.safe_files import move_verified_atomic, same_file_contents  # noqa: E402
 
 ROOT = Path(r"C:\InnPilot\workspace\Invoices")
 SCRIPT_DIR = ROOT / "Script"
@@ -35,6 +35,7 @@ EMAIL_SIGNATURE_NAME = "Your Hotel"
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 NO_EMAIL_FOLDER_NAME = "SenzaEmail"
 
+RECEIPT_FILENAME = ".innpilot-draft-receipt.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
 
 RUN_TS = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -230,58 +231,75 @@ def find_recipient_groups() -> list[dict]:
     return groups
 
 
-def create_draft(service, recipient_email: str | None, body_text: str, pdf_files: list[Path]) -> str:
-    message = EmailMessage()
-    if recipient_email:
-        message["To"] = recipient_email
-    message["Cc"] = CC_EMAIL
-    message["Subject"] = SUBJECT
-    message.set_content(body_text)
-
-    for pdf in pdf_files:
-        message.add_attachment(
-            pdf.read_bytes(),
-            maintype="application",
-            subtype="pdf",
-            filename=pdf.name,
-        )
-
-    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-
-    draft = (
-        service.users()
-        .drafts()
-        .create(userId="me", body={"message": {"raw": encoded_message}})
-        .execute()
-    )
-
-    return draft.get("id")
 
 
-def archive_successful_group(group: dict) -> list[str]:
-    archive_group_dir = ARCHIVE_RUN_DIR / "Output_DraftCreati" / group["group_name"]
+def archive_successful_group(
+    group: dict,
+    receipt_path: Path,
+    receipt: dict,
+) -> list[str]:
+    archive_group_dir = Path(receipt["archiveFolder"]).resolve()
+    archive_root = ARCHIVE_DIR.resolve()
+    if archive_group_dir != archive_root and archive_root not in archive_group_dir.parents:
+        raise RuntimeError("Draft archive receipt points outside the configured invoice archive.")
     archive_group_dir.mkdir(parents=True, exist_ok=True)
 
     archived_pdf_files = []
     for pdf in group["pdf_files"]:
-        destination = unique_path(archive_group_dir / pdf.name)
-        shutil.move(str(pdf), str(destination))
+        destination = archive_group_dir / pdf.name
+        if destination.exists() and not same_file_contents(pdf, destination):
+            destination = unique_path(destination)
+        move_verified_atomic(pdf, destination)
         archived_pdf_files.append(str(destination))
 
     body_file = group.get("body_file")
     if body_file and body_file.exists():
-        body_file.unlink()
+        body_destination = archive_group_dir / body_file.name
+        if body_destination.exists() and not same_file_contents(body_file, body_destination):
+            body_destination = unique_path(body_destination)
+        move_verified_atomic(body_file, body_destination)
+
+    receipt_destination = archive_group_dir / RECEIPT_FILENAME
+    if receipt_destination.exists() and not same_file_contents(receipt_path, receipt_destination):
+        receipt_destination = unique_path(receipt_destination)
+    move_verified_atomic(receipt_path, receipt_destination)
 
     try:
         if group["folder"].exists() and not any(group["folder"].iterdir()):
             group["folder"].rmdir()
     except OSError:
         pass
-
     return archived_pdf_files
 
 
-def gmail_report_item(group: dict, *, draft_id: str | None = None, archived_pdf_files: list[str] | None = None) -> dict:
+def recover_completed_receipts() -> int:
+    recovered = 0
+    if not OUTPUT_DIR.exists():
+        return recovered
+    for folder in sorted(OUTPUT_DIR.iterdir(), key=lambda path: path.name.casefold()):
+        receipt_path = folder / RECEIPT_FILENAME
+        if not folder.is_dir() or not receipt_path.is_file() or any(folder.glob("*.pdf")):
+            continue
+        receipt = load_receipt(receipt_path)
+        if receipt is None:
+            continue
+        archive_successful_group(
+            {"folder": folder, "pdf_files": [], "body_file": folder / "email_body.txt"},
+            receipt_path,
+            receipt,
+        )
+        recovered += 1
+    return recovered
+
+
+def gmail_report_item(
+    group: dict,
+    *,
+    receipt: dict | None = None,
+    draft_created: bool = False,
+    recovered_existing: bool = False,
+    archived_pdf_files: list[str] | None = None,
+) -> dict:
     item = {
         "recipientEmail": group["recipient_email"],
         "groupName": group["group_name"],
@@ -289,8 +307,10 @@ def gmail_report_item(group: dict, *, draft_id: str | None = None, archived_pdf_
         "pdfCount": len(group["pdf_files"]),
         "pdfFiles": [pdf.name for pdf in group["pdf_files"]],
     }
-    if draft_id:
-        item["draftId"] = draft_id
+    if receipt:
+        item["idempotencyKey"] = receipt["fingerprint"][:12]
+        item["draftCreated"] = draft_created
+        item["recoveredExistingDraft"] = recovered_existing
     if archived_pdf_files is not None:
         item["archivedPdfFiles"] = archived_pdf_files
     else:
@@ -311,6 +331,10 @@ def main(args: argparse.Namespace | None = None):
     log(f"Output folder: {OUTPUT_DIR}")
 
     groups = find_recipient_groups()
+    if not dry_run:
+        cleaned_receipts = recover_completed_receipts()
+        if cleaned_receipts:
+            log(f"Completed {cleaned_receipts} interrupted draft archive cleanup operation(s).")
     log(f"Draft groups found: {len(groups)}")
 
     for group in groups:
@@ -407,26 +431,54 @@ def main(args: argparse.Namespace | None = None):
 
     service = get_service()
     items = []
+    errors = []
     archived_count = 0
+    created_count = 0
+    recovered_count = 0
 
     for group in groups:
-        draft_id = create_draft(
-            service,
-            group["recipient_email"],
-            group["body_text"],
-            group["pdf_files"],
-        )
-
         recipient_label = group["recipient_email"] or "SenzaEmail (CC only)"
-        log(f"Draft created for {recipient_label}. Draft ID: {draft_id}")
-        archived_pdf_files = archive_successful_group(group)
-        archived_count += len(archived_pdf_files)
-        log(f"Archived {len(archived_pdf_files)} PDF for {recipient_label}.")
+        receipt_path = group["folder"] / RECEIPT_FILENAME
+        archive_folder = ARCHIVE_RUN_DIR / "Output_DraftCreati" / group["group_name"]
+        try:
+            receipt, draft_created, recovered_existing = prepare_draft_once(
+                service,
+                recipient_email=group["recipient_email"],
+                cc_email=CC_EMAIL,
+                subject=SUBJECT,
+                body_text=group["body_text"],
+                pdf_files=group["pdf_files"],
+                receipt_path=receipt_path,
+                archive_folder=archive_folder,
+            )
+            if draft_created:
+                created_count += 1
+                log(f"Draft created safely for {recipient_label}.")
+            else:
+                recovered_count += 1
+                log(f"Existing draft recovered safely for {recipient_label}; no duplicate was created.")
 
-        item = gmail_report_item(group, draft_id=draft_id, archived_pdf_files=archived_pdf_files)
-        item["ccEmail"] = CC_EMAIL
-        item["subject"] = SUBJECT
-        items.append(item)
+            archived_pdf_files = archive_successful_group(group, receipt_path, receipt)
+            archived_count += len(archived_pdf_files)
+            log(f"Archived {len(archived_pdf_files)} verified PDF for {recipient_label}.")
+            item = gmail_report_item(
+                group,
+                receipt=receipt,
+                draft_created=draft_created,
+                recovered_existing=recovered_existing,
+                archived_pdf_files=archived_pdf_files,
+            )
+            item["ccEmail"] = CC_EMAIL
+            item["subject"] = SUBJECT
+            items.append(item)
+        except Exception as error:
+            error_type = type(error).__name__
+            log(f"Draft workflow needs attention for {recipient_label}: {error_type}")
+            errors.append(f"{group['group_name']}: {error_type}")
+            item = gmail_report_item(group)
+            item["status"] = "failed"
+            item["errorType"] = error_type
+            items.append(item)
 
     report = {
         **standard_report(
@@ -434,19 +486,20 @@ def main(args: argparse.Namespace | None = None):
             mode="execute",
             started_at=started_at,
             finished_at=now_iso(),
-            status="success",
+            status=report_status(len(errors), 0),
             summary={
                 "found": len(groups),
-                "processed": len(groups),
+                "processed": len(items),
                 "planned": len(groups),
-                "created": len(items),
+                "created": created_count,
+                "recovered": recovered_count,
                 "moved": archived_count,
-                "failed": 0,
+                "failed": len(errors),
                 "warnings": 0,
             },
             items=items,
             warnings=[],
-            errors=[],
+            errors=errors,
             report_path=REPORT_FILE,
             log_path=LOG_FILE,
         ),
@@ -458,9 +511,11 @@ def main(args: argparse.Namespace | None = None):
     }
     write_report(REPORT_FILE, report)
 
-    log(f"Total drafts created: {len(items)}")
+    log(f"New drafts created: {created_count} | existing drafts recovered: {recovered_count}")
     log(f"Report: {REPORT_FILE}")
     log("=== END ===")
+    if errors:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

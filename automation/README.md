@@ -157,6 +157,14 @@ python automation\gmail_drafts\create_gmail_draft.py --config automation\config.
 
 In dry-run mode the Gmail script does not authenticate, does not call Gmail, does not create drafts, does not move PDFs to archive, does not delete `email_body.txt`, and reports the drafts it would create.
 
+Execute mode creates Gmail drafts only; it never sends messages. Each prepared group gets a
+deterministic RFC `Message-ID` derived from the recipient, body, and attachment hashes. Before
+creating anything, InnPilot searches Gmail for that identifier. An atomic local receipt then
+tracks the returned draft and byte-verified archive destination. After a crash or retry,
+InnPilot recovers the same draft and completes the remaining archive work instead of creating
+a duplicate. If any prepared content changed, the retry fails closed for manual review.
+
+
 Contract processing:
 
 ```powershell

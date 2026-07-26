@@ -47,6 +47,7 @@
     "resources": {
       "../automation/invoices/process_fatture.py": "automation/invoices/process_fatture.py",
       "../automation/gmail_drafts/create_gmail_draft.py": "automation/gmail_drafts/create_gmail_draft.py",
+      "../automation/gmail_drafts/draft_safety.py": "automation/gmail_drafts/draft_safety.py",
       "../automation/scans/copy_scans.py": "automation/scans/copy_scans.py",
       "../automation/ocr/extract_scan_text.py": "automation/ocr/extract_scan_text.py",
       "../automation/contracts/process_contratti.py": "automation/contracts/process_contratti.py",
