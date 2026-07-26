@@ -9,7 +9,9 @@ mod paths;
 mod preflight;
 mod redaction;
 mod runner_identity;
+mod runner_ledger;
 mod runner_protocol;
+mod runner_service;
 mod setup;
 mod templates;
 mod workflows;
@@ -31,6 +33,7 @@ pub fn run() {
         })
         .setup(|app| {
             config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
+            runner_service::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -228,6 +231,9 @@ async fn run_command(
     confirmed: Option<bool>,
 ) -> Result<workflows::RunSummary, String> {
     workflows::ensure_confirmation(&command_name, confirmed.unwrap_or(false))?;
+
+    let _workflow_lock = runner_ledger::ProcessLock::try_acquire(&app, "workflow")?
+        .ok_or_else(|| "Another InnPilot automation is already running.".to_string())?;
 
     {
         let mut running = state

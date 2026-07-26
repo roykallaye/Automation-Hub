@@ -23,8 +23,8 @@ struct CommandEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StepResult {
-    name: String,
-    exit_code: i32,
+    pub(crate) name: String,
+    pub(crate) exit_code: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,10 +66,24 @@ pub(crate) async fn run_command_inner(
     app: &AppHandle,
     command_name: &str,
 ) -> Result<RunSummary, String> {
+    run_command_inner_controlled(app, command_name, None, || false).await
+}
+
+pub(crate) async fn run_command_inner_controlled<F>(
+    app: &AppHandle,
+    command_name: &str,
+    dry_run_override: Option<bool>,
+    should_cancel: F,
+) -> Result<RunSummary, String>
+where
+    F: Fn() -> bool,
+{
     let config = config::ensure_config(app)?;
     preflight::ensure_workflow_can_run(command_name, &config)?;
     let reports_dir = activity::activity_reports_dir(app)?;
-    let (automation_name, steps) = command_steps(command_name, &config, Some(&reports_dir))?;
+    let dry_run = dry_run_override.unwrap_or(config.safety.dry_run_default);
+    let (automation_name, steps) =
+        command_steps(command_name, &config, Some(&reports_dir), dry_run)?;
     let start = Local::now();
     let timer = Instant::now();
     let mut output_tail = VecDeque::with_capacity(100);
@@ -100,7 +114,7 @@ pub(crate) async fn run_command_inner(
         });
     }
 
-    if config.safety.dry_run_default {
+    if dry_run {
         emit_line(
             app,
             command_name,
@@ -110,6 +124,9 @@ pub(crate) async fn run_command_inner(
     }
 
     for step in steps {
+        if should_cancel() {
+            return Err("RUNNER_CANCELLED".to_string());
+        }
         emit_line(
             app,
             command_name,
@@ -193,6 +210,7 @@ fn command_steps(
     command_name: &str,
     config: &config::HubConfig,
     reports_dir: Option<&Path>,
+    dry_run: bool,
 ) -> Result<(&'static str, Vec<CommandStep>), String> {
     let scripts = &config.scripts;
     let cmd_success = vec![0];
@@ -223,14 +241,14 @@ fn command_steps(
     let invoice = build_step(
         "Process invoice PDFs",
         &scripts.invoice_workflow_script,
-        config.safety.dry_run_default,
+        dry_run,
         false,
         cmd_success.clone(),
     );
     let gmail = build_step(
         "Create Gmail drafts",
         &scripts.gmail_draft_script,
-        config.safety.dry_run_default,
+        dry_run,
         false,
         cmd_success.clone(),
     );
@@ -242,14 +260,14 @@ fn command_steps(
     let copy_scansioni = build_step(
         "Copy scansioni cache",
         &scripts.copy_scansioni_script,
-        config.safety.dry_run_default,
+        dry_run,
         false,
         copy_success,
     );
     let ocr = build_step(
         "Run OCR preprocessing",
         &scripts.ocr_preprocessing_script,
-        config.safety.dry_run_default,
+        dry_run,
         false,
         cmd_success.clone(),
     );
@@ -257,7 +275,7 @@ fn command_steps(
         "Process signed contracts",
         &scripts.contract_processing_script,
         false,
-        !config.safety.dry_run_default,
+        !dry_run,
         cmd_success.clone(),
     );
 
@@ -591,8 +609,13 @@ mod tests {
         let config = config_with_fake_workspace(&root);
         let reports_dir = root.join("app-data").join("activity").join("reports");
 
-        let (_title, steps) =
-            command_steps("process_invoices_and_drafts", &config, Some(&reports_dir)).unwrap();
+        let (_title, steps) = command_steps(
+            "process_invoices_and_drafts",
+            &config,
+            Some(&reports_dir),
+            config.safety.dry_run_default,
+        )
+        .unwrap();
 
         assert_eq!(steps.len(), 2);
         for step in steps {
@@ -617,8 +640,13 @@ mod tests {
         config.invoice_delivery_mode = config::InvoiceDeliveryMode::PrepareOnly;
         let reports_dir = root.join("app-data").join("activity").join("reports");
 
-        let (title, steps) =
-            command_steps("process_invoices_and_drafts", &config, Some(&reports_dir)).unwrap();
+        let (title, steps) = command_steps(
+            "process_invoices_and_drafts",
+            &config,
+            Some(&reports_dir),
+            config.safety.dry_run_default,
+        )
+        .unwrap();
 
         assert_eq!(title, "Prepare Invoice Files");
         assert_eq!(steps.len(), 1);
@@ -639,8 +667,13 @@ mod tests {
         fs::write(&config.scripts.contract_processing_script, b"echo fake").unwrap();
         let reports_dir = root.join("app-data").join("activity").join("reports");
 
-        let (_title, steps) =
-            command_steps("process_signed_contracts", &config, Some(&reports_dir)).unwrap();
+        let (_title, steps) = command_steps(
+            "process_signed_contracts",
+            &config,
+            Some(&reports_dir),
+            config.safety.dry_run_default,
+        )
+        .unwrap();
         let contract_step = steps
             .iter()
             .find(|step| step.name == "Process signed contracts")
@@ -656,8 +689,13 @@ mod tests {
         let config = config_with_fake_workspace(&root);
         let reports_dir = root.join("app-data").join("activity").join("reports");
 
-        let (_title, steps) =
-            command_steps("process_signed_contracts", &config, Some(&reports_dir)).unwrap();
+        let (_title, steps) = command_steps(
+            "process_signed_contracts",
+            &config,
+            Some(&reports_dir),
+            config.safety.dry_run_default,
+        )
+        .unwrap();
         let contract_step = steps
             .iter()
             .find(|step| step.name == "Process signed contracts")

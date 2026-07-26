@@ -122,7 +122,7 @@ fn protect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
         Security::Cryptography::{CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB},
     };
 
-    let mut input = CRYPT_INTEGER_BLOB {
+    let input = CRYPT_INTEGER_BLOB {
         cbData: value.len() as u32,
         pbData: value.as_ptr() as *mut u8,
     };
@@ -132,7 +132,7 @@ fn protect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
     };
     let result = unsafe {
         CryptProtectData(
-            &mut input,
+            &input,
             ptr::null(),
             ptr::null(),
             ptr::null_mut(),
@@ -166,7 +166,7 @@ fn unprotect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
         },
     };
 
-    let mut input = CRYPT_INTEGER_BLOB {
+    let input = CRYPT_INTEGER_BLOB {
         cbData: value.len() as u32,
         pbData: value.as_ptr() as *mut u8,
     };
@@ -176,7 +176,7 @@ fn unprotect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
     };
     let result = unsafe {
         CryptUnprotectData(
-            &mut input,
+            &input,
             ptr::null_mut(),
             ptr::null(),
             ptr::null_mut(),

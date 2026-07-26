@@ -52,6 +52,37 @@ pub(crate) struct RunnerSyncResult {
     job_available: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunnerJobUpdate {
+    pub(crate) error_code: Option<String>,
+    pub(crate) failure_count: u32,
+    pub(crate) input_count: u32,
+    pub(crate) job_id: String,
+    pub(crate) status: String,
+    pub(crate) success_count: u32,
+    pub(crate) summary_code: Option<String>,
+    pub(crate) warning_count: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CloudJob {
+    pub(crate) id: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) workflow: String,
+    pub(crate) mode: String,
+    pub(crate) status: String,
+    pub(crate) lease_expires_at: String,
+    pub(crate) cancel_requested: bool,
+}
+
+pub(crate) struct RunnerSyncExchange {
+    pub(crate) server_time: String,
+    pub(crate) next_sync_seconds: u32,
+    pub(crate) job: Option<CloudJob>,
+}
+
 #[derive(Debug)]
 struct PairingCode {
     installation_key: String,
@@ -70,9 +101,9 @@ struct EnrollmentRequest<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncRequest {
-    capabilities: Vec<&'static str>,
-    job_update: Option<serde_json::Value>,
+struct SyncRequest<'a> {
+    capabilities: &'a [&'static str],
+    job_update: Option<&'a RunnerJobUpdate>,
     protocol_version: u8,
     runner_version: &'static str,
     scansioni_path_kind: &'static str,
@@ -104,7 +135,7 @@ struct EnrollmentResponse {
 struct SyncPayload {
     server_time: String,
     next_sync_seconds: u32,
-    job: Option<serde_json::Value>,
+    job: Option<CloudJob>,
 }
 
 #[derive(Deserialize)]
@@ -146,8 +177,6 @@ pub(crate) async fn pair(
         paired_at: None,
         last_sync_at: None,
     };
-    save_connection(app, &connection)?;
-
     let body = EnrollmentRequest {
         installation_key: &code.installation_key,
         key_fingerprint: &fingerprint,
@@ -185,6 +214,22 @@ pub(crate) async fn pair(
 }
 
 pub(crate) async fn sync(app: &AppHandle) -> Result<RunnerSyncResult, String> {
+    let exchange = sync_exchange(app, &[], None).await?;
+    let connection = connection_status(app)?;
+    Ok(RunnerSyncResult {
+        connection,
+        server_time: exchange.server_time,
+        next_sync_seconds: exchange.next_sync_seconds,
+        job_available: exchange.job.is_some(),
+    })
+}
+
+pub(crate) async fn sync_exchange(
+    app: &AppHandle,
+    capabilities: &[&'static str],
+    job_update: Option<&RunnerJobUpdate>,
+) -> Result<RunnerSyncExchange, String> {
+    validate_sync_input(capabilities, job_update)?;
     let mut connection = load_connection(app)?
         .filter(|item| item.paired_at.is_some())
         .ok_or_else(|| "Connect this PC to LifeDesk before synchronizing.".to_string())?;
@@ -199,9 +244,8 @@ pub(crate) async fn sync(app: &AppHandle) -> Result<RunnerSyncResult, String> {
     let (scansioni_status, scansioni_path_kind) =
         scansioni_health(&config.folders.scansioni_network_share);
     let body = SyncRequest {
-        // Job leasing remains closed until the durable local executor is enabled.
-        capabilities: Vec::new(),
-        job_update: None,
+        capabilities,
+        job_update,
         protocol_version: PROTOCOL_VERSION,
         runner_version: env!("CARGO_PKG_VERSION"),
         scansioni_path_kind,
@@ -246,14 +290,87 @@ pub(crate) async fn sync(app: &AppHandle) -> Result<RunnerSyncResult, String> {
     if payload.code != "SYNCED" || !(5..=300).contains(&payload.sync.next_sync_seconds) {
         return Err("LifeDesk returned an invalid synchronization response.".to_string());
     }
+    if let Some(job) = payload.sync.job.as_ref() {
+        validate_cloud_job(job, capabilities)?;
+    }
     connection.last_sync_at = Some(payload.sync.server_time.clone());
     save_connection(app, &connection)?;
 
-    Ok(RunnerSyncResult {
-        connection: status_from_connection(&connection),
+    Ok(RunnerSyncExchange {
         server_time: payload.sync.server_time,
         next_sync_seconds: payload.sync.next_sync_seconds,
-        job_available: payload.sync.job.is_some(),
+        job: payload.sync.job,
+    })
+}
+
+fn validate_sync_input(
+    capabilities: &[&str],
+    update: Option<&RunnerJobUpdate>,
+) -> Result<(), String> {
+    let allowed = [
+        "invoices",
+        "gmail_drafts",
+        "scan_import",
+        "signed_contracts",
+    ];
+    if capabilities.len() > allowed.len()
+        || capabilities.iter().any(|value| !allowed.contains(value))
+        || capabilities
+            .iter()
+            .enumerate()
+            .any(|(index, value)| capabilities[..index].contains(value))
+    {
+        return Err("The local runner capabilities are invalid.".to_string());
+    }
+    if let Some(update) = update {
+        if !is_uuid(&update.job_id)
+            || !matches!(
+                update.status.as_str(),
+                "running" | "succeeded" | "attention" | "failed" | "cancelled"
+            )
+            || [
+                update.input_count,
+                update.success_count,
+                update.warning_count,
+                update.failure_count,
+            ]
+            .into_iter()
+            .any(|count| count > 1_000_000)
+            || !valid_code(update.error_code.as_deref(), true)
+            || !valid_code(update.summary_code.as_deref(), false)
+        {
+            return Err("The local runner job update is invalid.".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_cloud_job(job: &CloudJob, capabilities: &[&str]) -> Result<(), String> {
+    if !is_uuid(&job.id)
+        || !is_uuid(&job.idempotency_key)
+        || !capabilities.contains(&job.workflow.as_str())
+        || !matches!(job.mode.as_str(), "dry_run" | "execute")
+        || !matches!(job.status.as_str(), "leased" | "running")
+        || chrono::DateTime::parse_from_rfc3339(&job.lease_expires_at).is_err()
+    {
+        return Err("LifeDesk returned an invalid leased job.".to_string());
+    }
+    Ok(())
+}
+
+fn valid_code(value: Option<&str>, uppercase: bool) -> bool {
+    value.is_none_or(|value| {
+        !value.is_empty()
+            && value.len() <= 80
+            && value.chars().all(|character| {
+                character.is_ascii_digit()
+                    || character == '_'
+                    || if uppercase {
+                        character.is_ascii_uppercase()
+                    } else {
+                        character.is_ascii_lowercase()
+                    }
+            })
     })
 }
 
