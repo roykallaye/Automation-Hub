@@ -6,7 +6,7 @@ import {
   automationActions,
 } from "./actions";
 import { applyBrandingToDocument } from "./branding";
-import { AppShell } from "./components/AppShell";
+import { OperatorShell } from "./components/OperatorShell";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { createTranslator, I18nProvider } from "./i18n";
 import { staffMessage } from "./messages";
@@ -14,8 +14,8 @@ import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { deriveNextAction } from "./nextAction";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AssistantPage } from "./routes/AssistantPage";
-import { AutomationsPage } from "./routes/AutomationsPage";
-import { HomePage } from "./routes/HomePage";
+import { OperatorAutomationsPage } from "./routes/OperatorAutomationsPage";
+import { OperatorHomePage } from "./routes/OperatorHomePage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { SetupPage } from "./routes/SetupPage";
 import { SupportPage } from "./routes/SupportPage";
@@ -254,17 +254,16 @@ function App() {
 
   return (
     <I18nProvider language={configStatus?.config.language}>
-      <AppShell
+      <OperatorShell
         currentPage={currentPage}
         displayName={displayName}
         logoDataUrl={logoDataUrl}
         status={runningCommand ? "warning" : status}
         statusLabel={runningLabel ?? (notice || t("app.loadingSetup"))}
-        nextAction={nextAction}
         onPageChange={setCurrentPage}
       >
       {currentPage === "home" && (
-        <HomePage
+        <OperatorHomePage
           configStatus={configStatus}
           modules={modules}
           loading={loadingConfig}
@@ -276,7 +275,7 @@ function App() {
       )}
 
       {currentPage === "automations" && (
-        <AutomationsPage
+        <OperatorAutomationsPage
           configStatus={configStatus}
           modules={modules}
           activityHistory={activityHistory}
@@ -346,7 +345,7 @@ function App() {
           onConfirm={() => runAction(pendingAction, true)}
         />
       )}
-      </AppShell>
+      </OperatorShell>
     </I18nProvider>
   );
 }
