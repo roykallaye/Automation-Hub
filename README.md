@@ -84,6 +84,32 @@ The release pipeline:
 
 Development can still run the source scripts with an external Python. That compatibility path is not required on hotel PCs.
 
+### Real LifeDesk product gate
+
+Release engineering can compile a test-only InnPilot client that exercises the
+deployed LifeDesk queue without touching production InnPilot app data:
+
+```powershell
+cargo build --manifest-path src-tauri/Cargo.toml --features cloud-e2e-probe --bin innpilot-cloud-probe
+```
+
+The companion LifeDesk cloud acceptance script receives the absolute debug
+probe path through `INNPILOT_E2E_PROBE_EXE` and the built worker path through
+`INNPILOT_E2E_WORKER`. It creates an isolated temporary hotel and identities,
+passes only a single-use pairing code to the child process, waits for the real
+Rust runner heartbeat, queues a synthetic scan-copy dry-run, verifies signed
+terminal evidence and audit events, and then deletes and verifies the fixture.
+
+The probe uses Tauri identifier `com.innpilot.cloud-e2e-probe`, a separate
+DPAPI-protected device identity, synthetic folders under that probe's app-data
+directory, and a feature-gated binary that is absent from normal builds. The
+service-role and publishable Supabase credentials are deliberately removed from
+the child environment. The local synthetic workspace is canonicalized and
+verified before its test-only cleanup.
+
+This gate does not authorize live execution and never reads a hotel document,
+folder, Gmail token, or production InnPilot configuration.
+
 Print local Windows toolchain diagnostics:
 
 ```powershell

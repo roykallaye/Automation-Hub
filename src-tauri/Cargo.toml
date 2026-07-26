@@ -12,6 +12,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+cloud-e2e-probe = []
+
+[[bin]]
+name = "innpilot-cloud-probe"
+path = "src/bin/innpilot-cloud-probe.rs"
+required-features = ["cloud-e2e-probe"]
+
 [dependencies]
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["zeroize"] }
@@ -24,7 +32,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tauri = { version = "2", features = [] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["rt", "time"] }
 zeroize = "1"
 tauri-plugin-dialog = "2"
 

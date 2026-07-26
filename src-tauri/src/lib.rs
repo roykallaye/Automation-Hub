@@ -1,6 +1,10 @@
 mod activity;
 mod automation_install;
 mod branding;
+#[cfg(feature = "cloud-e2e-probe")]
+mod cloud_probe;
+#[cfg(feature = "cloud-e2e-probe")]
+pub use cloud_probe::run_cloud_e2e_probe;
 mod config;
 mod discovery;
 mod folder_discovery;

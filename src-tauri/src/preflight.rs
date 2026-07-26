@@ -11,6 +11,7 @@ use std::{
 };
 
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+const PACKAGED_WORKER_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const DPAPI_SECRET_MAGIC: &[u8] = b"INNPILOT-DPAPI-SECRET-V1\n";
 
 #[derive(Debug, Clone, Serialize)]
@@ -734,6 +735,14 @@ fn is_innpilot_worker(executable: &str) -> bool {
     crate::worker_runtime::is_innpilot_worker(executable)
 }
 
+fn automation_engine_check_timeout(executable: &str) -> Duration {
+    if is_innpilot_worker(executable) {
+        PACKAGED_WORKER_CHECK_TIMEOUT
+    } else {
+        PYTHON_CHECK_TIMEOUT
+    }
+}
+
 fn python_check(python_executable: &str) -> PreflightItem {
     let bundled_worker = is_innpilot_worker(python_executable);
 
@@ -767,8 +776,11 @@ fn python_check(python_executable: &str) -> PreflightItem {
         };
     }
 
-    let status =
-        command_output_with_timeout(python_executable, &["--version"], PYTHON_CHECK_TIMEOUT);
+    let status = command_output_with_timeout(
+        python_executable,
+        &["--version"],
+        automation_engine_check_timeout(python_executable),
+    );
 
     match status {
         Ok(output) if output.status.success() => {
@@ -907,9 +919,17 @@ fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
         "import importlib.util, sys; required=[{required_modules}]; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)"
     );
     let output = if is_innpilot_worker(python_executable) {
-        command_output_with_timeout(python_executable, &["--health-check"], PYTHON_CHECK_TIMEOUT)
+        command_output_with_timeout(
+            python_executable,
+            &["--health-check"],
+            automation_engine_check_timeout(python_executable),
+        )
     } else {
-        command_output_with_timeout(python_executable, &["-c", &script], PYTHON_CHECK_TIMEOUT)
+        command_output_with_timeout(
+            python_executable,
+            &["-c", &script],
+            automation_engine_check_timeout(python_executable),
+        )
     };
 
     match output {
@@ -1981,6 +2001,26 @@ pub(crate) fn ensure_workflow_can_run(
     }
 }
 
+#[cfg(feature = "cloud-e2e-probe")]
+pub(crate) fn workflow_blocker_key(command_name: &str, config: &HubConfig) -> Option<String> {
+    let report = build_preflight_report(config);
+    let workflow = report
+        .workflows
+        .iter()
+        .find(|workflow| workflow.command_name.as_deref() == Some(command_name))?;
+    if workflow.can_run {
+        return None;
+    }
+    workflow.check_keys.iter().find_map(|key| {
+        report
+            .items
+            .iter()
+            .find(|item| item.key == *key)
+            .filter(|item| is_blocking_status(&item.status, item.item_type.as_str()))
+            .map(|item| item.key.clone())
+    })
+}
+
 pub(crate) fn can_write_to_folder(path: &Path) -> bool {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2003,6 +2043,18 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn packaged_worker_has_a_cold_start_allowance() {
+        assert_eq!(
+            automation_engine_check_timeout(r"C:\InnPilot\worker\innpilot-worker.exe"),
+            PACKAGED_WORKER_CHECK_TIMEOUT
+        );
+        assert_eq!(
+            automation_engine_check_timeout("python"),
+            PYTHON_CHECK_TIMEOUT
+        );
+    }
 
     #[test]
     fn missing_script_is_detected() {

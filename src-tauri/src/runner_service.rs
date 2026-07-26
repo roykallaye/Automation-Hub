@@ -69,7 +69,7 @@ async fn run_cycle(app: &AppHandle) -> Result<u32, String> {
     Ok(next_sync)
 }
 
-async fn process_job(app: &AppHandle, job: CloudJob) -> Result<(), String> {
+pub(crate) async fn process_job(app: &AppHandle, job: CloudJob) -> Result<(), String> {
     let leased = LeasedJob {
         job_id: job.id.clone(),
         idempotency_key: job.idempotency_key.clone(),
