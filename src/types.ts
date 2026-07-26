@@ -320,3 +320,25 @@ export type DiscoveryRequest = {
   createdAt: string;
   dataLocation: "local_app_data";
 };
+
+export type RecoveryPoint = {
+  id: string;
+  createdAt: string;
+  appVersion: string;
+  integrity: "ready" | "damaged";
+  includesAppConfig: boolean;
+  includesAutomationConfig: boolean;
+  includesRunnerLedger: boolean;
+};
+
+export type RecoveryStatus = {
+  points: RecoveryPoint[];
+  retentionLimit: number;
+  excludedData: string[];
+};
+
+export type RecoveryActionResult = {
+  point: RecoveryPoint;
+  preRestorePointId?: string | null;
+  restoredConfiguration: boolean;
+};

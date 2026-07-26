@@ -11,6 +11,7 @@ mod folder_discovery;
 mod logs;
 mod paths;
 mod preflight;
+mod recovery;
 mod redaction;
 mod runner_identity;
 mod runner_ledger;
@@ -66,7 +67,10 @@ pub fn run() {
             get_discovery_requests,
             get_lifedesk_connection,
             pair_with_lifedesk,
-            sync_with_lifedesk
+            sync_with_lifedesk,
+            get_recovery_status,
+            create_recovery_point,
+            restore_recovery_configuration
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -90,6 +94,25 @@ async fn pair_with_lifedesk(
 #[tauri::command]
 async fn sync_with_lifedesk(app: AppHandle) -> Result<runner_protocol::RunnerSyncResult, String> {
     runner_protocol::sync(&app).await
+}
+
+#[tauri::command]
+fn get_recovery_status(app: AppHandle) -> Result<recovery::RecoveryStatus, String> {
+    recovery::status(&app)
+}
+
+#[tauri::command]
+fn create_recovery_point(app: AppHandle) -> Result<recovery::RecoveryActionResult, String> {
+    recovery::create(&app)
+}
+
+#[tauri::command]
+fn restore_recovery_configuration(
+    app: AppHandle,
+    point_id: String,
+    confirmed: Option<bool>,
+) -> Result<recovery::RecoveryActionResult, String> {
+    recovery::restore_configuration(&app, &point_id, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]

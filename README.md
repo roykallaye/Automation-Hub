@@ -130,6 +130,16 @@ The NSIS installer is created under:
 src-tauri\target\release\bundle\nsis
 ```
 
+The same command writes a SHA-256 release manifest under
+build\release. The release manifest is deliberately marked for controlled
+internal evaluation. Commercial distribution is blocked until the PDF/OCR
+licensing decision and Windows code signing are formally completed.
+
+Operational recovery, first-hotel rollout, failure playbooks, and the complete
+release checklist are documented in
+[docs/OPERATIONS_AND_RECOVERY.md](docs/OPERATIONS_AND_RECOVERY.md).
+
+
 ### Windows MSVC Linker Setup
 
 Rust tests and Tauri builds on Windows use the MSVC linker. If `npm run test:rust` fails with:

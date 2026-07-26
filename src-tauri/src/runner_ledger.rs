@@ -1,5 +1,5 @@
 use fs2::FileExt;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior, MAIN_DB};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
@@ -321,6 +321,29 @@ impl Drop for ProcessLock {
         let _ = self.file.unlock();
     }
 }
+pub(crate) fn backup_database(app: &AppHandle, destination: &Path) -> Result<(), String> {
+    let ledger = RunnerLedger::open(app)?;
+    backup_connection(&ledger.connection, destination)
+}
+
+fn backup_connection(source: &Connection, destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        return Err("The runner ledger backup target already exists.".to_string());
+    }
+    source
+        .backup(MAIN_DB, destination, None)
+        .map_err(|error| format!("Could not create an online runner ledger backup: {error}"))?;
+    let verification = Connection::open(destination)
+        .map_err(|error| format!("Could not verify the runner ledger backup: {error}"))?;
+    let integrity: String = verification
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|error| format!("Could not check the runner ledger backup: {error}"))?;
+    if integrity != "ok" {
+        let _ = fs::remove_file(destination);
+        return Err("The runner ledger backup failed its integrity check.".to_string());
+    }
+    Ok(())
+}
 
 fn runner_directory(app: &AppHandle) -> Result<PathBuf, String> {
     let directory = app
@@ -488,6 +511,25 @@ mod tests {
         let mut job = fake_job();
         job.mode = "execute".to_string();
         assert_eq!(ledger.record_lease(&job).unwrap(), "leased");
+        drop(ledger);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn online_backup_is_consistent_and_never_overwrites_an_existing_target() {
+        let (mut ledger, root) = ledger();
+        ledger.record_lease(&fake_job()).unwrap();
+        let backup = root.join("backup.db");
+
+        backup_connection(&ledger.connection, &backup).unwrap();
+        let copy = Connection::open(&backup).unwrap();
+        let count: i64 = copy
+            .query_row("SELECT COUNT(*) FROM runner_jobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(backup_connection(&ledger.connection, &backup).is_err());
+
+        drop(copy);
         drop(ledger);
         fs::remove_dir_all(root).unwrap();
     }

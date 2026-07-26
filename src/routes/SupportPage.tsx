@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   Clipboard,
   Cpu,
@@ -5,9 +6,11 @@ import {
   FolderOpen,
   HeartPulse,
   PackageCheck,
+  RotateCcw,
+  Save,
   ShieldCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { DeveloperDetails } from "../components/DeveloperDetails";
 import { InfoHint } from "../components/InfoHint";
@@ -21,6 +24,8 @@ import type {
   LatestLog,
   ManagedAutomationInstallResult,
   PreflightItem,
+  RecoveryActionResult,
+  RecoveryStatus,
   RunSummary,
 } from "../types";
 
@@ -52,6 +57,24 @@ export function SupportPage({
   const [installError, setInstallError] = useState<string | null>(null);
   const [copiedPythonCommand, setCopiedPythonCommand] = useState(false);
   const [copiedSupportBundle, setCopiedSupportBundle] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState<"create" | "restore" | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    invoke<RecoveryStatus>("get_recovery_status")
+      .then((status) => {
+        if (active) setRecoveryStatus(status);
+      })
+      .catch((error) => {
+        if (active) setRecoveryError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const config = configStatus?.config;
   const items = configStatus?.preflight.items ?? [];
@@ -113,22 +136,78 @@ export function SupportPage({
       ]
     : [];
 
+  const latestRecovery =
+    recoveryStatus?.points.find((point) => point.integrity === "ready") ??
+    recoveryStatus?.points[0] ?? null;
+
+  async function refreshRecoveryStatus() {
+    const status = await invoke<RecoveryStatus>("get_recovery_status");
+    setRecoveryStatus(status);
+    return status;
+  }
+
+  async function createRecoveryPoint() {
+    setRecoveryBusy("create");
+    setRecoveryError("");
+    setRecoveryNotice("");
+    try {
+      const result = await invoke<RecoveryActionResult>("create_recovery_point");
+      await refreshRecoveryStatus();
+      setRecoveryNotice(
+        t("support.recoveryCreated", {
+          date: formatRecoveryDate(result.point.createdAt, config?.language),
+        }),
+      );
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecoveryBusy(null);
+    }
+  }
+
+  async function restoreRecoveryPoint(pointId: string) {
+    const confirmed = window.confirm(t("support.recoveryRestoreConfirm"));
+    if (!confirmed) return;
+    setRecoveryBusy("restore");
+    setRecoveryError("");
+    setRecoveryNotice("");
+    try {
+      await invoke<RecoveryActionResult>("restore_recovery_configuration", {
+        pointId,
+        confirmed: true,
+      });
+      await onRefresh();
+      await refreshRecoveryStatus();
+      setRecoveryNotice(t("support.recoveryRestored"));
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecoveryBusy(null);
+    }
+  }
+
   async function copySupportBundle() {
     if (!configStatus) return;
     const bundle = {
-      configPath: configStatus.configPath,
+      schema: "innpilot-support-v1",
       checkedAt: configStatus.preflight.checkedAt,
+      app: {
+        configSchemaVersion: configStatus.config.schemaVersion,
+        language: configStatus.config.language,
+        invoiceDeliveryMode: configStatus.config.invoiceDeliveryMode,
+        safeMode: configStatus.config.safety.dryRunDefault,
+      },
       items: configStatus.preflight.items.map((item) => ({
         key: item.key,
         status: item.status,
-        message: item.message,
       })),
       workflows: configStatus.preflight.workflows.map((workflow) => ({
         key: workflow.key,
         status: workflow.status,
         canRun: workflow.canRun,
-        message: workflow.message,
       })),
+      privacy:
+        "No local path, document, filename, email address, OAuth data, raw log, or device key.",
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
@@ -378,6 +457,111 @@ export function SupportPage({
         </section>
       </div>
 
+      <section className="overflow-hidden rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/90 via-white/70 to-sky-50/80 shadow-glass backdrop-blur-xl">
+        <div className="grid gap-5 p-5 lg:grid-cols-[1.2fr_0.8fr]">
+          <div>
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white/80 text-emerald-800 ring-1 ring-emerald-100">
+                <Save className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
+                  {t("support.recoveryEyebrow")}
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">
+                  {t("support.recoveryTitle")}
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-700">
+                  {t("support.recoveryText", { count: recoveryStatus?.retentionLimit ?? 10 })}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-emerald-800 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-55"
+                disabled={recoveryBusy !== null}
+                onClick={() => void createRecoveryPoint()}
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {recoveryBusy === "create"
+                  ? t("support.recoveryCreating")
+                  : t("support.recoveryCreate")}
+              </button>
+              <button
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-white/80 bg-white/75 px-4 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={
+                  recoveryBusy !== null ||
+                  !latestRecovery ||
+                  latestRecovery.integrity !== "ready"
+                }
+                onClick={() =>
+                  latestRecovery && void restoreRecoveryPoint(latestRecovery.id)
+                }
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                {recoveryBusy === "restore"
+                  ? t("support.recoveryRestoring")
+                  : t("support.recoveryRestore")}
+              </button>
+            </div>
+            {recoveryNotice && (
+              <p className="mt-3 rounded-md bg-emerald-100/70 px-3 py-2 text-sm font-semibold text-emerald-900">
+                {recoveryNotice}
+              </p>
+            )}
+            {recoveryError && (
+              <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">
+                {recoveryError}
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white/65 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-950">
+                {t("support.recoveryLatest")}
+              </p>
+              <StatusHint
+                tone={
+                  latestRecovery
+                    ? latestRecovery.integrity === "ready"
+                      ? "ready"
+                      : "attention"
+                    : "neutral"
+                }
+                label={
+                  latestRecovery
+                    ? latestRecovery.integrity === "ready"
+                      ? t("support.recoveryVerified")
+                      : t("support.recoveryDamaged")
+                    : t("support.recoveryNone")
+                }
+              />
+            </div>
+            <p className="mt-3 text-sm font-medium text-slate-700">
+              {latestRecovery
+                ? formatRecoveryDate(latestRecovery.createdAt, config?.language)
+                : t("support.recoveryFirst")}
+            </p>
+            {latestRecovery && (
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                InnPilot {latestRecovery.appVersion} ? {recoveryStatus?.points.length ?? 0}/
+                {recoveryStatus?.retentionLimit ?? 10}
+              </p>
+            )}
+            <div className="mt-4 rounded-md bg-emerald-50/75 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+                {t("support.recoveryPrivacy")}
+              </p>
+              <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
+                {t("support.recoveryPrivacyText")}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">
           {t("support.technicalDetails")}
@@ -525,4 +709,13 @@ function buildPythonInstallCommand(config: AppConfigStatus["config"]) {
 function joinWindowsPath(root: string, child: string) {
   const cleanRoot = root.trim().replace(/[\\/]$/, "");
   return cleanRoot ? `${cleanRoot}\\${child}` : child;
+}
+
+function formatRecoveryDate(value: string, language?: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "?";
+  return date.toLocaleString(language === "it" ? "it-IT" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
