@@ -31,12 +31,23 @@ const commit = execFileSync("git", ["-c", `safe.directory=${gitSafeRoot}`, "rev-
   cwd: root,
   encoding: "utf8",
 }).trim();
-const dirty = execFileSync(
+// Compare tracked content rather than Git's timestamp cache. Tauri may rewrite a
+// manifest with byte-identical content during bundling, which can briefly make
+// porcelain status report a false modification on Windows.
+const trackedChanges = execFileSync(
   "git",
-  ["-c", `safe.directory=${gitSafeRoot}`, "status", "--porcelain", "--untracked-files=no"],
+  [
+    "-c",
+    `safe.directory=${gitSafeRoot}`,
+    "diff",
+    "--name-only",
+    "--no-ext-diff",
+    "HEAD",
+    "--",
+  ],
   { cwd: root, encoding: "utf8" },
 ).trim();
-if (dirty && process.env.INNPILOT_ALLOW_DIRTY_RELEASE !== "yes") {
+if (trackedChanges && process.env.INNPILOT_ALLOW_DIRTY_RELEASE !== "yes") {
   throw new Error("Release manifests require a clean tracked source tree.");
 }
 
@@ -83,7 +94,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   version: packageJson.version,
   commit,
-  sourceTreeClean: !dirty,
+  sourceTreeClean: !trackedChanges,
   distribution: {
     mode: distributionMode,
     commercialDistributionApproved: false,
