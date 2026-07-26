@@ -1,4 +1,4 @@
-﻿import { Bot, Send } from "lucide-react";
+import { Bot, Send } from "lucide-react";
 
 import {
   contractAction,
@@ -29,7 +29,7 @@ import type {
 
 /*
   Automations is a workflow gallery: each hotel task is one card with a
-  consistent shape â€” what it does, whether it is ready, what happened last,
+  consistent shape — what it does, whether it is ready, what happened last,
   one button, and a plain safety statement. The pre-run "what will happen"
   panel opens before anything starts (ConfirmationModal).
 */

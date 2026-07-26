@@ -1,11 +1,16 @@
-﻿import {
+import {
   Activity,
+  CheckCircle2,
+  Circle,
   ClipboardCheck,
+  Gauge,
   LifeBuoy,
+  Map,
   PlayCircle,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trophy,
   Wand2,
 } from "lucide-react";
 
@@ -17,13 +22,14 @@ import { deliveryModeLabel } from "../messages";
 import type {
   AppConfigStatus,
   AppPage,
+  ActivityRecord,
   ModuleReadiness,
   RunSummary,
 } from "../types";
 import type { NextAction } from "../nextAction";
 
 /*
-  Home is a calm, guided entry point â€” not a dashboard.
+  Home is a calm, guided entry point — not a dashboard.
 
   One hero with the single next action, then large destination cards.
   Nothing runs from Home; the user is guided to the right place instead.
@@ -33,6 +39,7 @@ export function HomePage({
   modules,
   loading,
   lastSummary,
+  activityHistory,
   nextAction,
   onNavigate,
 }: {
@@ -40,6 +47,7 @@ export function HomePage({
   modules: ModuleReadiness[];
   loading: boolean;
   lastSummary: RunSummary | null;
+  activityHistory: ActivityRecord[];
   nextAction: NextAction;
   onNavigate: (page: AppPage) => void;
 }) {
@@ -47,6 +55,7 @@ export function HomePage({
   const safeModeOn = configStatus?.config.safety.dryRunDefault ?? false;
   const deliveryMode = configStatus?.config.invoiceDeliveryMode;
   const destinations = buildDestinations({ configStatus, modules, loading, lastSummary, t });
+  const launch = buildLaunchJourney(configStatus, modules, activityHistory, loading, t);
 
   return (
     <div className="space-y-5">
@@ -101,7 +110,7 @@ export function HomePage({
                   {t("home.mostRecent")}
                 </span>
                 <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">
-                  {lastSummary.automation_name} Â· {formatTime(lastSummary.end_time)}
+                  {lastSummary.automation_name} · {formatTime(lastSummary.end_time)}
                 </span>
               </span>
               <StatusHint
@@ -112,6 +121,8 @@ export function HomePage({
           )}
         </div>
       </section>
+
+      <LaunchJourney journey={launch} onNavigate={onNavigate} />
 
       <div className="stagger-children grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         {destinations.map((destination) => (
@@ -132,6 +143,228 @@ export function HomePage({
       </div>
     </div>
   );
+}
+
+type LaunchMilestone = {
+  key: string;
+  title: string;
+  description: string;
+  complete: boolean;
+  page: AppPage;
+};
+
+type LaunchJourneyModel = {
+  completed: number;
+  percentage: number;
+  level: string;
+  milestones: LaunchMilestone[];
+  successfulRuns: number;
+  handledItems: number;
+  loading: boolean;
+  t: ReturnType<typeof useI18n>["t"];
+};
+
+function LaunchJourney({
+  journey,
+  onNavigate,
+}: {
+  journey: LaunchJourneyModel;
+  onNavigate: (page: AppPage) => void;
+}) {
+  const { t } = journey;
+  return (
+    <section className="overflow-hidden rounded-xl border border-white/70 bg-white/62 shadow-glass backdrop-blur-xl">
+      <div className="border-b border-white/70 bg-[linear-gradient(105deg,rgb(var(--tint-violet-wash)),rgba(255,255,255,0.72),rgb(var(--tint-amber-wash)))] p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-800 text-white shadow-sm">
+              <Map className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-800">
+                {t("home.launchEyebrow")}
+              </p>
+              <h3 className="mt-1 text-xl font-semibold text-slate-950">
+                {t("home.launchTitle")}
+              </h3>
+              <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+                {t("home.launchDescription")}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-xl bg-white/75 px-4 py-3 ring-1 ring-white">
+            <Trophy className="h-5 w-5 text-amber-600" aria-hidden="true" />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {t("home.launchLevel")}
+              </p>
+              <p className="text-sm font-bold text-slate-950">{journey.level}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center gap-3">
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/80 ring-1 ring-slate-900/5">
+            <div
+              className="h-full rounded-full bg-[linear-gradient(90deg,rgb(var(--brand-700)),rgb(var(--tint-amber-fg)))] transition-all duration-500"
+              style={{ width: `${journey.percentage}%` }}
+            />
+          </div>
+          <span className="min-w-20 text-right text-xs font-bold text-slate-700">
+            {journey.loading
+              ? t("common.checking")
+              : t("home.launchProgress", {
+                  complete: journey.completed,
+                  total: journey.milestones.length,
+                })}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {journey.milestones.map((milestone, index) => (
+            <button
+              key={milestone.key}
+              className={[
+                "group rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md",
+                milestone.complete
+                  ? "border-emerald-200 bg-emerald-50/80"
+                  : "border-white/80 bg-white/70 hover:bg-white",
+              ].join(" ")}
+              onClick={() => onNavigate(milestone.page)}
+            >
+              <div className="flex items-center justify-between">
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-white text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+                  {index + 1}
+                </span>
+                {milestone.complete ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600" aria-hidden="true" />
+                ) : (
+                  <Circle className="h-5 w-5 text-slate-300" aria-hidden="true" />
+                )}
+              </div>
+              <p className="mt-3 text-sm font-bold text-slate-950">{milestone.title}</p>
+              <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
+                {milestone.description}
+              </p>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-brand-50/75 px-4 py-3 text-xs font-bold text-brand-900 ring-1 ring-brand-100">
+            <span className="inline-flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              {t("home.trustLocal")}
+            </span>
+            <span>{t("home.trustPreview")}</span>
+            <span>{t("home.trustNoSend")}</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/75 px-4 py-3 ring-1 ring-white">
+            <Gauge className="h-4 w-4 text-brand-700" aria-hidden="true" />
+            <span className="text-xs font-bold text-slate-700">
+              {t("home.successfulRuns", { count: journey.successfulRuns })}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/75 px-4 py-3 ring-1 ring-white">
+            <Sparkles className="h-4 w-4 text-amber-600" aria-hidden="true" />
+            <span className="text-xs font-bold text-slate-700">
+              {t("home.itemsHandled", { count: journey.handledItems })}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function buildLaunchJourney(
+  configStatus: AppConfigStatus | null,
+  modules: ModuleReadiness[],
+  activityHistory: ActivityRecord[],
+  loading: boolean,
+  t: ReturnType<typeof useI18n>["t"],
+): LaunchJourneyModel {
+  const hotelName = configStatus?.config.client.displayName?.trim();
+  const profileReady = Boolean(hotelName && hotelName !== "Your Hotel");
+  const workspaceKeys = [
+    "invoiceInputFolder",
+    "invoiceOutputFolder",
+    "invoiceArchiveFolder",
+    "invoiceLogFolder",
+  ];
+  const workspaceReady = Boolean(configStatus) && workspaceKeys.every((key) =>
+    configStatus!.preflight.items.some((item) => item.key === key && item.status === "ready"),
+  );
+  const safeRehearsal = activityHistory.some(
+    (record) =>
+      record.workflowCommandName === "process_invoices_and_drafts" &&
+      record.mode === "dry_run" &&
+      (record.status === "success" || record.status === "needs_attention"),
+  );
+  const primaryIds =
+    configStatus?.config.invoiceDeliveryMode === "prepareOnly"
+      ? ["invoices"]
+      : ["invoices", "gmailDrafts"];
+  const configured = primaryIds.every(
+    (id) => modules.find((module) => module.id === id)?.status === "ready",
+  );
+  const pilotReady = configured && safeRehearsal;
+
+  const milestones: LaunchMilestone[] = [
+    {
+      key: "profile",
+      title: t("home.milestoneProfile"),
+      description: t("home.milestoneProfileText"),
+      complete: profileReady,
+      page: "settings",
+    },
+    {
+      key: "workspace",
+      title: t("home.milestoneWorkspace"),
+      description: t("home.milestoneWorkspaceText"),
+      complete: workspaceReady,
+      page: "setup",
+    },
+    {
+      key: "rehearsal",
+      title: t("home.milestoneRehearsal"),
+      description: t("home.milestoneRehearsalText"),
+      complete: safeRehearsal,
+      page: configured ? "automations" : "setup",
+    },
+    {
+      key: "pilot",
+      title: t("home.milestonePilot"),
+      description: t("home.milestonePilotText"),
+      complete: pilotReady,
+      page: pilotReady ? "automations" : "setup",
+    },
+  ];
+  const completed = loading ? 0 : milestones.filter((milestone) => milestone.complete).length;
+  const level =
+    completed === 4
+      ? t("home.levelPilotReady")
+      : completed >= 2
+        ? t("home.levelBuilder")
+        : t("home.levelExplorer");
+  const successfulRuns = activityHistory.filter((record) => record.status === "success").length;
+  const handledItems = activityHistory.reduce((total, record) => {
+    const summary = record.summary;
+    return total + (summary.processed ?? summary.found ?? summary.created ?? summary.moved ?? 0);
+  }, 0);
+
+  return {
+    completed,
+    percentage: Math.round((completed / milestones.length) * 100),
+    level,
+    milestones,
+    successfulRuns,
+    handledItems,
+    loading,
+    t,
+  };
 }
 
 type Destination = {

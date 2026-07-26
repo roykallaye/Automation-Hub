@@ -349,10 +349,12 @@ automation.automationRootFolder = C:\InnPilot\automation
 automation.pythonExecutable = C:\InnPilot\.venv\Scripts\python.exe
 scripts.invoiceWorkflowScript = C:\InnPilot\automation\invoices\process_fatture.py
 scripts.gmailDraftScript = C:\InnPilot\automation\gmail_drafts\create_gmail_draft.py
+scripts.copyScansioniScript = C:\InnPilot\automation\scans\copy_scans.py
+scripts.ocrPreprocessingScript = C:\InnPilot\automation\ocr\extract_scan_text.py
 scripts.contractProcessingScript = C:\InnPilot\automation\contracts\process_contratti.py
 ```
 
-`copy_scansioni.cmd` and `preprocess_scansioni_to_text.ps1` are still separate legacy/import scripts until they are collected and converted into canonical automation workers.
+The canonical scan-copy and document-reading workers support configuration, structured reports, and true dry-run mode. Document reading currently extracts embedded text from searchable PDFs; image-only PDFs are explicitly reported for follow-up OCR.
 
 ### App-Managed Automation Scripts
 
@@ -372,6 +374,8 @@ It copies only known versioned files such as:
 
 - `invoices\process_fatture.py`
 - `gmail_drafts\create_gmail_draft.py`
+- `scans\copy_scans.py`
+- `ocr\extract_scan_text.py`
 - `contracts\process_contratti.py`
 - `shared\*.py`
 - `requirements.txt`
@@ -477,12 +481,11 @@ The canonical versionable scripts are under:
 
 - `automation\invoices\process_fatture.py`
 - `automation\gmail_drafts\create_gmail_draft.py`
+- `automation\scans\copy_scans.py`
+- `automation\ocr\extract_scan_text.py`
 - `automation\contracts\process_contratti.py`
 
-Still missing from the manager-PC collection:
-
-- `copy_scansioni.cmd`
-- `preprocess_scansioni_to_text.ps1`
+The document-reading worker extracts embedded PDF text. Image-only OCR remains a release-roadmap item and is surfaced as a warning rather than silently skipped.
 
 The ignored `Script/` folder may exist locally as a copied manager-PC mirror. Do not commit it.
 
@@ -500,7 +503,7 @@ Example fake script behavior:
 
 Use temporary folders for every configured folder path. Never point test config at real guest PDFs, real contracts, or the real Gmail token.
 
-Future improvement: add canonical, config-driven scan-copy and OCR-preprocessing workers, then have InnPilot run them with the same `--config` convention.
+Future improvement: bundle an image-only OCR engine as a signed sidecar and add fixture-based end-to-end tests for the full scan-to-contract pipeline.
 
 ## Data That Must Never Be Committed
 

@@ -551,11 +551,13 @@ pub(crate) fn canonical_script_paths(automation_root: &Path) -> ScriptPaths {
             .to_string_lossy()
             .to_string(),
         copy_scansioni_script: automation_root
-            .join("copy_scansioni.cmd")
+            .join("scans")
+            .join("copy_scans.py")
             .to_string_lossy()
             .to_string(),
         ocr_preprocessing_script: automation_root
-            .join("preprocess_scansioni_to_text.ps1")
+            .join("ocr")
+            .join("extract_scan_text.py")
             .to_string_lossy()
             .to_string(),
         contract_processing_script: automation_root
@@ -576,6 +578,8 @@ fn looks_like_automation_root(path: &Path) -> bool {
             .join("contracts")
             .join("process_contratti.py")
             .is_file()
+        && path.join("scans").join("copy_scans.py").is_file()
+        && path.join("ocr").join("extract_scan_text.py").is_file()
 }
 
 #[cfg(test)]
@@ -886,22 +890,7 @@ mod tests {
     fn repo_automation_root_is_used_when_canonical_scripts_exist() {
         let root = std::env::temp_dir().join("innpilot_repo_root_for_config_test");
         let automation = root.join("automation");
-        fs::create_dir_all(automation.join("invoices")).unwrap();
-        fs::create_dir_all(automation.join("gmail_drafts")).unwrap();
-        fs::create_dir_all(automation.join("contracts")).unwrap();
-        fs::write(automation.join("invoices").join("process_fatture.py"), b"").unwrap();
-        fs::write(
-            automation
-                .join("gmail_drafts")
-                .join("create_gmail_draft.py"),
-            b"",
-        )
-        .unwrap();
-        fs::write(
-            automation.join("contracts").join("process_contratti.py"),
-            b"",
-        )
-        .unwrap();
+        create_canonical_script_markers(&automation);
 
         assert_eq!(default_automation_root_for_current_dir(&root), automation);
     }
@@ -971,6 +960,14 @@ mod tests {
             r"C:\InnPilot\automation\gmail_drafts\create_gmail_draft.py"
         );
         assert_eq!(
+            scripts.copy_scansioni_script,
+            r"C:\InnPilot\automation\scans\copy_scans.py"
+        );
+        assert_eq!(
+            scripts.ocr_preprocessing_script,
+            r"C:\InnPilot\automation\ocr\extract_scan_text.py"
+        );
+        assert_eq!(
             scripts.contract_processing_script,
             r"C:\InnPilot\automation\contracts\process_contratti.py"
         );
@@ -980,8 +977,12 @@ mod tests {
         fs::create_dir_all(root.join("invoices")).unwrap();
         fs::create_dir_all(root.join("gmail_drafts")).unwrap();
         fs::create_dir_all(root.join("contracts")).unwrap();
+        fs::create_dir_all(root.join("scans")).unwrap();
+        fs::create_dir_all(root.join("ocr")).unwrap();
         fs::write(root.join("invoices").join("process_fatture.py"), b"").unwrap();
         fs::write(root.join("gmail_drafts").join("create_gmail_draft.py"), b"").unwrap();
         fs::write(root.join("contracts").join("process_contratti.py"), b"").unwrap();
+        fs::write(root.join("scans").join("copy_scans.py"), b"").unwrap();
+        fs::write(root.join("ocr").join("extract_scan_text.py"), b"").unwrap();
     }
 }

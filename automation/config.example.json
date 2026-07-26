@@ -10,8 +10,10 @@
     "invoiceLogDir": "C:\\InnPilot\\Invoices\\Log",
     "gmailCredentialsFile": "C:\\InnPilot\\Secrets\\gmail_credentials.json",
     "gmailTokenFile": "C:\\InnPilot\\Secrets\\gmail_token.json",
+    "scanSourceDir": "C:\\Hotel\\SharedScanner",
+    "scanCacheDir": "C:\\InnPilot\\Scans\\IncomingCache",
     "contractInputShortcut": "C:\\InnPilot\\Scansioni.lnk",
-    "contractInputDir": "C:\\InnPilot\\Scansioni",
+    "contractInputDir": "C:\\InnPilot\\Scans\\IncomingCache",
     "contractDestinationDir": "C:\\InnPilot\\Contracts\\2026\\CONTRATTI FIRMATI",
     "contractOcrTextDir": "C:\\InnPilot\\OCR\\ScansioniText",
     "contractLogDir": "C:\\InnPilot\\Invoices\\Log"

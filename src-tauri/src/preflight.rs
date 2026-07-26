@@ -108,6 +108,47 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
             "Contract processing script",
             &config.scripts.contract_processing_script,
         ),
+        safe_mode_support_check(
+            "invoiceSafeModeSupport",
+            "Invoice safe-mode support",
+            config.safety.dry_run_default,
+            if config.invoice_delivery_mode == InvoiceDeliveryMode::GmailDrafts {
+                vec![
+                    &config.scripts.invoice_workflow_script,
+                    &config.scripts.gmail_draft_script,
+                ]
+            } else {
+                vec![&config.scripts.invoice_workflow_script]
+            },
+        ),
+        safe_mode_support_check(
+            "gmailSafeModeSupport",
+            "Gmail safe-mode support",
+            config.safety.dry_run_default,
+            vec![&config.scripts.gmail_draft_script],
+        ),
+        safe_mode_support_check(
+            "scanCopySafeModeSupport",
+            "Scan-copy safe-mode support",
+            config.safety.dry_run_default,
+            vec![&config.scripts.copy_scansioni_script],
+        ),
+        safe_mode_support_check(
+            "ocrSafeModeSupport",
+            "Document-reading safe-mode support",
+            config.safety.dry_run_default,
+            vec![&config.scripts.ocr_preprocessing_script],
+        ),
+        safe_mode_support_check(
+            "contractsSafeModeSupport",
+            "Contracts safe-mode support",
+            config.safety.dry_run_default,
+            vec![
+                &config.scripts.copy_scansioni_script,
+                &config.scripts.ocr_preprocessing_script,
+                &config.scripts.contract_processing_script,
+            ],
+        ),
         folder_check(
             "invoiceInputFolder",
             "Invoice input folder",
@@ -222,6 +263,9 @@ struct AutomationFilePaths {
     invoice_log_dir: Option<String>,
     gmail_credentials_file: Option<String>,
     gmail_token_file: Option<String>,
+    scan_source_dir: Option<String>,
+    scan_cache_dir: Option<String>,
+    contract_input_dir: Option<String>,
     contract_destination_dir: Option<String>,
     contract_ocr_text_dir: Option<String>,
     contract_log_dir: Option<String>,
@@ -316,6 +360,30 @@ fn automation_alignment_checks(config: &HubConfig) -> Vec<PreflightItem> {
             &config.folders.invoice_log_folder,
             "paths.invoiceLogDir",
             paths.invoice_log_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.scansioniNetworkShare",
+            &config.folders.scansioni_network_share,
+            "paths.scanSourceDir",
+            paths.scan_source_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.scansioniLocalCacheFolder",
+            &config.folders.scansioni_local_cache_folder,
+            "paths.scanCacheDir",
+            paths.scan_cache_dir.as_deref(),
+            false,
+        );
+        compare_path(
+            &mut mismatches,
+            "folders.scansioniLocalCacheFolder",
+            &config.folders.scansioni_local_cache_folder,
+            "paths.contractInputDir",
+            paths.contract_input_dir.as_deref(),
             false,
         );
         compare_path(
@@ -1019,6 +1087,100 @@ fn script_check(key: &str, label: &str, path: &str) -> PreflightItem {
     }
 }
 
+fn safe_mode_support_check(
+    key: &str,
+    label: &str,
+    safe_mode_enabled: bool,
+    script_paths: Vec<&String>,
+) -> PreflightItem {
+    let unsupported = script_paths
+        .into_iter()
+        .filter(|path| !script_supports_safe_mode(path))
+        .filter_map(|path| {
+            Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+
+    if !safe_mode_enabled || unsupported.is_empty() {
+        return PreflightItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            path: None,
+            item_type: "safety".to_string(),
+            status: ReadinessStatus::Ready,
+            message: if safe_mode_enabled {
+                "Every worker in this workflow has verified preview support.".to_string()
+            } else {
+                "Safe mode is off. Live runs still require confirmation.".to_string()
+            },
+            readable: None,
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        path: None,
+        item_type: "safety".to_string(),
+        status: ReadinessStatus::MissingConfiguration,
+        message: format!(
+            "Safe mode blocked this workflow because these legacy workers cannot prove they support preview-only runs: {}. Install managed workers or have setup support review the legacy scripts before switching to live mode.",
+            unsupported.join(", ")
+        ),
+        readable: None,
+        writable: None,
+    }
+}
+
+fn script_supports_safe_mode(path: &str) -> bool {
+    let Some(name) = Path::new(path).file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "process_fatture.py"
+            | "create_gmail_draft.py"
+            | "process_contratti.py"
+            | "copy_scans.py"
+            | "extract_scan_text.py"
+    )
+}
+
+#[cfg(test)]
+mod safe_mode_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_workers_are_safe_mode_aware_but_legacy_wrappers_are_not() {
+        assert!(script_supports_safe_mode(
+            r"C:\InnPilot\automation\invoices\process_fatture.py"
+        ));
+        assert!(script_supports_safe_mode(
+            r"C:\InnPilot\automation\contracts\process_contratti.py"
+        ));
+        assert!(!script_supports_safe_mode(r"C:\Hotel\run_invoices.cmd"));
+        assert!(!script_supports_safe_mode(r"C:\Hotel\ocr.ps1"));
+    }
+
+    #[test]
+    fn safe_mode_check_blocks_unknown_legacy_workers() {
+        let legacy = r"C:\Hotel\copy_scans.cmd".to_string();
+        let check = safe_mode_support_check(
+            "fixtureSafeModeSupport",
+            "Fixture safe-mode support",
+            true,
+            vec![&legacy],
+        );
+
+        assert_eq!(check.status, ReadinessStatus::MissingConfiguration);
+        assert!(check.message.contains("copy_scans.cmd"));
+    }
+}
+
 fn folder_check(
     key: &str,
     label: &str,
@@ -1380,13 +1542,18 @@ fn workflow_preflight(
     let invoice_needs_python = is_python_script(&config.scripts.invoice_workflow_script)
         || (invoice_uses_gmail && is_python_script(&config.scripts.gmail_draft_script));
     let gmail_needs_python = is_python_script(&config.scripts.gmail_draft_script);
-    let contracts_needs_python = is_python_script(&config.scripts.contract_processing_script);
+    let scan_copy_needs_python = is_python_script(&config.scripts.copy_scansioni_script);
+    let ocr_needs_python = is_python_script(&config.scripts.ocr_preprocessing_script);
+    let contracts_needs_python = scan_copy_needs_python
+        || ocr_needs_python
+        || is_python_script(&config.scripts.contract_processing_script);
     let invoice_base_checks = [
         "invoiceWorkflowScript",
         "invoiceInputFolder",
         "invoiceOutputFolder",
         "invoiceLogFolder",
         "invoiceDeliveryMode",
+        "invoiceSafeModeSupport",
     ];
     let invoice_gmail_checks = [
         "gmailDraftScript",
@@ -1410,6 +1577,7 @@ fn workflow_preflight(
             "gmailTokenPath",
             "gmailTokenFolder",
             "gmailTokenAlignment",
+            "gmailSafeModeSupport",
         ],
         gmail_needs_python,
     );
@@ -1422,8 +1590,27 @@ fn workflow_preflight(
             "scansioniLocalCacheFolder",
             "ocrTextOutputFolder",
             "contractsOutputFolder",
+            "contractsSafeModeSupport",
         ],
         contracts_needs_python,
+    );
+    let scan_copy_checks = with_python_config(
+        &[
+            "copyScansioniScript",
+            "scansioniNetworkShare",
+            "scansioniLocalCacheFolder",
+            "scanCopySafeModeSupport",
+        ],
+        scan_copy_needs_python,
+    );
+    let ocr_checks = with_python_config(
+        &[
+            "ocrPreprocessingScript",
+            "scansioniLocalCacheFolder",
+            "ocrTextOutputFolder",
+            "ocrSafeModeSupport",
+        ],
+        ocr_needs_python,
     );
 
     vec![
@@ -1455,11 +1642,7 @@ fn workflow_preflight(
             "scansioniNetwork",
             "Scansioni/network folder",
             Some("copy_scansioni"),
-            &[
-                "copyScansioniScript",
-                "scansioniNetworkShare",
-                "scansioniLocalCacheFolder",
-            ],
+            &scan_copy_checks,
             items,
             true,
         ),
@@ -1467,11 +1650,7 @@ fn workflow_preflight(
             "ocrWorkflow",
             "OCR workflow",
             Some("ocr_preprocessing"),
-            &[
-                "ocrPreprocessingScript",
-                "scansioniLocalCacheFolder",
-                "ocrTextOutputFolder",
-            ],
+            &ocr_checks,
             items,
             true,
         ),

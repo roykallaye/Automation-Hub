@@ -12,11 +12,13 @@ import {
   Sparkles,
   Wand2,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
 import { TINT_TILE, type CardTint } from "../components/tints";
 import { useI18n, type TranslationKey } from "../i18n";
+import type { DiscoveryRequest } from "../types";
 
 type FrequentRequest = {
   icon: typeof Mail;
@@ -127,17 +129,44 @@ export function AssistantPage() {
   const [request, setRequest] = useState("");
   const [selected, setSelected] = useState<FrequentRequest | null>(null);
   const [customPreview, setCustomPreview] = useState<string | null>(null);
+  const [savingBrief, setSavingBrief] = useState(false);
+  const [savedBrief, setSavedBrief] = useState<DiscoveryRequest | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function choose(card: FrequentRequest) {
     setSelected(card);
     setCustomPreview(null);
     setRequest(t(card.promptKey));
+    setSavedBrief(null);
+    setSaveError(null);
   }
 
   function previewCustom() {
     if (!request.trim()) return;
     setSelected(null);
     setCustomPreview(request.trim());
+    setSavedBrief(null);
+    setSaveError(null);
+  }
+
+  async function saveDiscoveryBrief() {
+    if (!request.trim()) return;
+    setSavingBrief(true);
+    setSaveError(null);
+    try {
+      const stepKeys = selected?.planStepKeys ?? GENERIC_PLAN_STEP_KEYS;
+      const result = await invoke<DiscoveryRequest>("create_discovery_request", {
+        draft: {
+          description: request.trim(),
+          suggestedSteps: stepKeys.map((stepKey) => t(stepKey)),
+        },
+      });
+      setSavedBrief(result);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingBrief(false);
+    }
   }
 
   const showingPlan = selected || customPreview;
@@ -232,17 +261,26 @@ export function AssistantPage() {
           </ol>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              className="inline-flex min-h-11 cursor-not-allowed items-center gap-2 rounded-md bg-ink/40 px-5 text-sm font-semibold text-white"
-              disabled
-              title={t("assistant.futureNote")}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={savingBrief || Boolean(savedBrief)}
+              onClick={saveDiscoveryBrief}
             >
               <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />
-              {t("assistant.startInterview")}
+              {savingBrief
+                ? t("assistant.savingBrief")
+                : savedBrief
+                  ? t("assistant.briefSaved")
+                  : t("assistant.saveBrief")}
             </button>
             <span className="text-xs font-semibold text-slate-500">
-              {t("assistant.futureNote")}
+              {savedBrief ? t("assistant.briefSavedNote") : t("assistant.localBriefNote")}
             </span>
           </div>
+          {saveError && (
+            <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">
+              {saveError}
+            </p>
+          )}
         </section>
       )}
 

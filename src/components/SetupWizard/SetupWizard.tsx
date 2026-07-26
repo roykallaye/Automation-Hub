@@ -101,14 +101,19 @@ export function SetupWizard({
   const { t } = useI18n();
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
+  const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(false);
   const [setupResult, setSetupResult] = useState<SetupActionResult | null>(null);
   const [setupAction, setSetupAction] = useState<string | null>(null);
   const [inspections, setInspections] = useState<Record<string, FolderInspectionState>>({});
   const [completedActions, setCompletedActions] = useState<SetupAction[]>([]);
   const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>([]);
   const steps = useMemo<WizardStepMeta[]>(
-    () => stepDefinitions.map((step) => ({ key: step.key, title: t(step.titleKey) })),
-    [t],
+    () =>
+      stepDefinitions
+        .filter((step) => step.key !== "folders" || draft.setupMode === "existingFolders")
+        .filter((step) => step.key !== "contracts" || showAdvancedWorkflows)
+        .map((step) => ({ key: step.key, title: t(step.titleKey) })),
+    [draft.setupMode, showAdvancedWorkflows, t],
   );
   const preview = useMemo(() => buildConfigPreview(draft), [draft]);
   const currentStep = steps[stepIndex];
@@ -549,7 +554,12 @@ export function SetupWizard({
       <StepProgress steps={steps} currentIndex={stepIndex} />
 
       <div className="space-y-4">
-        {currentStep.key === "welcome" && <WelcomeStep />}
+        {currentStep.key === "welcome" && (
+          <WelcomeStep
+            showAdvancedWorkflows={showAdvancedWorkflows}
+            onShowAdvancedWorkflows={setShowAdvancedWorkflows}
+          />
+        )}
         {currentStep.key === "mode" && (
           <FolderModeStep draft={draft} onChooseMode={chooseSetupMode} />
         )}
@@ -574,6 +584,7 @@ export function SetupWizard({
               onChooseDirectory={chooseDirectory}
               onChooseGmailCredentialsFolder={chooseGmailCredentialsFolder}
               onChooseTokenFolder={chooseTokenFolder}
+              showAdvancedWorkflows={showAdvancedWorkflows}
             />
           ) : (
             <FolderPreviewStep draft={draft} />
@@ -789,7 +800,13 @@ type SetupActionResult = {
   details?: unknown;
 };
 
-function WelcomeStep() {
+function WelcomeStep({
+  showAdvancedWorkflows,
+  onShowAdvancedWorkflows,
+}: {
+  showAdvancedWorkflows: boolean;
+  onShowAdvancedWorkflows: (value: boolean) => void;
+}) {
   const { t } = useI18n();
   return (
     <SetupStep
@@ -802,6 +819,31 @@ function WelcomeStep() {
         <InfoCard title={t("wizard.confirmFirst")} text={t("wizard.confirmFirstText")} />
         <InfoCard title={t("wizard.guidedSetup")} text={t("wizard.guidedSetupText")} />
       </div>
+      <label className="mt-5 flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-white/70 bg-white/65 p-4 transition hover:bg-white">
+        <span>
+          <span className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-950">
+            {showAdvancedWorkflows
+              ? t("wizard.advancedLaunchTitle")
+              : t("wizard.quickLaunchTitle")}
+            {!showAdvancedWorkflows && (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                {t("wizard.recommended")}
+              </span>
+            )}
+          </span>
+          <span className="mt-1 block max-w-2xl text-sm font-medium leading-6 text-slate-600">
+            {showAdvancedWorkflows
+              ? t("wizard.advancedLaunchText")
+              : t("wizard.quickLaunchText")}
+          </span>
+        </span>
+        <input
+          className="mt-1 h-5 w-5 shrink-0 accent-brand-700"
+          type="checkbox"
+          checked={showAdvancedWorkflows}
+          onChange={(event) => onShowAdvancedWorkflows(event.target.checked)}
+        />
+      </label>
     </SetupStep>
   );
 }
@@ -966,6 +1008,7 @@ function ExistingFoldersStep({
   onChooseDirectory,
   onChooseGmailCredentialsFolder,
   onChooseTokenFolder,
+  showAdvancedWorkflows,
 }: {
   draft: SetupDraft;
   update: <K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) => void;
@@ -975,6 +1018,7 @@ function ExistingFoldersStep({
   onChooseDirectory: (field: PathFieldKey) => void;
   onChooseGmailCredentialsFolder: () => void;
   onChooseTokenFolder: () => void;
+  showAdvancedWorkflows: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -987,7 +1031,17 @@ function ExistingFoldersStep({
         {t("wizard.discoveryReadOnly")}
       </div>
       <div className="grid gap-4">
-        {EXISTING_FOLDER_FIELDS.map((item) => {
+        {EXISTING_FOLDER_FIELDS.filter(
+          (item) =>
+            showAdvancedWorkflows ||
+            ![
+              "sharedScanFolder",
+              "scansLocalCacheFolder",
+              "ocrTextOutputFolder",
+              "signedContractsOutputFolder",
+              "contractLogFolder",
+            ].includes(item.field),
+        ).map((item) => {
           const value = draft[item.field] as string;
           const inspection = inspections[item.field];
           const choose = item.chooseCredentialsFolder

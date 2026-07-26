@@ -13,6 +13,8 @@ use tauri::{AppHandle, Manager};
 const CANONICAL_FILES: &[&str] = &[
     "invoices/process_fatture.py",
     "gmail_drafts/create_gmail_draft.py",
+    "scans/copy_scans.py",
+    "ocr/extract_scan_text.py",
     "contracts/process_contratti.py",
     "shared/__init__.py",
     "shared/config.py",
@@ -204,8 +206,16 @@ fn apply_managed_root_to_config(config: &mut HubConfig, destination_root: &Path)
             "create_gmail_draft.py",
             &canonical.gmail_draft_script,
         ),
-        copy_scansioni_script: previous_scripts.copy_scansioni_script,
-        ocr_preprocessing_script: previous_scripts.ocr_preprocessing_script,
+        copy_scansioni_script: managed_or_explicit(
+            &previous_scripts.copy_scansioni_script,
+            "copy_scans.py",
+            &canonical.copy_scansioni_script,
+        ),
+        ocr_preprocessing_script: managed_or_explicit(
+            &previous_scripts.ocr_preprocessing_script,
+            "extract_scan_text.py",
+            &canonical.ocr_preprocessing_script,
+        ),
         contract_processing_script: managed_or_explicit(
             &previous_scripts.contract_processing_script,
             "process_contratti.py",

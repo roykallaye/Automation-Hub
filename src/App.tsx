@@ -269,6 +269,7 @@ function App() {
           modules={modules}
           loading={loadingConfig}
           lastSummary={lastSummary}
+          activityHistory={activityHistory}
           nextAction={nextAction}
           onNavigate={setCurrentPage}
         />

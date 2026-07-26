@@ -311,3 +311,12 @@ export type FolderInspection = {
   suggestedRole?: ExistingFolderRole | string | null;
   confidence?: number | null;
 };
+
+export type DiscoveryRequest = {
+  id: string;
+  description: string;
+  suggestedSteps: string[];
+  status: "open" | "in_progress" | "completed";
+  createdAt: string;
+  dataLocation: "local_app_data";
+};

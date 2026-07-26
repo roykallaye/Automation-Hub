@@ -3,6 +3,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
+    fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -76,6 +77,7 @@ pub(crate) async fn run_command_inner(
     let mut step_reports = Vec::new();
     let mut final_exit_code = 0;
     let mut had_warning = false;
+    let mut had_failure = false;
 
     emit_line(
         app,
@@ -83,6 +85,20 @@ pub(crate) async fn run_command_inner(
         "system",
         &format!("Starting {automation_name}"),
     );
+
+    if command_name == "reconnect_gmail" {
+        emit_line(
+            app,
+            command_name,
+            "system",
+            "Resetting the configured Gmail sign-in token",
+        );
+        reset_gmail_token(&config.gmail.token_path)?;
+        step_results.push(StepResult {
+            name: "Reset Gmail sign-in".to_string(),
+            exit_code: 0,
+        });
+    }
 
     if config.safety.dry_run_default {
         emit_line(
@@ -118,6 +134,7 @@ pub(crate) async fn run_command_inner(
 
         if !step.success_codes.contains(&exit_code) {
             final_exit_code = exit_code;
+            had_failure = true;
             emit_line(
                 app,
                 command_name,
@@ -133,11 +150,7 @@ pub(crate) async fn run_command_inner(
         }
     }
 
-    let all_steps_succeeded = step_results
-        .iter()
-        .zip(command_steps(command_name, &config, None)?.1.iter())
-        .all(|(result, step)| step.success_codes.contains(&result.exit_code));
-    let status = if all_steps_succeeded {
+    let status = if !had_failure {
         if had_warning {
             "warning"
         } else {
@@ -187,75 +200,64 @@ fn command_steps(
 
     let automation_config_path = config.automation.automation_config_path.clone();
     let python = config.automation.python_executable.clone();
-
-    let cmd_file = |name: &'static str, path: &str, success_codes: Vec<i32>| CommandStep {
-        name,
-        program: "cmd.exe".to_string(),
-        args: vec!["/C".to_string(), "call".to_string(), path.to_string()],
-        success_codes,
-        report_path: None,
+    let build_step = |name: &'static str,
+                      path: &str,
+                      dry_run: bool,
+                      execute_contracts: bool,
+                      success_codes: Vec<i32>| {
+        script_step(
+            name,
+            path,
+            &python,
+            ScriptStepOptions {
+                automation_config_path: Some(&automation_config_path),
+                dry_run,
+                execute_contracts,
+                reports_dir,
+                command_name,
+                success_codes,
+            },
+        )
     };
 
-    let invoice = script_step(
+    let invoice = build_step(
         "Process invoice PDFs",
         &scripts.invoice_workflow_script,
-        &python,
-        Some(&automation_config_path),
         config.safety.dry_run_default,
         false,
-        reports_dir,
-        command_name,
         cmd_success.clone(),
     );
-    let gmail = script_step(
+    let gmail = build_step(
         "Create Gmail drafts",
         &scripts.gmail_draft_script,
-        &python,
-        Some(&automation_config_path),
         config.safety.dry_run_default,
         false,
-        reports_dir,
-        command_name,
         cmd_success.clone(),
     );
-    let reset_gmail = CommandStep {
-        name: "Reset Gmail sign-in",
-        program: "cmd.exe".to_string(),
-        args: vec![
-            "/C".to_string(),
-            format!(
-                "if exist \"{}\" del /q \"{}\"",
-                config.gmail.token_path, config.gmail.token_path
-            ),
-        ],
-        success_codes: cmd_success.clone(),
-        report_path: None,
+    let copy_success = if is_python_script(&scripts.copy_scansioni_script) {
+        cmd_success.clone()
+    } else {
+        robocopy_success
     };
-    let copy_scansioni = cmd_file(
+    let copy_scansioni = build_step(
         "Copy scansioni cache",
         &scripts.copy_scansioni_script,
-        robocopy_success,
+        config.safety.dry_run_default,
+        false,
+        copy_success,
     );
-    let ocr = script_step(
+    let ocr = build_step(
         "Run OCR preprocessing",
         &scripts.ocr_preprocessing_script,
-        &python,
-        Some(&automation_config_path),
+        config.safety.dry_run_default,
         false,
-        false,
-        reports_dir,
-        command_name,
         cmd_success.clone(),
     );
-    let contracts = script_step(
+    let contracts = build_step(
         "Process signed contracts",
         &scripts.contract_processing_script,
-        &python,
-        Some(&automation_config_path),
         false,
-        is_legacy_wrapper(&scripts.contract_processing_script),
-        reports_dir,
-        command_name,
+        !config.safety.dry_run_default,
         cmd_success.clone(),
     );
 
@@ -270,7 +272,7 @@ fn command_steps(
                 ))
             }
         }
-        "reconnect_gmail" => Ok(("Reconnect Gmail", vec![reset_gmail, gmail])),
+        "reconnect_gmail" => Ok(("Reconnect Gmail", vec![gmail])),
         "copy_scansioni" => Ok(("Copy Scansioni", vec![copy_scansioni])),
         "ocr_preprocessing" => Ok(("Run OCR Preprocessing", vec![ocr])),
         "process_signed_contracts" => Ok((
@@ -281,31 +283,37 @@ fn command_steps(
     }
 }
 
+struct ScriptStepOptions<'a> {
+    automation_config_path: Option<&'a str>,
+    dry_run: bool,
+    execute_contracts: bool,
+    reports_dir: Option<&'a Path>,
+    command_name: &'a str,
+    success_codes: Vec<i32>,
+}
+
 fn script_step(
     name: &'static str,
     path: &str,
     python_executable: &str,
-    automation_config_path: Option<&str>,
-    dry_run: bool,
-    execute_contracts: bool,
-    reports_dir: Option<&Path>,
-    command_name: &str,
-    success_codes: Vec<i32>,
+    options: ScriptStepOptions<'_>,
 ) -> CommandStep {
     if is_python_script(path) {
         let mut args = vec![path.to_string()];
-        if let Some(config_path) = automation_config_path {
+        if let Some(config_path) = options.automation_config_path {
             args.push("--config".to_string());
             args.push(config_path.to_string());
         }
-        if dry_run {
+        if options.dry_run {
             args.push("--dry-run".to_string());
         }
-        if execute_contracts {
+        if options.execute_contracts {
             args.push("--execute".to_string());
         }
         let report_path = if supports_json_report(path) {
-            reports_dir.map(|dir| activity::report_path_for_step(dir, command_name, name))
+            options
+                .reports_dir
+                .map(|dir| activity::report_path_for_step(dir, options.command_name, name))
         } else {
             None
         };
@@ -317,7 +325,7 @@ fn script_step(
             name,
             program: python_executable.to_string(),
             args,
-            success_codes,
+            success_codes: options.success_codes,
             report_path,
         };
     }
@@ -333,20 +341,20 @@ fn script_step(
                 "-File".to_string(),
                 path.to_string(),
             ],
-            success_codes,
+            success_codes: options.success_codes,
             report_path: None,
         };
     }
 
     let mut args = vec!["/C".to_string(), "call".to_string(), path.to_string()];
-    if execute_contracts {
+    if options.execute_contracts {
         args.push("--execute".to_string());
     }
     CommandStep {
         name,
         program: "cmd.exe".to_string(),
         args,
-        success_codes,
+        success_codes: options.success_codes,
         report_path: None,
     }
 }
@@ -365,15 +373,35 @@ fn is_powershell_script(path: &str) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("ps1"))
 }
 
-fn is_legacy_wrapper(path: &str) -> bool {
-    !is_python_script(path)
-}
-
 fn supports_json_report(path: &str) -> bool {
     matches!(
         Path::new(path).file_name().and_then(|name| name.to_str()),
-        Some("process_fatture.py" | "create_gmail_draft.py" | "process_contratti.py")
+        Some(
+            "process_fatture.py"
+                | "create_gmail_draft.py"
+                | "process_contratti.py"
+                | "copy_scans.py"
+                | "extract_scan_text.py"
+        )
     )
+}
+
+fn reset_gmail_token(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("The Gmail token path is not configured.".to_string());
+    }
+
+    let token_path = Path::new(trimmed);
+    if !token_path.exists() {
+        return Ok(());
+    }
+    if !token_path.is_file() {
+        return Err("The configured Gmail token path is not a file.".to_string());
+    }
+
+    fs::remove_file(token_path)
+        .map_err(|error| format!("Could not reset the configured Gmail token: {error}"))
 }
 
 fn run_step(
@@ -526,6 +554,30 @@ mod tests {
     #[test]
     fn high_impact_workflow_with_confirmation_can_continue_to_readiness_validation() {
         assert!(ensure_confirmation("process_invoices_and_drafts", true).is_ok());
+    }
+
+    #[test]
+    fn gmail_token_reset_deletes_only_the_exact_configured_file() {
+        let root = temp_root("gmail_token_reset");
+        fs::create_dir_all(&root).unwrap();
+        let token = root.join("gmail_token.json");
+        let neighbor = root.join("keep.json");
+        fs::write(&token, b"fake-token").unwrap();
+        fs::write(&neighbor, b"keep").unwrap();
+
+        reset_gmail_token(token.to_string_lossy().as_ref()).unwrap();
+
+        assert!(!token.exists());
+        assert_eq!(fs::read_to_string(neighbor).unwrap(), "keep");
+    }
+
+    #[test]
+    fn gmail_token_reset_rejects_a_directory() {
+        let root = temp_root("gmail_token_directory");
+        fs::create_dir_all(&root).unwrap();
+
+        assert!(reset_gmail_token(root.to_string_lossy().as_ref()).is_err());
+        assert!(root.exists());
     }
 
     #[test]

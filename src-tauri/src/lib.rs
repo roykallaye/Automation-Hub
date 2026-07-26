@@ -2,6 +2,7 @@ mod activity;
 mod automation_install;
 mod branding;
 mod config;
+mod discovery;
 mod folder_discovery;
 mod logs;
 mod paths;
@@ -27,8 +28,7 @@ pub fn run() {
             last_run: Mutex::new(None),
         })
         .setup(|app| {
-            config::ensure_config(&app.handle())
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,10 +51,25 @@ pub fn run() {
             read_branding_logo,
             save_output_templates,
             save_app_language,
-            inspect_existing_folder
+            inspect_existing_folder,
+            create_discovery_request,
+            get_discovery_requests
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
+}
+
+#[tauri::command]
+fn create_discovery_request(
+    app: AppHandle,
+    draft: discovery::DiscoveryRequestDraft,
+) -> Result<discovery::DiscoveryRequest, String> {
+    discovery::create_discovery_request(&app, draft)
+}
+
+#[tauri::command]
+fn get_discovery_requests(app: AppHandle) -> Result<Vec<discovery::DiscoveryRequest>, String> {
+    discovery::get_discovery_requests(&app)
 }
 
 #[tauri::command]

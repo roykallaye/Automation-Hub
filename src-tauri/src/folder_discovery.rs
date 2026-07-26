@@ -182,7 +182,7 @@ fn folder_candidates(path: &Path, limit: usize) -> Vec<FolderCandidate> {
             })
         })
         .collect::<Vec<_>>();
-    folders.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    folders.sort_by_key(|folder| folder.name.to_lowercase());
     folders.truncate(limit);
     folders
 }
@@ -217,7 +217,7 @@ fn summarize_files(path: &Path) -> (BTreeMap<String, usize>, Vec<String>) {
         }
     }
 
-    previews.sort_by(|left, right| right.modified.cmp(&left.modified));
+    previews.sort_by_key(|preview| std::cmp::Reverse(preview.modified));
     (
         counts,
         previews

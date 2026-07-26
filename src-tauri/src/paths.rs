@@ -1,4 +1,5 @@
 use crate::config::HubConfig;
+use std::{fs, path::Path};
 
 pub(crate) fn is_allowed_path(config: &HubConfig, path: &str) -> bool {
     let folders = &config.folders;
@@ -14,17 +15,21 @@ pub(crate) fn is_allowed_path(config: &HubConfig, path: &str) -> bool {
         folders.contract_log_folder.as_str(),
     ];
 
-    let normalized = normalize_for_compare(path);
-    allowed_roots.iter().any(|root| {
-        let root = normalize_for_compare(root);
-        !root.is_empty() && (normalized == root || normalized.starts_with(&format!("{root}\\")))
-    })
-}
+    // Explorer only needs to open paths that already exist. Canonicalizing both
+    // sides before comparing also resolves `..`, junctions and symlinks, so a
+    // crafted child-looking path cannot escape a configured hotel folder.
+    let Ok(target) = fs::canonicalize(Path::new(path)) else {
+        return false;
+    };
 
-fn normalize_for_compare(path: &str) -> String {
-    path.trim_end_matches(['\\', '/'])
-        .replace('/', "\\")
-        .to_lowercase()
+    allowed_roots.iter().any(|root| {
+        if root.trim().is_empty() {
+            return false;
+        }
+        fs::canonicalize(Path::new(root))
+            .map(|allowed_root| target == allowed_root || target.starts_with(&allowed_root))
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(test)]
@@ -44,6 +49,7 @@ mod tests {
     fn allowed_path_accepts_configured_folder_children() {
         let config = config_with_temp_paths();
         let child = Path::new(&config.folders.invoice_input_folder).join("sample.pdf");
+        fs::write(&child, b"fake fixture").unwrap();
 
         assert!(is_allowed_path(&config, child.to_str().unwrap()));
         assert!(!is_allowed_path(&config, "C:\\unrelated\\sample.pdf"));
@@ -60,6 +66,23 @@ mod tests {
 
         assert!(!is_allowed_path(&config, script_parent.to_str().unwrap()));
         assert!(!is_allowed_path(&config, sibling.to_str().unwrap()));
+    }
+
+    #[test]
+    fn allowed_path_rejects_parent_traversal_that_resolves_outside_root() {
+        let config = config_with_temp_paths();
+        let allowed = Path::new(&config.folders.invoice_input_folder);
+        let outside = allowed.parent().unwrap().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        fs::write(&secret, b"fake fixture").unwrap();
+        let traversal = allowed.join("..").join("outside").join("secret.txt");
+
+        assert!(secret.exists());
+        assert!(!is_allowed_path(
+            &config,
+            traversal.to_string_lossy().as_ref()
+        ));
     }
 
     #[test]

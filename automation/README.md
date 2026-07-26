@@ -6,15 +6,14 @@ These are the versionable InnPilot automation workers. The legacy `Script/` fold
 
 - `invoices/process_fatture.py` crops and prepares invoice PDFs for Gmail draft creation.
 - `gmail_drafts/create_gmail_draft.py` creates Gmail drafts from prepared invoice folders. It uses the Gmail compose scope and does not send emails.
+- `scans/copy_scans.py` safely copies matching scanner PDFs from the configured shared folder into a local cache, with dry-run and collision handling.
+- `ocr/extract_scan_text.py` extracts embedded text from searchable PDFs into the local text workspace, with dry-run and structured warnings for image-only files.
 - `contracts/process_contratti.py` reads OCR text for scanned PDFs, identifies signed contract documents, and can rename/move them into the contracts folder.
 - `shared/config.py` loads the shared JSON config.
 - `config.example.json` documents the local configuration shape.
 - `requirements.txt` lists the Python packages currently needed by the available scripts.
 
-Still missing from the manager-PC script collection:
-
-- `copy_scansioni.cmd`
-- `preprocess_scansioni_to_text.ps1`
+Image-only PDF OCR is not bundled yet. The document-reading worker reports those files as needing attention instead of pretending they were processed.
 
 ## Install Dependencies
 
@@ -26,7 +25,7 @@ python -m venv .venv
 python -m pip install -r automation\requirements.txt
 ```
 
-The `.cmd` wrappers under `automation/` use `python` from `PATH`. If a hotel PC uses a virtual environment, activate it before running the wrappers or call the scripts with that environment's Python executable.
+The optional `.cmd` wrappers under `automation/` use `python` from `PATH`. InnPilot itself calls the configured Python executable directly.
 
 For a controlled manual hotel dry-run, the recommended managed layout is:
 
