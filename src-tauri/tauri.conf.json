@@ -53,6 +53,7 @@
       "../automation/shared/__init__.py": "automation/shared/__init__.py",
       "../automation/shared/config.py": "automation/shared/config.py",
       "../automation/shared/report.py": "automation/shared/report.py",
+      "../automation/shared/safe_files.py": "automation/shared/safe_files.py",
       "../automation/requirements.txt": "automation/requirements.txt",
       "../automation/README.md": "automation/README.md",
       "../automation/config.example.json": "automation/config.example.json"

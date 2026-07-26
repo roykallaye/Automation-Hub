@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from shared.safe_files import atomic_write_text
+
 
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -50,8 +52,8 @@ def standard_report(
 
 
 def write_report(report_path: Path, report: dict[str, Any]) -> None:
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
+    atomic_write_text(
+        report_path,
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

@@ -1,6 +1,5 @@
 import argparse
 import re
-import shutil
 import sys
 import tempfile
 from datetime import datetime
@@ -19,6 +18,7 @@ from shared.config import (  # noqa: E402
     recipient_rules,
 )
 from shared.report import now_iso, standard_report, write_report  # noqa: E402
+from shared.safe_files import copy_verified_atomic, same_file_contents  # noqa: E402
 
 
 ROOT = Path(r"C:\InnPilot\workspace\Invoices")
@@ -164,6 +164,11 @@ def configure_run(args: argparse.Namespace) -> None:
     )
     if not args.dry_run:
         args.dry_run = config_bool(config, "safety", "dryRunDefault", False)
+
+    if not args.dry_run and not ARCHIVE_SUCCESSFUL_ORIGINALS:
+        raise ConfigError(
+            "Execute mode requires safety.archiveSuccessfulOriginals=true so no invoice is deleted without a verified archive copy."
+        )
 
     ARCHIVE_RUN_DIR = ARCHIVE_DIR / RUN_TS
     LOG_FILE = LOG_DIR / f"process_fatture_{RUN_TS}.log"
@@ -598,7 +603,8 @@ def main(args: argparse.Namespace | None = None):
                     continue
 
                 failed_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(pdf_path, failed_dir / pdf_path.name)
+                failed_copy = unique_path(failed_dir / pdf_path.name)
+                copy_verified_atomic(pdf_path, failed_copy)
 
                 log(f"FAILED missing {', '.join(missing)}: {pdf_path.name}")
 
@@ -666,7 +672,7 @@ def main(args: argparse.Namespace | None = None):
                 archived_original = unique_path(processed_originals_dir / pdf_path.name)
 
                 try:
-                    shutil.copy2(pdf_path, archived_original)
+                    copy_verified_atomic(pdf_path, archived_original)
                 except Exception as archive_error:
                     log(
                         f"ARCHIVE FAILED: original left in Input and not deleted: "
@@ -689,6 +695,11 @@ def main(args: argparse.Namespace | None = None):
                         },
                     })
                     continue
+
+            if not archived_original or not same_file_contents(pdf_path, archived_original):
+                raise RuntimeError(
+                    "The original invoice archive copy could not be verified; the input file was left untouched."
+                )
 
             temp_pdf.rename(final_pdf)
             pdf_path.unlink()
@@ -724,7 +735,9 @@ def main(args: argparse.Namespace | None = None):
             if not dry_run:
                 failed_dir.mkdir(parents=True, exist_ok=True)
                 try:
-                    shutil.copy2(pdf_path, failed_dir / pdf_path.name)
+                    if pdf_path.exists():
+                        failed_copy = unique_path(failed_dir / pdf_path.name)
+                        copy_verified_atomic(pdf_path, failed_copy)
                 except Exception:
                     pass
             else:

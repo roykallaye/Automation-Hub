@@ -139,6 +139,12 @@ Invoice processing:
 python automation\invoices\process_fatture.py --config automation\config.local.json --dry-run
 ```
 
+
+Execute mode fails closed unless `safety.archiveSuccessfulOriginals` is enabled. Before an
+input invoice is removed, InnPilot creates and verifies a byte-identical archive copy.
+Failed-file copies and scanner imports are written through collision-safe temporary files
+and verified with SHA-256. A filename collision never overwrites an existing hotel file.
+
 In dry-run mode the invoice script reads candidate input PDFs and uses a temporary file for PDF parsing, but it does not write final PDFs into the real output folder, does not create recipient folders, does not copy failed originals, and does not delete originals. By default candidates are all PDFs in the invoice input folder. Optional filename filters are only used when `invoice.fileSelectionMode` is `filenamePatterns`.
 
 Future invoice validation may add a review queue or content confidence checks for PDFs that do not look like invoices. Today the safe rule is simpler: the invoice input folder is the intentional signal, unreadable PDFs are reported as issues, and non-PDF files are ignored.

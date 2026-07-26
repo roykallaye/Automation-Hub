@@ -266,6 +266,28 @@ class ProcessFattureTests(unittest.TestCase):
             self.assertEqual(data["details"]["deliveryMode"], "prepareOnly")
             self.assertTrue(data["details"]["gmailSkippedByMode"])
 
+    def test_execute_refuses_to_delete_inputs_when_verified_archiving_is_disabled(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            config = workspace.config()
+            config["safety"]["archiveSuccessfulOriginals"] = False
+            workspace.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            invoice = workspace.invoice_input / "Funzione Pubblica amministrazione fixture.pdf"
+            invoice.write_bytes(b"%PDF-1.4\n% fail-closed fixture\n")
+
+            result = run_script(
+                "automation/invoices/process_fatture.py",
+                "--config",
+                workspace.config_path,
+                "--json-report",
+                workspace.root / "must-not-exist.json",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("archiveSuccessfulOriginals=true", result.stderr)
+            self.assertTrue(invoice.exists())
+            self.assertEqual(count_files(workspace.invoice_output), 0)
+            self.assertEqual(count_files(workspace.invoice_archive), 0)
+
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with InnPilotWorkspace() as workspace:
             sentinel = workspace.invoice_input / "sentinel.txt"

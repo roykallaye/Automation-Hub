@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -12,6 +11,7 @@ if str(AUTOMATION_ROOT) not in sys.path:
 
 from shared.config import ConfigError, config_path, config_str_list, config_value, load_config, resolve_path
 from shared.report import now_iso, report_status, standard_report, write_report
+from shared.safe_files import copy_verified_atomic, same_file_contents
 
 
 def matching_pdfs(source: Path, prefixes: list[str]) -> list[Path]:
@@ -32,7 +32,7 @@ def matching_pdfs(source: Path, prefixes: list[str]) -> list[Path]:
 
 def unique_destination(destination: Path, source: Path, reserved: set[Path]) -> tuple[Path, bool]:
     candidate = destination / source.name
-    if candidate.exists() and candidate.is_file() and candidate.stat().st_size == source.stat().st_size:
+    if candidate.exists() and same_file_contents(source, candidate):
         return candidate, True
     if not candidate.exists() and candidate not in reserved:
         reserved.add(candidate)
@@ -92,7 +92,7 @@ def run(args: argparse.Namespace) -> int:
             status = "planned_copy"
         else:
             try:
-                shutil.copy2(pdf, target)
+                copy_verified_atomic(pdf, target)
                 copied += 1
                 status = "copied"
             except OSError as error:

@@ -19,6 +19,7 @@ const CANONICAL_FILES: &[&str] = &[
     "shared/__init__.py",
     "shared/config.py",
     "shared/report.py",
+    "shared/safe_files.py",
     "requirements.txt",
     "README.md",
     "config.example.json",

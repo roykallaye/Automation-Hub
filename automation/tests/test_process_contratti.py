@@ -78,6 +78,35 @@ class ProcessContrattiTests(unittest.TestCase):
             self.assertEqual(data["summary"]["found"], 1)
             self.assertEqual(data["summary"]["planned"], 1)
 
+    def test_execute_never_files_a_contract_without_a_confirmed_person_name(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            pdf = workspace.scans_cache / "Sharp MFP unnamed.pdf"
+            pdf.write_bytes(b"%PDF-1.4\n% fake scan\n")
+            text = workspace.ocr_text / "Sharp MFP unnamed.txt"
+            text.write_text(
+                "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+                encoding="utf-8",
+            )
+            report = workspace.root / "contracts-unnamed-report.json"
+
+            result = run_script(
+                "automation/contracts/process_contratti.py",
+                "--config",
+                workspace.config_path,
+                "--execute",
+                "--json-report",
+                report,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(pdf.exists())
+            self.assertEqual(count_files(workspace.contracts_signed), 0)
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["status"], "needs_attention")
+            self.assertEqual(data["summary"]["planned"], 0)
+            self.assertEqual(data["summary"]["moved"], 0)
+            self.assertEqual(data["items"][0]["status"], "needs_name_review")
+
     def test_missing_config_fails_safely_before_touching_workspace(self) -> None:
         with InnPilotWorkspace() as workspace:
             sentinel = workspace.scans_cache / "Sharp MFP sentinel.pdf"

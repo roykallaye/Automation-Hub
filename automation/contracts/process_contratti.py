@@ -3,7 +3,6 @@ import datetime as dt
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +19,7 @@ from shared.config import (  # noqa: E402
     resolve_path,
 )
 from shared.report import now_iso, report_status, standard_report, write_report  # noqa: E402
+from shared.safe_files import move_verified_atomic  # noqa: E402
 
 
 SHORTCUT_PATH = Path(r"C:\InnPilot\workspace\Scans\IncomingCache")
@@ -146,7 +146,8 @@ def matching_pdfs(input_dir: Path) -> list[Path]:
             continue
         if path.suffix.lower() != ".pdf":
             continue
-        if not any(path.name.startswith(prefix) for prefix in FILE_PREFIXES):
+        normalized_name = path.name.casefold()
+        if not any(normalized_name.startswith(prefix.casefold()) for prefix in FILE_PREFIXES):
             continue
         files.append(path)
     return sorted(files, key=lambda item: item.name.lower())
@@ -420,10 +421,20 @@ def process(args: argparse.Namespace) -> int:
         logging.info("Original path: %s", pdf_path)
         logging.info("Final path: %s", final_path)
 
+        if used_no_name:
+            logging.warning("Contract requires a person-name review and was left in place: %s", pdf_path)
+            items.append({
+                "sourcePath": str(pdf_path),
+                "status": "needs_name_review",
+                "textPath": str(text_path),
+                "hasEmployeeName": False,
+            })
+            continue
+
         if args.execute:
-            shutil.move(str(pdf_path), str(final_path))
+            move_verified_atomic(pdf_path, final_path)
             moved += 1
-            logging.info("Renamed and moved: %s -> %s", pdf_path, final_path)
+            logging.info("Verified and moved contract: %s -> %s", pdf_path, final_path)
             item_status = "moved"
         else:
             logging.info("DRY RUN would rename and move: %s -> %s", pdf_path, final_path)
@@ -461,7 +472,7 @@ def process(args: argparse.Namespace) -> int:
         summary={
             "found": len(pdfs),
             "processed": len(pdfs),
-            "planned": identified,
+            "planned": identified - no_name,
             "created": 0,
             "moved": moved,
             "failed": text_read_failures,
