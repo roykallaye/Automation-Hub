@@ -589,6 +589,14 @@ impl GeneratedSetup {
                 "contractOcrTextDir": app_config.folders.ocr_text_output_folder,
                 "contractLogDir": app_config.folders.contract_log_folder,
             },
+            "ocr": {
+                "languages": ["ita", "eng", "deu"],
+                "tessdataDir": "ocr\\tessdata",
+                "maxPages": 20,
+                "dpi": 300,
+                "minEmbeddedChars": 24,
+                "maxFileMb": 50,
+            },
             "gmail": {
                 "subject": draft.gmail_subject.trim(),
                 "ccEmail": draft.cc_email.trim(),
@@ -1242,6 +1250,19 @@ mod tests {
                 .unwrap(),
             "Scanner"
         );
+        assert_eq!(
+            generated.automation_config["ocr"]["languages"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            generated.automation_config["ocr"]["tessdataDir"]
+                .as_str()
+                .unwrap(),
+            r"ocr\tessdata"
+        );
     }
 
     #[test]
@@ -1390,6 +1411,27 @@ mod tests {
         assert_eq!(
             generated.app_config.folders.contract_log_folder,
             existing.join("LogContratti").to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn existing_folder_mode_preserves_a_pc_specific_unc_scansioni_path() {
+        let root = temp_root("unc_scansioni");
+        let mut draft = draft_for_root(&root);
+        draft.setup_mode = SetupMode::ExistingFolders;
+        draft.shared_scan_folder = r"\\LIFE-SERVER\Scansioni".to_string();
+
+        let generated = GeneratedSetup::from_draft(&draft).unwrap();
+
+        assert_eq!(
+            generated.app_config.folders.scansioni_network_share,
+            r"\\LIFE-SERVER\Scansioni"
+        );
+        assert_eq!(
+            generated.automation_config["paths"]["scanSourceDir"]
+                .as_str()
+                .unwrap(),
+            r"\\LIFE-SERVER\Scansioni"
         );
     }
 

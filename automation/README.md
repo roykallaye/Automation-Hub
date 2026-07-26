@@ -7,13 +7,13 @@ These are the versionable InnPilot automation workers. The legacy `Script/` fold
 - `invoices/process_fatture.py` crops and prepares invoice PDFs for Gmail draft creation.
 - `gmail_drafts/create_gmail_draft.py` creates Gmail drafts from prepared invoice folders. It uses the Gmail compose scope and does not send emails.
 - `scans/copy_scans.py` safely copies matching scanner PDFs from the configured shared folder into a local cache, with dry-run and collision handling.
-- `ocr/extract_scan_text.py` extracts embedded text from searchable PDFs into the local text workspace, with dry-run and structured warnings for image-only files.
+- `ocr/extract_scan_text.py` extracts embedded text and locally OCRs image-only pages in Italian, English, and German without uploading documents.
 - `contracts/process_contratti.py` reads OCR text for scanned PDFs, identifies signed contract documents, and can rename/move them into the contracts folder.
 - `shared/config.py` loads the shared JSON config.
 - `config.example.json` documents the local configuration shape.
 - `requirements.txt` lists the Python packages currently needed by the available scripts.
 
-Image-only PDF OCR is not bundled yet. The document-reading worker reports those files as needing attention instead of pretending they were processed.
+The installer bundles the official Apache-2.0 `tessdata_fast` Italian, English, and German language models. OCR runs locally on the hotel PC.
 
 ## Install Dependencies
 
@@ -82,6 +82,7 @@ Important config sections:
 - `client`: hotel display/signature names.
 - `paths`: invoice folders, Gmail credential/token file locations, contract scan/OCR/log folders.
 - `gmail`: subject, CC address, and optional `bodyTemplate` for draft creation. `bodyTemplate` supports `{hotelName}`, `{signature}`, `{invoiceCount}`, and `{date}` placeholders; unknown placeholders are left untouched and an empty template falls back to the built-in body. InnPilot's Hotel & Settings page writes these keys when templates are saved.
+- `ocr`: local language models, page/file safety limits, DPI, and the minimum embedded-text threshold. New setups use the bundled `ocr\tessdata` directory.
 - `invoice`: delivery mode, file selection mode, optional filename filters, and recipient routing rules. `deliveryMode` can be `prepareOnly`, `gmailDrafts`, or the future blocked value `sendAutomatically`. `fileSelectionMode` defaults to `allPdfs`, meaning every PDF in the invoice input folder is an invoice candidate and non-PDF files are ignored. Use `filenamePatterns` only for mixed PDF folders; `inputGlobs` may contain multiple filters and legacy `inputGlob` is still accepted.
 - `contracts`: scanner filename prefixes, contract marker texts, and year metadata. `scannerFilePrefixes` and `contractMarkers` may contain multiple values; legacy single-string fields are still accepted.
 - `safety`: dry-run default, original archiving, and log redaction flags.
@@ -130,6 +131,11 @@ InnPilot's Setup page can generate and save a local setup from a guided wizard. 
 Guided setup does not run these automation scripts, does not create Gmail drafts, and does not send emails. After setup is saved and checked, workflows are still started separately from the InnPilot Automations page.
 
 Setup can either create a new InnPilot workspace or connect folders the hotel already uses. Existing-folder discovery is read-only: InnPilot checks folder metadata, nearby folder names, and file-type counts only. It does not read file contents, run automation scripts, call Gmail, upload data, move files, rename files, or delete files. Confirmed mappings are saved into `automation\config.local.json` as normal path values.
+
+The shared Scansioni folder is saved in each PC's local config, so the manager and
+each receptionist may use a different drive letter or UNC path such as
+`\\LIFE-SERVER\Scansioni`. InnPilot copies matching scanner PDFs into that PC's
+local cache with SHA-256 verification before OCR or contract processing begins.
 
 ## Safe Dry Runs
 
@@ -233,13 +239,15 @@ python -m unittest discover automation/tests
 
 The tests cover:
 
+- embedded-text fast-path behavior and local image-page OCR routing
+- stale OCR output detection using a SHA-256 source sidecar
 - invoice dry-run behavior with a generated fake PDF when PyMuPDF is installed
 - Gmail draft dry-run reporting without authentication or file moves
 - contract processing dry-run using fake scan PDF names and fake OCR text
 - missing config failures that leave temp fixture files untouched
 - credential/token file contents not appearing in dry-run output
 
-If PyMuPDF is not installed, the invoice PDF fixture test is skipped. Install `automation\requirements.txt` to run the full automation test suite.
+If PyMuPDF is not installed, PDF-dependent fixture tests are skipped. Install `automation\requirements.txt` to run the full suite and the real local OCR smoke test.
 
 ## Files That Must Never Be Committed
 

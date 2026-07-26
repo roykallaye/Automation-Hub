@@ -18,6 +18,14 @@
     "contractOcrTextDir": "C:\\InnPilot\\OCR\\ScansioniText",
     "contractLogDir": "C:\\InnPilot\\Invoices\\Log"
   },
+  "ocr": {
+    "languages": ["ita", "eng", "deu"],
+    "tessdataDir": "ocr\\tessdata",
+    "maxPages": 20,
+    "dpi": 300,
+    "minEmbeddedChars": 24,
+    "maxFileMb": 50
+  },
   "gmail": {
     "subject": "Invoices - Example Hotel",
     "ccEmail": "backoffice@example.invalid"

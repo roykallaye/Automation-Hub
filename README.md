@@ -485,7 +485,11 @@ The canonical versionable scripts are under:
 - `automation\ocr\extract_scan_text.py`
 - `automation\contracts\process_contratti.py`
 
-The document-reading worker extracts embedded PDF text. Image-only OCR remains a release-roadmap item and is surfaced as a warning rather than silently skipped.
+The document-reading worker uses embedded PDF text when available and locally
+OCRs image-only pages with bundled Italian, English, and German models. PDFs are
+never uploaded to an external OCR service or modified. A SHA-256 sidecar ties
+each text output to the exact source PDF so a stale extraction cannot be reused
+after a scan changes.
 
 The ignored `Script/` folder may exist locally as a copied manager-PC mirror. Do not commit it.
 
@@ -503,7 +507,7 @@ Example fake script behavior:
 
 Use temporary folders for every configured folder path. Never point test config at real guest PDFs, real contracts, or the real Gmail token.
 
-Future improvement: bundle an image-only OCR engine as a signed sidecar and add fixture-based end-to-end tests for the full scan-to-contract pipeline.
+The release gate includes unit tests and a synthetic image-only PDF smoke test for the bundled local OCR path. Real hotel PDFs are never used as test fixtures.
 
 ## Data That Must Never Be Committed
 

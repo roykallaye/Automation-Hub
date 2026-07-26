@@ -103,6 +103,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
             "OCR preprocessing script",
             &config.scripts.ocr_preprocessing_script,
         ),
+        ocr_language_data_check(config),
         script_check(
             "contractProcessingScript",
             "Contract processing script",
@@ -250,6 +251,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
 #[serde(rename_all = "camelCase")]
 struct AutomationFileConfig {
     paths: Option<AutomationFilePaths>,
+    ocr: Option<AutomationFileOcr>,
     invoice: Option<AutomationFileInvoice>,
     safety: Option<AutomationFileSafety>,
 }
@@ -275,6 +277,13 @@ struct AutomationFilePaths {
 #[serde(rename_all = "camelCase")]
 struct AutomationFileInvoice {
     file_selection_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationFileOcr {
+    languages: Option<Vec<String>>,
+    tessdata_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1308,6 +1317,125 @@ fn folder_permission_message(key: &str) -> String {
     )
 }
 
+fn ocr_language_data_check(config: &HubConfig) -> PreflightItem {
+    let config_path = Path::new(config.automation.automation_config_path.trim());
+    if !config_path.is_file() {
+        return PreflightItem {
+            key: "ocrLanguageData".to_string(),
+            label: "Local OCR language data".to_string(),
+            path: None,
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Local OCR language data is checked after setup is saved.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let automation_config = fs::read_to_string(config_path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<AutomationFileConfig>(&contents).ok());
+    let Some(ocr) = automation_config.and_then(|automation| automation.ocr) else {
+        return PreflightItem {
+            key: "ocrLanguageData".to_string(),
+            label: "Local OCR language data".to_string(),
+            path: None,
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Legacy setup does not declare the local OCR models yet. Refresh managed scripts and setup before using image-only PDFs.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    };
+
+    let configured_path = ocr.tessdata_dir.unwrap_or_default();
+    if configured_path.trim().is_empty() {
+        return PreflightItem {
+            key: "ocrLanguageData".to_string(),
+            label: "Local OCR language data".to_string(),
+            path: None,
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: "Local OCR language data is not configured. Refresh InnPilot setup."
+                .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let declared = Path::new(configured_path.trim());
+    let language_dir = if declared.is_absolute() {
+        declared.to_path_buf()
+    } else {
+        config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(declared)
+    };
+    let languages = ocr
+        .languages
+        .filter(|languages| !languages.is_empty())
+        .unwrap_or_else(|| vec!["ita".to_string(), "eng".to_string(), "deu".to_string()]);
+
+    if !language_dir.is_dir() {
+        return PreflightItem {
+            key: "ocrLanguageData".to_string(),
+            label: "Local OCR language data".to_string(),
+            path: Some(language_dir.to_string_lossy().to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingFolder,
+            message:
+                "Local OCR models are missing. Reinstall or refresh InnPilot's managed scripts."
+                    .to_string(),
+            readable: Some(false),
+            writable: None,
+        };
+    }
+
+    let missing = languages
+        .iter()
+        .filter(|language| {
+            language.is_empty()
+                || !language
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+                || !language_dir
+                    .join(format!("{language}.traineddata"))
+                    .is_file()
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return PreflightItem {
+            key: "ocrLanguageData".to_string(),
+            label: "Local OCR language data".to_string(),
+            path: Some(language_dir.to_string_lossy().to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::MissingConfiguration,
+            message: format!(
+                "Local OCR models are incomplete. Missing language codes: {}. Refresh managed scripts.",
+                missing.join(", ")
+            ),
+            readable: Some(true),
+            writable: None,
+        };
+    }
+
+    PreflightItem {
+        key: "ocrLanguageData".to_string(),
+        label: "Local OCR language data".to_string(),
+        path: Some(language_dir.to_string_lossy().to_string()),
+        item_type: "dependency".to_string(),
+        status: ReadinessStatus::Ready,
+        message: format!(
+            "Local OCR is ready for {} language model(s). Documents stay on this PC.",
+            languages.len()
+        ),
+        readable: Some(true),
+        writable: None,
+    }
+}
+
 fn token_check(key: &str, label: &str, path: &str) -> PreflightItem {
     if path.trim().is_empty() {
         return PreflightItem {
@@ -1589,6 +1717,7 @@ fn workflow_preflight(
             "scansioniNetworkShare",
             "scansioniLocalCacheFolder",
             "ocrTextOutputFolder",
+            "ocrLanguageData",
             "contractsOutputFolder",
             "contractsSafeModeSupport",
         ],
@@ -1608,6 +1737,7 @@ fn workflow_preflight(
             "ocrPreprocessingScript",
             "scansioniLocalCacheFolder",
             "ocrTextOutputFolder",
+            "ocrLanguageData",
             "ocrSafeModeSupport",
         ],
         ocr_needs_python,
@@ -2275,6 +2405,69 @@ mod tests {
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
         assert!(item.message.contains("timed out"));
         assert!(item.message.contains("working Python executable"));
+    }
+
+    #[test]
+    fn local_ocr_models_are_ready_when_all_declared_languages_exist() {
+        let config = config_with_temp_paths();
+        let config_path = Path::new(&config.automation.automation_config_path);
+        let tessdata = config_path.parent().unwrap().join("ocr").join("tessdata");
+        fs::create_dir_all(&tessdata).unwrap();
+        for language in ["ita", "eng", "deu"] {
+            fs::write(tessdata.join(format!("{language}.traineddata")), b"fixture").unwrap();
+        }
+        fs::write(
+            config_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "ocr": {
+                    "languages": ["ita", "eng", "deu"],
+                    "tessdataDir": "ocr\\tessdata"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let item = ocr_language_data_check(&config);
+
+        assert_eq!(item.status, ReadinessStatus::Ready);
+        assert!(item.message.contains("3 language"));
+        assert!(item.message.contains("stay on this PC"));
+    }
+
+    #[test]
+    fn missing_local_ocr_model_blocks_image_ocr_before_a_workflow_starts() {
+        let config = config_with_temp_paths();
+        let config_path = Path::new(&config.automation.automation_config_path);
+        let tessdata = config_path.parent().unwrap().join("ocr").join("tessdata");
+        fs::create_dir_all(&tessdata).unwrap();
+        fs::write(tessdata.join("ita.traineddata"), b"fixture").unwrap();
+        fs::write(
+            config_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "ocr": {
+                    "languages": ["ita", "eng", "deu"],
+                    "tessdataDir": "ocr\\tessdata"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let item = ocr_language_data_check(&config);
+
+        assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+        assert!(item.message.contains("eng"));
+        assert!(item.message.contains("deu"));
+        let workflow = workflow(
+            "ocrWorkflow",
+            "OCR workflow",
+            Some("ocr_preprocessing"),
+            &["ocrLanguageData"],
+            std::slice::from_ref(&item),
+            true,
+        );
+        assert!(!workflow.can_run);
     }
 
     fn write_automation_config(

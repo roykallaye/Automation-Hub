@@ -6,6 +6,7 @@ use chrono::Local;
 use serde::Serialize;
 use std::{
     fs,
+    io::{BufReader, Read},
     path::{Path, PathBuf},
 };
 use tauri::{AppHandle, Manager};
@@ -16,6 +17,11 @@ const CANONICAL_FILES: &[&str] = &[
     "gmail_drafts/draft_safety.py",
     "scans/copy_scans.py",
     "ocr/extract_scan_text.py",
+    "ocr/tessdata/README.md",
+    "ocr/tessdata/LICENSE",
+    "ocr/tessdata/ita.traineddata",
+    "ocr/tessdata/eng.traineddata",
+    "ocr/tessdata/deu.traineddata",
     "contracts/process_contratti.py",
     "shared/__init__.py",
     "shared/config.py",
@@ -134,6 +140,17 @@ fn copy_canonical_files(
 
         if destination.exists() {
             if destination.is_file() {
+                match files_have_same_contents(&source, &destination) {
+                    Ok(true) => {
+                        skipped.push(relative.to_string());
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        errors.push(format!("Could not verify existing {relative}: {error}"));
+                        continue;
+                    }
+                }
                 match backup_existing_file(&destination) {
                     Ok(path) => backed_up.push(path.to_string_lossy().to_string()),
                     Err(error) => {
@@ -165,6 +182,42 @@ fn copy_canonical_files(
         config_path: None,
         preflight: None,
     })
+}
+
+fn files_have_same_contents(first: &Path, second: &Path) -> Result<bool, String> {
+    let first_size = fs::metadata(first)
+        .map_err(|error| error.to_string())?
+        .len();
+    let second_size = fs::metadata(second)
+        .map_err(|error| error.to_string())?
+        .len();
+    if first_size != second_size {
+        return Ok(false);
+    }
+
+    let mut first_reader =
+        BufReader::new(fs::File::open(first).map_err(|error| error.to_string())?);
+    let mut second_reader =
+        BufReader::new(fs::File::open(second).map_err(|error| error.to_string())?);
+    let mut first_buffer = [0_u8; 64 * 1024];
+    let mut second_buffer = [0_u8; 64 * 1024];
+    loop {
+        let first_read = first_reader
+            .read(&mut first_buffer)
+            .map_err(|error| error.to_string())?;
+        let second_read = second_reader
+            .read(&mut second_buffer)
+            .map_err(|error| error.to_string())?;
+        if first_read != second_read {
+            return Ok(false);
+        }
+        if first_read == 0 {
+            return Ok(true);
+        }
+        if first_buffer[..first_read] != second_buffer[..second_read] {
+            return Ok(false);
+        }
+    }
 }
 
 fn is_forbidden_relative_path(path: &Path) -> bool {
@@ -312,6 +365,29 @@ mod tests {
         assert_eq!(fs::read_to_string(existing).unwrap(), "canonical");
         assert_eq!(result.backed_up.len(), 1);
         assert!(Path::new(&result.backed_up[0]).is_file());
+    }
+
+    #[test]
+    fn identical_managed_resources_are_skipped_without_creating_backups() {
+        let root = temp_root("skip_identical");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        create_source_tree(&source);
+
+        let first = copy_canonical_files(&source, &destination).unwrap();
+        let second = copy_canonical_files(&source, &destination).unwrap();
+
+        assert!(first.errors.is_empty());
+        assert!(second.errors.is_empty());
+        assert!(second.copied.is_empty());
+        assert!(second.backed_up.is_empty());
+        assert_eq!(second.skipped.len(), CANONICAL_FILES.len());
+        let backup_count = fs::read_dir(destination.join("ocr").join("tessdata"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".bak"))
+            .count();
+        assert_eq!(backup_count, 0);
     }
 
     #[test]
