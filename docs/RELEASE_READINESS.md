@@ -29,12 +29,21 @@ test:clean-install uses the separate product identity
 com.innpilot.validation. It refuses pre-existing validation state, never
 touches the real InnPilot profile, and removes only its exact synthetic profile.
 
+Every push and pull request also runs the source release gates on an isolated
+Windows 2022 GitHub runner. The workflow has read-only repository permission,
+pins official checkout, Node, and Python actions to exact revisions, installs
+the locked dependency graphs, builds and self-tests the private automation
+engine, and then runs `verify:release`. It never receives hotel files, Gmail
+credentials, Supabase service-role keys, signing keys, or production device
+keys. The isolated installer lifecycle and the credentialed LifeDesk cloud
+acceptance remain deliberate release-operator gates.
+
 The gate proves:
 
 - frontend production compilation;
 - packaged resource inventory;
 - compiled worker checksum and synthetic smoke test;
-- 46 Python workflow and safe-file tests;
+- 48 Python workflow and safe-file tests;
 - Rust formatting, strict lint, and 137 all-feature/all-target tests;
 - installer contains no recognized hotel documents, credentials, tokens, or
   connection/device-key files;
@@ -49,16 +58,16 @@ The gate proves:
 | LifeDesk cloud acceptance | 8/8 stages passed; synthetic tenant deleted and verified |
 | LifeDesk tests | 78/78 passed; typecheck and production build passed |
 | InnPilot Rust | 137/137 passed across all features and targets |
-| InnPilot automation | 46/46 passed |
+| InnPilot automation | 48/48 passed |
 | Strict Clippy | Passed with warnings denied |
 | Windows lifecycle | Clean install, upgrade preservation, and safe uninstall passed |
-| Packaged worker SHA-256 | 0e2423a47f4c0cf197b7f5519ce804fb8cc00cde8626f149f4000145238cf7e8 |
+| Packaged worker SHA-256 | 1d2fe071dbf79ab2b6e91748081e8f33e7cb91c412b07d1162ed04a911c0328d |
 | Installer data-leak scan | 0 forbidden operational files |
 
 Relevant source commits:
 
-- LifeDesk: 58d8e35 on dev and production main
-- InnPilot lifecycle evidence: 4d02207; release controls: 69deacd
+- LifeDesk: `76a5415` on dev and production main
+- InnPilot: `3101569` on `codex/lifedesk-integration`
 
 ## Failure-mode coverage
 
