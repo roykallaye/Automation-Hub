@@ -125,6 +125,7 @@ class InnPilotWorkspace:
 
 
 def run_script(script: str, *args: str | Path) -> subprocess.CompletedProcess[str]:
+    """Run one managed script with a hard deadline so release tests cannot hang."""
     command = [sys.executable, str(REPO_ROOT / script), *[str(arg) for arg in args]]
     return subprocess.run(
         command,
@@ -132,6 +133,7 @@ def run_script(script: str, *args: str | Path) -> subprocess.CompletedProcess[st
         text=True,
         capture_output=True,
         check=False,
+        timeout=60,
     )
 
 

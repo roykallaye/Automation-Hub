@@ -11,6 +11,9 @@ const result = spawnSync(
       PYTHONDONTWRITEBYTECODE: '1',
     },
     stdio: 'inherit',
+    timeout: 5 * 60 * 1000,
+    killSignal: 'SIGKILL',
+    windowsHide: true,
   },
 );
 

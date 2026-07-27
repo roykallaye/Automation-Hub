@@ -18,6 +18,7 @@ class WorkerTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            timeout=30,
         )
 
     def test_version_is_available_without_loading_a_workflow(self) -> None:
