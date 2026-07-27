@@ -48,4 +48,16 @@ The private Windows worker is packaged with PyInstaller under its GPL license pl
 
 - Project and license: https://pyinstaller.org/en/stable/license.html
 
+## Tauri desktop runtime
+
+InnPilot uses Tauri 2.11.2 and the official autostart 2.5.1 and
+single-instance 2.4.3 plugins for its Windows desktop shell, notification-area
+lifecycle, and opt-in current-user startup. Tauri and the official plugins are
+provided under Apache-2.0 or MIT. The autostart plugin uses `auto-launch` 0.5.0,
+provided under MIT.
+
+- Tauri: https://github.com/tauri-apps/tauri
+- Official Tauri plugins: https://github.com/tauri-apps/plugins-workspace
+- auto-launch: https://github.com/zzzgydi/auto-launch
+
 This notice is an engineering inventory, not legal advice. Release approval must include license review, the checksum manifest, and the exact dependency manifest produced by the release build.

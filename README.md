@@ -348,7 +348,7 @@ docs\FAKE_WORKSPACE_REHEARSAL.md
 11. Run a dry-run automation from `Automations`.
 12. Confirm the Activity page receives a structured history entry marked `Safe mode`.
 13. Confirm no real Gmail authentication, sending, moving, deleting, or hotel-folder access occurred.
-14. Close InnPilot and delete the fake workspace when finished.
+14. Choose **Esci da InnPilot** from its tray menu, then delete the fake workspace.
 
 InnPilot passes app-controlled `--json-report` paths to the canonical Python scripts that support structured reports. Legacy `.cmd` and `.ps1` wrappers are left unchanged for compatibility.
 

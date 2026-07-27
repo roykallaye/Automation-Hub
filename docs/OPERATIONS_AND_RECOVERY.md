@@ -14,6 +14,9 @@ so hotel documents and cloud job evidence cannot be accidentally erased.
   codes only.
 - InnPilot never sends Gmail messages. The Gmail workflow creates drafts.
 - A workflow cannot run twice at the same time on one PC.
+- Closing the main window keeps the protected runner active in the Windows
+  notification area; **Esci da InnPilot** in the tray menu stops it completely.
+- Windows sign-in startup is opt-in and applies only to the current Windows user.
 - A restarted runner marks an interrupted job for attention; it does not
   silently execute it again.
 - Execute mode must be deliberately approved. Start every new PC and every
@@ -21,7 +24,7 @@ so hotel documents and cloud job evidence cannot be accidentally erased.
 
 ## Daily operator sequence
 
-1. Open InnPilot and check the LifeDesk connection indicator.
+1. Open InnPilot from the tray icon or Start menu and check the LifeDesk connection indicator.
 2. Confirm the intended folder is available.
 3. Open the relevant automation card and review what it will do.
 4. For a new or changed setup, leave Safe mode on and use synthetic files.
@@ -32,6 +35,19 @@ so hotel documents and cloud job evidence cannot be accidentally erased.
 
 No operator should edit config.json, config.local.json, runner.db, the DPAPI
 device-key file, or a generated recovery manifest by hand.
+
+## Windows background operation
+
+In **Hotel & Settings**, **Keep InnPilot ready** lets an operator explicitly
+register or remove InnPilot from the current Windows user's sign-in startup.
+When enabled, InnPilot starts with `--background`, hides its main window, and
+continues only the same integrity-checked, allowlisted LifeDesk runner used while visible.
+It does not run before Windows sign-in and it is not a privileged Windows
+service.
+
+Closing the window hides it to the notification area. Double-click the InnPilot
+icon, or choose **Apri InnPilot**, to restore the window. Choose **Esci da
+InnPilot** to stop the process and runner completely.
 
 ## Recovery points
 
@@ -123,7 +139,7 @@ considering any broader diagnostic collection.
 
 ### LifeDesk says the runner is offline
 
-- Confirm InnPilot is open on the paired PC and that HTTPS access is available.
+- Confirm InnPilot is running in the notification area and that HTTPS access is available.
 - Use **Sync now** once.
 - If the pairing was revoked, a manager creates a new one-time code in LifeDesk
   and pairs that exact PC again.
@@ -149,7 +165,7 @@ considering any broader diagnostic collection.
 
 - InnPilot keeps terminal job evidence in the local ledger until LifeDesk
   acknowledges it.
-- Leave InnPilot open and use Sync later.
+- Leave the InnPilot background runner active and use Sync later.
 - Do not rerun only because LifeDesk has not yet refreshed.
 
 ## First-hotel rollout
@@ -158,12 +174,14 @@ considering any broader diagnostic collection.
 2. Use a dedicated Windows account or a clearly controlled staff account.
 3. Configure the real shared-folder path on that PC.
 4. Pair it with the correct LifeDesk hotel.
-5. Create a recovery point.
-6. Run the packaged worker with synthetic PDFs in safe mode.
-7. Verify LifeDesk receives only counters and safe state.
-8. Observe for one week before enabling execute mode.
-9. Add the first reception PC only after the manager-PC results are reviewed.
-10. Record who can approve execute jobs, revoke a runner, restore settings, and
+5. Enable **Keep InnPilot ready**, sign out and back in, and verify it starts in
+   the notification area without a duplicate process.
+6. Create a recovery point.
+7. Run the packaged worker with synthetic PDFs in safe mode.
+8. Verify LifeDesk receives only counters and safe state.
+9. Observe for one week before enabling execute mode.
+10. Add the first reception PC only after the manager-PC results are reviewed.
+11. Record who can approve execute jobs, revoke a runner, restore settings, and
     access the Windows account.
 
 ## Release integrity

@@ -8,6 +8,7 @@ $expectedAppData = [IO.Path]::GetFullPath(
   (Join-Path $env:APPDATA "com.innpilot.validation")
 )
 $process = $null
+$duplicateProcess = $null
 $installedByProbe = $false
 $ownsProfileCleanup = $false
 
@@ -53,6 +54,11 @@ function Assert-UnderDirectory([string] $Path, [string] $Directory, [string] $La
 }
 
 function Stop-ValidationProcess {
+  if ($null -ne $script:duplicateProcess -and -not $script:duplicateProcess.HasExited) {
+    Stop-Process -Id $script:duplicateProcess.Id -Force
+    $script:duplicateProcess.WaitForExit(10000) | Out-Null
+  }
+  $script:duplicateProcess = $null
   if ($null -ne $script:process -and -not $script:process.HasExited) {
     Stop-Process -Id $script:process.Id -Force
     $script:process.WaitForExit(10000) | Out-Null
@@ -93,6 +99,47 @@ function Wait-ForFile([string] $Path, [int] $Seconds = 25) {
   }
   throw "Timed out waiting for $Path"
 }
+function Wait-ForWorkerReadinessProbe(
+  [string] $WorkerPath,
+  [int] $Seconds = 90,
+  [int] $StableSeconds = 3
+) {
+  $expectedWorker = Get-NormalizedFullPath $WorkerPath
+  $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+  $seenProbe = $false
+  $idleSince = $null
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $active = @(
+      Get-Process -Name "innpilot-worker" -ErrorAction SilentlyContinue |
+        Where-Object {
+          try {
+            (Get-NormalizedFullPath $_.Path).Equals(
+              $expectedWorker,
+              [StringComparison]::OrdinalIgnoreCase
+            )
+          }
+          catch {
+            $false
+          }
+        }
+    )
+    if ($active.Count -gt 0) {
+      $seenProbe = $true
+      $idleSince = $null
+    }
+    elseif ($seenProbe) {
+      if ($null -eq $idleSince) {
+        $idleSince = [DateTime]::UtcNow
+      }
+      elseif (([DateTime]::UtcNow - $idleSince).TotalSeconds -ge $StableSeconds) {
+        return
+      }
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  throw "The installed app did not complete its packaged-worker readiness probe."
+}
+
 
 $existingRecord = Get-ValidationUninstallRecord
 if ($null -ne $existingRecord) {
@@ -168,8 +215,23 @@ try {
   }
 
   $configPath = Join-Path $expectedAppData "config.json"
-  $process = Start-Process -FilePath $application[0].FullName -PassThru -WindowStyle Hidden
+  $process = Start-Process -FilePath $application[0].FullName `
+    -ArgumentList "--background" -PassThru -WindowStyle Hidden
   Wait-ForFile $configPath
+  Wait-ForWorkerReadinessProbe $worker
+  if ($process.HasExited) {
+    throw "The background launch exited before the runner could remain available."
+  }
+
+  $duplicateProcess = Start-Process -FilePath $application[0].FullName `
+    -ArgumentList "--background" -PassThru -WindowStyle Hidden
+  if (-not $duplicateProcess.WaitForExit(10000)) {
+    throw "A second InnPilot process remained active instead of yielding to the existing instance."
+  }
+  $duplicateProcess = $null
+  if ($process.HasExited) {
+    throw "The primary InnPilot process exited while handling a second launch."
+  }
   Stop-ValidationProcess
 
   $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
@@ -219,6 +281,8 @@ try {
   [ordered]@{
     installer = $installers[0].Name
     cleanInstall = "passed"
+    backgroundLaunch = "passed"
+    singleInstance = "passed"
     workerChecksum = $actualDigest
     genericConfig = "passed"
     upgradePreservedConfig = "passed"

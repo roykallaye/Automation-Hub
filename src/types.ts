@@ -342,3 +342,9 @@ export type RecoveryActionResult = {
   preRestorePointId?: string | null;
   restoredConfiguration: boolean;
 };
+
+export type DesktopServiceStatus = {
+  launchAtSignIn: boolean;
+  keepsRunningWhenClosed: boolean;
+  changesAvailable: boolean;
+};

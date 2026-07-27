@@ -44,30 +44,31 @@ The gate proves:
 - packaged resource inventory;
 - compiled worker checksum and synthetic smoke test;
 - 48 Python workflow and safe-file tests;
-- Rust formatting, strict lint, and 137 all-feature/all-target tests;
+- Rust formatting, strict lint, and 139 all-feature/all-target tests;
 - installer contains no recognized hotel documents, credentials, tokens, or
   connection/device-key files;
 - first launch creates generic settings and selects the packaged worker;
+- background launch remains alive and a second launch yields to the existing
+  desktop runner;
 - reinstall preserves existing settings;
 - uninstall preserves recoverable app data.
 
-## Recorded evidence ? 26 July 2026
+## Recorded evidence - 27 July 2026
 
 | Proof | Result |
 | --- | --- |
 | LifeDesk cloud acceptance | 8/8 stages passed; synthetic tenant deleted and verified |
 | LifeDesk tests | 78/78 passed; typecheck and production build passed |
-| InnPilot Rust | 137/137 passed across all features and targets |
+| InnPilot Rust | 139/139 passed across all features and targets |
 | InnPilot automation | 48/48 passed |
 | Strict Clippy | Passed with warnings denied |
-| Windows lifecycle | Clean install, upgrade preservation, and safe uninstall passed |
+| Windows lifecycle | Clean install, background launch, single-instance handoff, upgrade preservation, and safe uninstall passed |
 | Packaged worker SHA-256 | 1d2fe071dbf79ab2b6e91748081e8f33e7cb91c412b07d1162ed04a911c0328d |
 | Installer data-leak scan | 0 forbidden operational files |
 
-Relevant source commits:
-
-- LifeDesk: `76a5415` on dev and production main
-- InnPilot: `3101569` on `codex/lifedesk-integration`
+The commit carrying this document is the InnPilot evidence revision. LifeDesk
+acceptance evidence is retained on its `dev` branch and must be rerun with
+production credentials before a new commercial release.
 
 ## Failure-mode coverage
 
@@ -82,6 +83,7 @@ Relevant source commits:
 | Modified worker | Refuse execution when SHA-256 differs | worker runtime tests and installer probe |
 | Gmail credential/token issue | Fail closed and guide reconnect; never upload or log secrets | preflight, DPAPI, and redaction tests |
 | Uninstall or upgrade | Preserve settings and private recovery state | isolated Windows lifecycle probe |
+| Duplicate desktop launch | Keep one runner and route the launch to the existing instance | isolated Windows lifecycle probe |
 | Malformed cloud result | Emit bounded status/error codes only | runner protocol and raw-error tests |
 
 ## External gates before commercial distribution

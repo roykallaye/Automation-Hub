@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { BrandingPanel } from "../components/BrandingPanel";
+import { DesktopServicePanel } from "../components/DesktopServicePanel";
 import { InfoHint } from "../components/InfoHint";
 import { LifeDeskConnectionPanel } from "../components/LifeDeskConnectionPanel";
 import { PageHeader } from "../components/PageHeader";
@@ -61,6 +62,7 @@ export function SettingsPage({
       <PageHeader title={t("settings.title")} eyebrow={t("settings.eyebrow")} />
 
       <LifeDeskConnectionPanel />
+      <DesktopServicePanel />
 
       <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <div className="flex items-center gap-3">

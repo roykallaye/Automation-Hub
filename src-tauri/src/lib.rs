@@ -6,6 +6,7 @@ mod cloud_probe;
 #[cfg(feature = "cloud-e2e-probe")]
 pub use cloud_probe::run_cloud_e2e_probe;
 mod config;
+mod desktop_service;
 mod discovery;
 mod folder_discovery;
 mod logs;
@@ -23,7 +24,7 @@ mod worker_runtime;
 mod workflows;
 
 use std::{process::Command, sync::Mutex};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WindowEvent};
 
 struct AppState {
     is_running: Mutex<bool>,
@@ -32,6 +33,19 @@ struct AppState {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _arguments, _working_directory| {
+                let app = app.clone();
+                let _ = app.clone().run_on_main_thread(move || {
+                    desktop_service::show_main_window(&app);
+                });
+            },
+        ))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg(desktop_service::BACKGROUND_ARG)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             is_running: Mutex::new(false),
@@ -39,10 +53,19 @@ pub fn run() {
         })
         .setup(|app| {
             config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
+            desktop_service::setup(app)?;
             runner_service::start(app.handle().clone());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            get_desktop_service_status,
+            set_desktop_service_enabled,
             run_command,
             open_path,
             get_latest_logs,
@@ -74,6 +97,22 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
+}
+
+#[tauri::command]
+fn get_desktop_service_status(
+    app: AppHandle,
+) -> Result<desktop_service::DesktopServiceStatus, String> {
+    desktop_service::status(&app)
+}
+
+#[tauri::command]
+fn set_desktop_service_enabled(
+    app: AppHandle,
+    enabled: bool,
+    confirmed: Option<bool>,
+) -> Result<desktop_service::DesktopServiceStatus, String> {
+    desktop_service::set_enabled(&app, enabled, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]
