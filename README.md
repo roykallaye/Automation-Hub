@@ -4,7 +4,9 @@ Windows desktop control panel for hotel office automations.
 
 InnPilot is a Tauri + React operator dashboard for hotel automation. The versionable automation workers now live under `automation/`. The legacy `Script/` folder is treated as a local-only manager-PC import mirror and is ignored by git. InnPilot calls configured script paths through a Rust backend allowlist and performs app-side preflight checks before enabling workflow buttons.
 
-Branding note: the app identity was renamed to InnPilot before production use. Existing pre-production Life Hotel or FlowHost app data can be ignored or removed manually during development; no automated migration is implemented yet.
+Branding note: the app identity was renamed to InnPilot before production use.
+Preserve older pre-production profiles until the pilot upgrade and settings
+migration have been accepted; old product identities are not deleted automatically.
 
 ## Tech Stack
 
@@ -131,13 +133,18 @@ src-tauri\target\release\bundle\nsis
 ```
 
 The same command writes a SHA-256 release manifest under
-build\release. The release manifest is deliberately marked for controlled
-internal evaluation. Commercial distribution is blocked until the PDF/OCR
-licensing decision and Windows code signing are formally completed.
+`build\release`. The release manifest is deliberately marked for controlled
+internal evaluation. Commercial distribution is blocked until code signing,
+the signed update channel, notice/privacy approvals, and the supervised pilot
+are formally completed.
 
 Operational recovery, first-hotel rollout, failure playbooks, and the complete
 release checklist are documented in
 [docs/OPERATIONS_AND_RECOVERY.md](docs/OPERATIONS_AND_RECOVERY.md).
+
+The exact installer, checksum, manager-PC installation, folder mapping,
+LifeDesk pairing, success/failure results, and rollback sequence are in
+[docs/PILOT_HANDOFF.md](docs/PILOT_HANDOFF.md).
 
 Release evidence and the commercial go/no-go decision are recorded in
 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md). The security boundary

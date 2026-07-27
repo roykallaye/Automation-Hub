@@ -66,11 +66,15 @@ do not pass.
 
 ## Current implementation
 
-Pairing and signed manual heartbeat are implemented. Workflow leasing remains
-fail-closed until the durable executor milestone is complete.
+Pairing, signed background synchronization, durable workflow leasing, local
+execution, cancellation, and sanitized result reporting are implemented.
 
 - The release endpoint is fixed to the LifeDesk Supabase project and redirects are disabled.
 - Ed25519 private seed material is protected with current-user Windows DPAPI.
 - The one-time pairing token is never written to disk or logs.
 - Public connection metadata is written with an interrupted-write backup path.
-- Sync uses a fresh nonce, timestamp, exact-body SHA-256, and Ed25519 signature.
+- Every sync uses a fresh nonce, timestamp, exact-body SHA-256, and Ed25519 signature.
+- Leased jobs are committed to the local SQLite ledger before execution.
+- Restarted or interrupted work is recovered without silently repeating a completed run.
+- LifeDesk may select only reviewed built-in workflows; it cannot send paths, commands, or scripts.
+- Only bounded status, counters, timestamps, and allowlisted error codes return to LifeDesk.
