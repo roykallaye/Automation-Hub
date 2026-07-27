@@ -11,6 +11,7 @@
     "build:worker": "npm run build:tesseract && node scripts/build-worker.mjs",
     "build:validation": "tauri build --config src-tauri/tauri.validation.conf.json",
     "test:worker-binary": "node scripts/smoke-worker.mjs",
+    "test:release-security": "node --test scripts/test-release-security.mjs",
     "test:clean-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-clean-install.ps1",
     "verify:release": "node scripts/validate-release.mjs",
     "release:windows": "npm run build:worker && npm run test:worker-binary && tauri build --config src-tauri/tauri.release.conf.json && npm run release:manifest",

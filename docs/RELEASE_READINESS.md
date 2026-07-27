@@ -95,5 +95,11 @@ reintroduction of `PyMuPDF` or `fitz`.
 6. Run a supervised pilot, record operator acceptance, and approve execute mode
    one workflow at a time.
 
+These gates are represented in `release/release-policy.json` and verified against
+the actual release artifacts by `scripts/inspect-authenticode.ps1` and
+`scripts/release-security.mjs`. The generated security audit names every missing
+gate. Setting `INNPILOT_DISTRIBUTION_MODE=commercial` must fail until the audit is
+fully green; internal-evaluation mode remains available for controlled testing.
+
 Until those gates are complete, use only controlled internal evaluation or an
 explicitly supervised synthetic-data pilot.

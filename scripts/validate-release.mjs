@@ -56,6 +56,7 @@ assertCleanSource();
 const gates = [
   ["Frontend production build", npm, npmArgs("run", "build")],
   ["Packaged resource inventory", npm, npmArgs("run", "doctor:resources")],
+  ["Release security policy tests", npm, npmArgs("run", "test:release-security")],
   ["Compiled worker smoke test", npm, npmArgs("run", "test:worker-binary")],
   ["Automation contract tests", npm, npmArgs("run", "test:automation")],
   ["Rust formatting", cargo, ["fmt", "--manifest-path", manifest, "--", "--check"]],

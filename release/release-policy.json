@@ -1,0 +1,24 @@
+{
+  "schema": "innpilot-release-policy-v1",
+  "authenticode": {
+    "expectedPublisherSubject": "",
+    "allowedSignerThumbprints": [],
+    "requireTrustedTimestamp": true
+  },
+  "update": {
+    "clientIntegrated": false,
+    "endpoint": "",
+    "publicKey": "",
+    "signatureVerificationTested": false,
+    "stagedRolloutTested": false,
+    "rollbackTested": false
+  },
+  "approvals": {
+    "ocrRuntimeNoticesApproved": false,
+    "ocrRuntimeNoticesEvidence": "",
+    "privacyAndDpaApproved": false,
+    "privacyAndDpaEvidence": "",
+    "supervisedPilotAccepted": false,
+    "supervisedPilotEvidence": ""
+  }
+}

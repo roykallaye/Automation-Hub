@@ -4,10 +4,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createReleaseSecurityAudit } from "./release-security.mjs";
 
 const root = process.cwd();
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -21,10 +23,8 @@ if (packageJson.version !== tauriConfig.version) {
 
 const distributionMode =
   process.env.INNPILOT_DISTRIBUTION_MODE || "internal-evaluation";
-if (distributionMode !== "internal-evaluation") {
-  throw new Error(
-    "Commercial release is intentionally blocked until Windows signing, signed updates, and the pinned OCR runtime notices are formally approved.",
-  );
+if (!["internal-evaluation", "commercial"].includes(distributionMode)) {
+  throw new Error("Distribution mode must be internal-evaluation or commercial.");
 }
 
 const commit = execFileSync("git", ["-c", `safe.directory=${gitSafeRoot}`, "rev-parse", "HEAD"], {
@@ -66,6 +66,10 @@ if (installers.length !== 1) {
 const workerDir = join(root, "build", "worker");
 const files = [
   { role: "windows_installer", path: join(nsisDir, installers[0]) },
+  {
+    role: "desktop_application",
+    path: join(root, "src-tauri", "target", "release", "innpilot.exe"),
+  },
   { role: "automation_worker", path: join(workerDir, "innpilot-worker.exe") },
   { role: "worker_checksum", path: join(workerDir, "innpilot-worker.sha256") },
   {
@@ -80,14 +84,46 @@ for (const file of files) {
   }
 }
 
-const workerDigest = sha256(files[1].path);
-const declaredWorkerDigest = readFileSync(files[2].path, "utf8")
+const workerFile = files.find((file) => file.role === "automation_worker");
+const checksumFile = files.find((file) => file.role === "worker_checksum");
+const workerDigest = sha256(workerFile.path);
+const declaredWorkerDigest = readFileSync(checksumFile.path, "utf8")
   .trim()
   .split(/\s+/)[0]
   .toLowerCase();
 if (workerDigest !== declaredWorkerDigest) {
   throw new Error("The packaged worker does not match its declared checksum.");
 }
+
+const outputDir = join(root, "build", "release");
+mkdirSync(outputDir, { recursive: true });
+const output = join(outputDir, "innpilot-release.json");
+const securityAuditPath = join(outputDir, "innpilot-release-security.json");
+for (const staleOutput of [output, output + ".sha256", securityAuditPath]) {
+  rmSync(staleOutput, { force: true });
+}
+
+const securityAudit = createReleaseSecurityAudit({
+  version: packageJson.version,
+  commit,
+  policyPath: join(root, "release", "release-policy.json"),
+  signatureScriptPath: join(root, "scripts", "inspect-authenticode.ps1"),
+  targets: files
+    .filter((file) =>
+      ["windows_installer", "desktop_application", "automation_worker"].includes(file.role),
+    )
+    .map((file) => ({ role: file.role, path: file.path })),
+});
+writeFileSync(securityAuditPath, JSON.stringify(securityAudit, null, 2) + "\n");
+files.push({ role: "release_security_audit", path: securityAuditPath });
+
+if (distributionMode === "commercial" && !securityAudit.commercialReady) {
+  throw new Error(
+    "Commercial release blocked: " + securityAudit.missingGates.join("; "),
+  );
+}
+const commercialApproved =
+  distributionMode === "commercial" && securityAudit.commercialReady;
 
 const manifest = {
   schema: "innpilot-release-v1",
@@ -97,14 +133,19 @@ const manifest = {
   sourceTreeClean: !trackedChanges,
   distribution: {
     mode: distributionMode,
-    commercialDistributionApproved: false,
-    reason:
-      "This unsigned build is for controlled internal evaluation only; commercial release also requires a signed update channel and formal approval of the pinned OCR runtime notices.",
+    commercialDistributionApproved: commercialApproved,
+    reason: commercialApproved
+      ? "All source-controlled commercial release gates passed."
+      : `Commercial release blocked by ${securityAudit.missingGates.length} verified gate(s).`,
   },
   platform: { os: "windows", architecture: "x86_64", package: "nsis" },
   security: {
     packagedWorkerChecksumVerified: true,
     codeSigningRequiredForCommercialRelease: true,
+    authenticodeSignaturesValid: securityAudit.authenticodeValid,
+    signedUpdateChannelReady: securityAudit.signedUpdateReady,
+    commercialGatesPassed: securityAudit.commercialReady,
+    securityAuditSha256: sha256(securityAuditPath),
     hotelOperationalDataIncluded: false,
   },
   artifacts: files.map((file) => {
@@ -118,9 +159,6 @@ const manifest = {
   }),
 };
 
-const outputDir = join(root, "build", "release");
-mkdirSync(outputDir, { recursive: true });
-const output = join(outputDir, "innpilot-release.json");
 const serialized = JSON.stringify(manifest, null, 2) + "\n";
 writeFileSync(output, serialized);
 writeFileSync(
@@ -128,7 +166,7 @@ writeFileSync(
   `${createHash("sha256").update(serialized).digest("hex")}  innpilot-release.json\n`,
 );
 console.log(
-  `InnPilot ${manifest.version} internal-evaluation manifest created for ${installers[0]}.`,
+  `InnPilot ${manifest.version} ${distributionMode} manifest created for ${installers[0]}.`,
 );
 
 function sha256(path) {

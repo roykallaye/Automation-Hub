@@ -168,22 +168,32 @@ considering any broader diagnostic collection.
 
 ## Release integrity
 
-npm run release:windows performs the worker build, packaged-worker smoke test,
+`npm run release:windows` performs the worker build, packaged-worker smoke test,
 NSIS build, and release-manifest generation. The manifest hashes the installer,
-worker, worker checksum, resolved dependency list, and third-party notices.
+desktop executable, worker, worker checksum, resolved dependency list, third-party
+notices, and generated release-security audit.
 
-The current release path deliberately emits an **internal-evaluation** manifest.
-The former PyMuPDF licensing blocker has been removed from the runtime. Commercial
-distribution remains blocked in source until all of these conditions are met:
+The checked-in `release/release-policy.json` is deliberately fail-closed. Every
+commercial field starts empty or false. The Authenticode audit inspects the actual
+installer, desktop executable, and automation worker with Windows trust APIs; it
+requires the exact publisher subject, an allowlisted certificate thumbprint, and
+a trusted timestamp on all three files. It also requires an integrated signed
+update client, pinned HTTPS endpoint and public key, tested staged rollout and
+rollback, approved OCR-runtime notices, privacy/DPA approval, and supervised pilot
+acceptance.
 
-1. The Windows installer and application are signed with the product publisher's
-   trusted code-signing certificate and the release pipeline verifies the signer.
-2. Updates are distributed through a signed, rollback-capable channel.
-3. The notices for the exact pinned Tesseract runtime and the DLL inventory in
-   its generated runtime manifest have received formal release approval.
+Normal generation emits an **internal-evaluation** manifest and a named list of
+missing gates. A commercial attempt is intentionally explicit:
 
-A successful build is not commercial approval. Do not rename or remove this
-gate to prepare a client release.
+```powershell
+$env:INNPILOT_DISTRIBUTION_MODE = "commercial"
+npm run release:manifest
+```
+
+That command exits non-zero unless every policy gate and live artifact check
+passes. A successful technical build alone is not commercial approval. Do not
+rename, bypass, or populate policy evidence before the corresponding external
+work has actually been completed and recorded.
 
 ## Release gate checklist
 
@@ -198,8 +208,11 @@ gate to prepare a client release.
 - [ ] Installer is validated in a clean Windows environment.
 - [ ] Upgrade preserves configuration and DPAPI identity.
 - [ ] Uninstall behavior is documented and does not remove hotel folders.
-- [ ] Installer signature is valid for commercial distribution.
-- [ ] PDF/OCR licensing decision is approved for commercial distribution.
+- [ ] Installer, desktop executable, and worker signatures match the pinned publisher and thumbprint.
+- [ ] Every signed executable contains a trusted timestamp.
+- [ ] Signed update verification, staged rollout, and rollback tests pass.
+- [ ] PDF/OCR notices are approved for commercial distribution.
+- [ ] Release security audit reports zero missing gates.
 - [ ] Release manifest and its checksum are archived with the release.
 
 ## Incident evidence
