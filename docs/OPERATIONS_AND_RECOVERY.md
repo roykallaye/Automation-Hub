@@ -198,6 +198,14 @@ reused for up to ten minutes only when both the canonical worker path and
 verified SHA-256 digest still match; this avoids repeated one-file worker cold
 starts while preserving fail-closed verification.
 
+The main InnPilot window does not wait for that cold process to finish. It loads
+the saved configuration and filesystem checks immediately, shows the automation
+engine as being verified, and performs the signed-worker check on a blocking
+worker thread. Automation actions remain disabled until the verified result
+returns. A configuration refresh invalidates older pending UI results, and the
+workflow runner performs the full preflight again before any operational process
+starts.
+
 The checked-in `release/release-policy.json` is deliberately fail-closed. Every
 commercial field starts empty or false. The Authenticode audit inspects the actual
 installer, desktop executable, and automation worker with Windows trust APIs; it

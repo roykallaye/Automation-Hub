@@ -197,6 +197,7 @@ function deriveModule(
   );
   const warningItems = items.filter((item) => item.status === "warning");
   const blockingWorkflow = workflows.find((workflow) => workflow && !workflow.canRun);
+  const checkingWorkflow = workflows.find((workflow) => workflow?.status === "notChecked");
 
   if (!items.length && !workflows.length) {
     return {
@@ -224,6 +225,21 @@ function deriveModule(
       blockingProblems: blockingItems.map((item) =>
         staffMessage(item.message, item.status, item.key),
       ),
+      warnings: warningItems.map((item) =>
+        staffMessage(item.message, item.status, item.key),
+      ),
+    };
+  }
+
+  if (checkingWorkflow) {
+    return {
+      id: definition.id,
+      title: t(definition.titleKey),
+      status: "not_checked",
+      shortReason: t("module.checkingReason"),
+      nextAction: t("module.checkingNext"),
+      relatedWorkflowCommandNames: definition.relatedWorkflowCommandNames,
+      blockingProblems: [],
       warnings: warningItems.map((item) =>
         staffMessage(item.message, item.status, item.key),
       ),

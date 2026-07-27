@@ -44,7 +44,7 @@ pub(crate) fn save_client_branding(
     .sanitized();
 
     let config_path = config::save_config_for_app(app, &hub_config)?;
-    Ok(preflight::AppConfigStatus::new(
+    Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
         hub_config,
     ))

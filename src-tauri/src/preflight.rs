@@ -33,6 +33,14 @@ impl AppConfigStatus {
             config,
         }
     }
+
+    pub(crate) fn new_fast(config_path: String, config: HubConfig) -> Self {
+        Self {
+            preflight: build_fast_preflight_report(&config),
+            config_path,
+            config,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,11 +91,27 @@ struct WorkflowPreflight {
 
 pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
     let engine_probe = python_package_probe(&config.automation.python_executable);
+    build_preflight_report_with_probe(config, &engine_probe)
+}
+
+pub(crate) fn build_fast_preflight_report(config: &HubConfig) -> PreflightReport {
+    let engine_probe = if config.automation.python_executable.trim().is_empty() {
+        PythonPackageProbe::NotConfigured
+    } else {
+        PythonPackageProbe::Deferred
+    };
+    build_preflight_report_with_probe(config, &engine_probe)
+}
+
+fn build_preflight_report_with_probe(
+    config: &HubConfig,
+    engine_probe: &PythonPackageProbe,
+) -> PreflightReport {
     let mut items = vec![
         automation_root_check(&config.automation.automation_root_folder),
         automation_config_check(&config.automation.automation_config_path),
-        python_check(&config.automation.python_executable, &engine_probe),
-        python_package_summary_check(&config.automation.python_executable, &engine_probe),
+        python_check(&config.automation.python_executable, engine_probe),
+        python_package_summary_check(&config.automation.python_executable, engine_probe),
         script_check(
             "invoiceWorkflowScript",
             "Invoice workflow script",
@@ -237,7 +261,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
     ];
     dependencies.extend(python_package_dependency_checks(
         &config.automation.python_executable,
-        &engine_probe,
+        engine_probe,
     ));
 
     let workflows = workflow_preflight(config, &items, &dependencies);
@@ -762,9 +786,26 @@ fn python_check(python_executable: &str, probe: &PythonPackageProbe) -> Prefligh
         };
     }
 
+    if matches!(probe, PythonPackageProbe::Deferred) {
+        return PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Automation engine".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "readiness".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message: "Automation engine safety check is running in the background.".to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
     let bundled_worker = is_innpilot_worker(python_executable);
     if bundled_worker {
         let (status, message) = match probe {
+            PythonPackageProbe::Deferred => (
+                ReadinessStatus::NotChecked,
+                "Automation engine safety check is running in the background.".to_string(),
+            ),
             PythonPackageProbe::Ready => (
                 ReadinessStatus::Ready,
                 "Private InnPilot automation engine ready.".to_string(),
@@ -938,6 +979,7 @@ const REQUIRED_PYTHON_PACKAGES: &[RequiredPythonPackage] = &[
 
 #[derive(Debug, Clone)]
 enum PythonPackageProbe {
+    Deferred,
     NotConfigured,
     IntegrityFailed,
     PythonUnavailable,
@@ -1050,6 +1092,17 @@ fn python_package_summary_check(
     probe: &PythonPackageProbe,
 ) -> PreflightItem {
     match probe {
+        PythonPackageProbe::Deferred => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Automation capabilities".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "readiness".to_string(),
+            status: ReadinessStatus::NotChecked,
+            message:
+                "Automation capabilities are being verified in the background.".to_string(),
+            readable: None,
+            writable: None,
+        },
         PythonPackageProbe::NotConfigured => PreflightItem {
             key: "pythonPackages".to_string(),
             label: "Python packages".to_string(),
@@ -1143,6 +1196,10 @@ fn python_package_dependency_checks(
                 _ => false,
             };
             let (status, message) = match probe {
+                PythonPackageProbe::Deferred => (
+                    ReadinessStatus::NotChecked,
+                    "Automation capability check is running in the background.".to_string(),
+                ),
                 PythonPackageProbe::NotConfigured => (
                     ReadinessStatus::NotChecked,
                     "Choose a Python executable before checking this package.".to_string(),
@@ -1180,7 +1237,11 @@ fn python_package_dependency_checks(
                 key: package.key.to_string(),
                 label: package.label.to_string(),
                 path: Some(python_executable.to_string()),
-                item_type: "dependency".to_string(),
+                item_type: if matches!(probe, PythonPackageProbe::Deferred) {
+                    "readiness".to_string()
+                } else {
+                    "dependency".to_string()
+                },
                 status,
                 message,
                 readable: None,
@@ -2082,6 +2143,7 @@ fn is_blocking_status(status: &ReadinessStatus, item_type: &str) -> bool {
         ReadinessStatus::Ready => false,
         ReadinessStatus::Warning => false,
         ReadinessStatus::NotChecked if item_type == "token" => false,
+        ReadinessStatus::NotChecked if item_type == "readiness" => true,
         ReadinessStatus::NotChecked => false,
         ReadinessStatus::MissingConfiguration
         | ReadinessStatus::MissingScript
@@ -2678,6 +2740,43 @@ mod tests {
         );
 
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
+    }
+
+    #[test]
+    fn fast_preflight_defers_the_worker_process_and_blocks_python_workflows() {
+        let mut config = config_with_temp_paths();
+        config.automation.python_executable =
+            r"C:\definitely-missing\innpilot-worker.exe".to_string();
+        let python_script = Path::new(&config.scripts.invoice_workflow_script).with_extension("py");
+        fs::write(&python_script, b"print('fixture')").unwrap();
+        config.scripts.invoice_workflow_script = python_script.to_string_lossy().to_string();
+
+        let report = build_fast_preflight_report(&config);
+        let engine = report
+            .items
+            .iter()
+            .find(|item| item.key == "pythonExecutable")
+            .unwrap();
+        let invoice = report
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .unwrap();
+
+        assert_eq!(engine.status, ReadinessStatus::NotChecked);
+        assert_eq!(engine.item_type, "readiness");
+        assert!(engine.message.contains("background"));
+        assert_eq!(invoice.status, ReadinessStatus::NotChecked);
+        assert!(!invoice.can_run);
+    }
+
+    #[test]
+    fn deferred_readiness_is_blocking_but_an_absent_optional_token_is_not() {
+        assert!(is_blocking_status(
+            &ReadinessStatus::NotChecked,
+            "readiness"
+        ));
+        assert!(!is_blocking_status(&ReadinessStatus::NotChecked, "token"));
     }
 
     #[test]

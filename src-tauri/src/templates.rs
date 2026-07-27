@@ -39,7 +39,7 @@ pub(crate) fn save_output_templates(
         &hub_config,
     )?;
 
-    Ok(preflight::AppConfigStatus::new(
+    Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
         hub_config,
     ))

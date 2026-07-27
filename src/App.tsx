@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   automationActions,
@@ -34,6 +34,7 @@ import type {
 function App() {
   const [configStatus, setConfigStatus] = useState<AppConfigStatus | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
+  const [checkingReadiness, setCheckingReadiness] = useState(true);
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
   const [liveOutput, setLiveOutput] = useState<string[]>([]);
   const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
@@ -44,6 +45,7 @@ function App() {
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
   const [currentPage, setCurrentPage] = useState<AppPage>("home");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const configRefreshId = useRef(0);
 
   const branding = configStatus?.config.client.branding;
   useEffect(() => {
@@ -111,7 +113,7 @@ function App() {
   const nextAction = useMemo(
     () =>
       deriveNextAction({
-        loading: loadingConfig,
+        loading: loadingConfig || checkingReadiness,
         configStatus,
         modules,
         lastSummary,
@@ -119,20 +121,42 @@ function App() {
         runningCommand,
         t,
       }),
-    [activityHistory, configStatus, lastSummary, loadingConfig, modules, runningCommand, t],
+    [activityHistory, checkingReadiness, configStatus, lastSummary, loadingConfig, modules, runningCommand, t],
   );
 
   async function refreshConfigStatus() {
+    const requestId = ++configRefreshId.current;
+    setCheckingReadiness(true);
     try {
       const nextStatus = await invoke<AppConfigStatus>("get_config_status");
+      if (requestId !== configRefreshId.current) return null;
       setConfigStatus(nextStatus);
-      setNotice(t("app.ready"));
+      setNotice(t("app.readinessChecking"));
+      void refreshVerifiedConfigStatus(requestId);
       return nextStatus;
     } catch (error) {
-      setNotice(readError(error));
+      if (requestId === configRefreshId.current) {
+        setNotice(readError(error));
+        setCheckingReadiness(false);
+      }
       return null;
     } finally {
-      setLoadingConfig(false);
+      if (requestId === configRefreshId.current) {
+        setLoadingConfig(false);
+      }
+    }
+  }
+
+  async function refreshVerifiedConfigStatus(requestId: number) {
+    try {
+      const verifiedStatus = await invoke<AppConfigStatus>("refresh_config_status");
+      if (requestId !== configRefreshId.current) return;
+      setConfigStatus(verifiedStatus);
+      setNotice(t("app.ready"));
+      setCheckingReadiness(false);
+    } catch {
+      if (requestId !== configRefreshId.current) return;
+      setNotice(t("app.readinessCheckFailed"));
     }
   }
 
@@ -241,6 +265,7 @@ function App() {
 
   function actionDisabledReason(action: AutomationAction) {
     if (loadingConfig) return t("app.setupLoading");
+    if (checkingReadiness) return t("app.readinessChecking");
     if (!configStatus) return t("app.setupLoadFailed");
     const workflow = workflowFor(action);
     if (!workflow) return t("app.workflowStatusMissing");

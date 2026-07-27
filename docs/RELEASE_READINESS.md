@@ -44,12 +44,15 @@ The gate proves:
 - packaged resource inventory;
 - compiled worker checksum and synthetic smoke test;
 - 48 Python workflow and safe-file tests;
-- Rust formatting, strict lint, and 141 all-feature/all-target tests;
+- Rust formatting, strict lint, and 143 all-feature/all-target tests;
 - installer contains no recognized hotel documents, credentials, tokens, or
   connection/device-key files;
 - first launch creates generic settings and selects the packaged worker;
 - packaged-worker integrity is verified before its readiness process can start,
   and repeated checks reuse only the same verified digest;
+- the desktop interface loads from a process-free status check while the deep
+  engine check runs off the UI thread; every automation action remains locked
+  until that verified result arrives;
 - background launch remains alive and a second launch yields to the existing
   desktop runner;
 - reinstall preserves existing settings;
@@ -61,7 +64,7 @@ The gate proves:
 | --- | --- |
 | LifeDesk cloud acceptance | 8/8 stages passed; synthetic tenant deleted and verified |
 | LifeDesk tests | 78/78 passed; typecheck and production build passed |
-| InnPilot Rust | 141/141 passed across all features and targets |
+| InnPilot Rust | 143/143 passed across all features and targets |
 | InnPilot automation | 48/48 passed |
 | Strict Clippy | Passed with warnings denied |
 | Windows lifecycle | Clean install, background launch, single-instance handoff, upgrade preservation, and safe uninstall passed |
@@ -85,6 +88,7 @@ production credentials before a new commercial release.
 | Corrupt recovery point | Reject restore before modifying live settings | manifest integrity tests |
 | Modified worker | Refuse execution when SHA-256 differs | worker runtime tests and installer probe |
 | Modified worker during preflight | Block before starting the worker and invalidate cached readiness when its digest changes | worker trust-order and dependency tests |
+| Cold or slow worker startup | Show the desktop immediately, report verification in progress, and keep actions locked; execution independently reruns full preflight | deferred-readiness tests and clean-install probe |
 | Gmail credential/token issue | Fail closed and guide reconnect; never upload or log secrets | preflight, DPAPI, and redaction tests |
 | Uninstall or upgrade | Preserve settings and private recovery state | isolated Windows lifecycle probe |
 | Duplicate desktop launch | Keep one runner and route the launch to the existing instance | isolated Windows lifecycle probe |

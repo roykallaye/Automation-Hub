@@ -71,6 +71,7 @@ pub fn run() {
             get_latest_logs,
             get_last_run_summary,
             get_config_status,
+            refresh_config_status,
             validate_configuration,
             preview_setup,
             initialize_workspace,
@@ -196,10 +197,23 @@ fn open_activity_report(app: AppHandle, path: String) -> Result<(), String> {
 #[tauri::command]
 fn get_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, String> {
     let (config, config_path) = config::ensure_config_with_path(&app)?;
-    Ok(preflight::AppConfigStatus::new(
+    Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
         config,
     ))
+}
+
+#[tauri::command]
+async fn refresh_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (config, config_path) = config::ensure_config_with_path(&app)?;
+        Ok(preflight::AppConfigStatus::new(
+            config_path.to_string_lossy().to_string(),
+            config,
+        ))
+    })
+    .await
+    .map_err(|_| "The automation safety check stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -229,7 +243,7 @@ fn save_app_language(
     language: String,
 ) -> Result<preflight::AppConfigStatus, String> {
     let (config, config_path) = config::save_language_for_app(&app, &language)?;
-    Ok(preflight::AppConfigStatus::new(
+    Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
         config,
     ))
