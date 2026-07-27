@@ -15,18 +15,22 @@ pub(crate) fn is_innpilot_worker(executable: &str) -> bool {
 }
 
 pub(crate) fn verify_worker(executable: &str) -> Result<(), String> {
+    verified_worker_digest(executable).map(|_| ())
+}
+
+pub(crate) fn verified_worker_digest(executable: &str) -> Result<Option<String>, String> {
     if !is_innpilot_worker(executable) {
-        return Ok(());
+        return Ok(None);
     }
     let worker = Path::new(executable);
     let checksum_path = worker
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(CHECKSUM_FILE);
-    verify_worker_files(worker, &checksum_path)
+    verify_worker_files(worker, &checksum_path).map(Some)
 }
 
-fn verify_worker_files(worker: &Path, checksum_path: &Path) -> Result<(), String> {
+fn verify_worker_files(worker: &Path, checksum_path: &Path) -> Result<String, String> {
     let metadata = worker
         .metadata()
         .map_err(|_| "The private automation engine is missing.".to_string())?;
@@ -41,7 +45,7 @@ fn verify_worker_files(worker: &Path, checksum_path: &Path) -> Result<(), String
                 .to_string(),
         );
     }
-    Ok(())
+    Ok(actual)
 }
 
 fn read_expected_checksum(path: &Path) -> Result<String, String> {
@@ -91,7 +95,8 @@ mod tests {
             format!("{}  innpilot-worker.exe\n", sha256_file(&worker).unwrap()),
         )
         .unwrap();
-        assert!(verify_worker_files(&worker, &checksum).is_ok());
+        let digest = verify_worker_files(&worker, &checksum).unwrap();
+        assert_eq!(digest, sha256_file(&worker).unwrap());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -116,6 +121,9 @@ mod tests {
     #[test]
     fn external_python_is_not_subject_to_worker_checksum_format() {
         assert!(verify_worker(r"C:\Python314\python.exe").is_ok());
+        assert!(verified_worker_digest(r"C:\Python314\python.exe")
+            .unwrap()
+            .is_none());
     }
 
     fn temp_root(name: &str) -> PathBuf {

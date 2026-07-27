@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -13,6 +14,8 @@ use std::{
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const PACKAGED_WORKER_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const DPAPI_SECRET_MAGIC: &[u8] = b"INNPILOT-DPAPI-SECRET-V1\n";
+
+const PACKAGED_WORKER_PROBE_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,12 +82,12 @@ struct WorkflowPreflight {
 }
 
 pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
-    let python_package_probe = python_package_probe(&config.automation.python_executable);
+    let engine_probe = python_package_probe(&config.automation.python_executable);
     let mut items = vec![
         automation_root_check(&config.automation.automation_root_folder),
         automation_config_check(&config.automation.automation_config_path),
-        python_check(&config.automation.python_executable),
-        python_package_summary_check(&config.automation.python_executable, &python_package_probe),
+        python_check(&config.automation.python_executable, &engine_probe),
+        python_package_summary_check(&config.automation.python_executable, &engine_probe),
         script_check(
             "invoiceWorkflowScript",
             "Invoice workflow script",
@@ -234,7 +237,7 @@ pub(crate) fn build_preflight_report(config: &HubConfig) -> PreflightReport {
     ];
     dependencies.extend(python_package_dependency_checks(
         &config.automation.python_executable,
-        &python_package_probe,
+        &engine_probe,
     ));
 
     let workflows = workflow_preflight(config, &items, &dependencies);
@@ -743,24 +746,7 @@ fn automation_engine_check_timeout(executable: &str) -> Duration {
     }
 }
 
-fn python_check(python_executable: &str) -> PreflightItem {
-    let bundled_worker = is_innpilot_worker(python_executable);
-
-    if bundled_worker && crate::worker_runtime::verify_worker(python_executable).is_err() {
-        return PreflightItem {
-            key: "pythonExecutable".to_string(),
-            label: "Automation engine".to_string(),
-            path: Some(python_executable.to_string()),
-            item_type: "dependency".to_string(),
-            status: ReadinessStatus::PermissionProblem,
-            message:
-                "The private automation engine failed its integrity check. Reinstall InnPilot."
-                    .to_string(),
-            readable: None,
-            writable: None,
-        };
-    }
-
+fn python_check(python_executable: &str, probe: &PythonPackageProbe) -> PreflightItem {
     if python_executable.trim().is_empty() {
         return PreflightItem {
             key: "pythonExecutable".to_string(),
@@ -771,6 +757,50 @@ fn python_check(python_executable: &str) -> PreflightItem {
             message:
                 "The automation engine is not configured. Ask setup support to repair InnPilot."
                     .to_string(),
+            readable: None,
+            writable: None,
+        };
+    }
+
+    let bundled_worker = is_innpilot_worker(python_executable);
+    if bundled_worker {
+        let (status, message) = match probe {
+            PythonPackageProbe::Ready => (
+                ReadinessStatus::Ready,
+                "Private InnPilot automation engine ready.".to_string(),
+            ),
+            PythonPackageProbe::IntegrityFailed => (
+                ReadinessStatus::PermissionProblem,
+                "The private automation engine failed its integrity check. Reinstall InnPilot."
+                    .to_string(),
+            ),
+            PythonPackageProbe::TimedOut => (
+                ReadinessStatus::MissingConfiguration,
+                "Automation engine check timed out. Ask setup support to repair InnPilot."
+                    .to_string(),
+            ),
+            PythonPackageProbe::PythonUnavailable => (
+                ReadinessStatus::MissingConfiguration,
+                "The private automation engine was not found. Reinstall InnPilot.".to_string(),
+            ),
+            PythonPackageProbe::NotConfigured => (
+                ReadinessStatus::MissingConfiguration,
+                "The automation engine is not configured. Ask setup support to repair InnPilot."
+                    .to_string(),
+            ),
+            PythonPackageProbe::Missing(_) | PythonPackageProbe::CheckFailed => (
+                ReadinessStatus::MissingConfiguration,
+                "The private automation engine failed its readiness check. Reinstall InnPilot."
+                    .to_string(),
+            ),
+        };
+        return PreflightItem {
+            key: "pythonExecutable".to_string(),
+            label: "Automation engine".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status,
+            message,
             readable: None,
             writable: None,
         };
@@ -791,11 +821,7 @@ fn python_check(python_executable: &str) -> PreflightItem {
                 path: Some(python_executable.to_string()),
                 item_type: "dependency".to_string(),
                 status: ReadinessStatus::Ready,
-                message: if bundled_worker {
-                    format!("Private InnPilot automation engine ready: {version}.")
-                } else {
-                    format!("External Python found: {version}.")
-                },
+                message: format!("External Python found: {version}."),
                 readable: None,
                 writable: None,
             }
@@ -913,6 +939,7 @@ const REQUIRED_PYTHON_PACKAGES: &[RequiredPythonPackage] = &[
 #[derive(Debug, Clone)]
 enum PythonPackageProbe {
     NotConfigured,
+    IntegrityFailed,
     PythonUnavailable,
     TimedOut,
     Ready,
@@ -920,10 +947,25 @@ enum PythonPackageProbe {
     CheckFailed,
 }
 
+#[derive(Debug, Clone)]
+struct CachedPackagedWorkerProbe {
+    path: PathBuf,
+    digest: String,
+    checked_at: Instant,
+    result: PythonPackageProbe,
+}
+
+static PACKAGED_WORKER_PROBE_CACHE: OnceLock<Mutex<Option<CachedPackagedWorkerProbe>>> =
+    OnceLock::new();
+
 fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
     if python_executable.trim().is_empty() {
         return PythonPackageProbe::NotConfigured;
     }
+    if is_innpilot_worker(python_executable) {
+        return packaged_worker_probe(python_executable);
+    }
+
     let required_modules = REQUIRED_PYTHON_PACKAGES
         .iter()
         .map(|package| format!("'{}'", package.module))
@@ -932,19 +974,11 @@ fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
     let script = format!(
         "import importlib.util, sys; required=[{required_modules}]; missing=[name for name in required if importlib.util.find_spec(name) is None]; print(', '.join(missing)); sys.exit(1 if missing else 0)"
     );
-    let output = if is_innpilot_worker(python_executable) {
-        command_output_with_timeout(
-            python_executable,
-            &["--health-check"],
-            automation_engine_check_timeout(python_executable),
-        )
-    } else {
-        command_output_with_timeout(
-            python_executable,
-            &["-c", &script],
-            automation_engine_check_timeout(python_executable),
-        )
-    };
+    let output = command_output_with_timeout(
+        python_executable,
+        &["-c", &script],
+        automation_engine_check_timeout(python_executable),
+    );
 
     match output {
         Ok(output) if output.status.success() => PythonPackageProbe::Ready,
@@ -966,6 +1000,51 @@ fn python_package_probe(python_executable: &str) -> PythonPackageProbe {
     }
 }
 
+fn packaged_worker_probe(python_executable: &str) -> PythonPackageProbe {
+    let digest = match crate::worker_runtime::verified_worker_digest(python_executable) {
+        Ok(Some(digest)) => digest,
+        Ok(None) | Err(_) => return PythonPackageProbe::IntegrityFailed,
+    };
+    let path = Path::new(python_executable)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(python_executable));
+    let cache = PACKAGED_WORKER_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    let mut cache = match cache.lock() {
+        Ok(cache) => cache,
+        Err(_) => return PythonPackageProbe::CheckFailed,
+    };
+    if let Some(cached) = cache.as_ref() {
+        if cached.path == path
+            && cached.digest == digest
+            && cached.checked_at.elapsed() <= PACKAGED_WORKER_PROBE_CACHE_TTL
+        {
+            return cached.result.clone();
+        }
+    }
+
+    let result = match command_output_with_timeout(
+        python_executable,
+        &["--health-check"],
+        automation_engine_check_timeout(python_executable),
+    ) {
+        Ok(output) if output.status.success() => PythonPackageProbe::Ready,
+        Ok(_) => PythonPackageProbe::CheckFailed,
+        Err(TimedCommandError::Timeout) => PythonPackageProbe::TimedOut,
+        Err(TimedCommandError::Io) => PythonPackageProbe::PythonUnavailable,
+    };
+    if matches!(result, PythonPackageProbe::Ready) {
+        *cache = Some(CachedPackagedWorkerProbe {
+            path,
+            digest,
+            checked_at: Instant::now(),
+            result: result.clone(),
+        });
+    } else {
+        *cache = None;
+    }
+    result
+}
+
 fn python_package_summary_check(
     python_executable: &str,
     probe: &PythonPackageProbe,
@@ -978,6 +1057,18 @@ fn python_package_summary_check(
             item_type: "dependency".to_string(),
             status: ReadinessStatus::NotChecked,
             message: "Python packages can be checked after Python is configured.".to_string(),
+            readable: None,
+            writable: None,
+        },
+        PythonPackageProbe::IntegrityFailed => PreflightItem {
+            key: "pythonPackages".to_string(),
+            label: "Python packages".to_string(),
+            path: Some(python_executable.to_string()),
+            item_type: "dependency".to_string(),
+            status: ReadinessStatus::PermissionProblem,
+            message:
+                "The private automation engine failed its integrity check. Reinstall InnPilot."
+                    .to_string(),
             readable: None,
             writable: None,
         },
@@ -1055,6 +1146,11 @@ fn python_package_dependency_checks(
                 PythonPackageProbe::NotConfigured => (
                     ReadinessStatus::NotChecked,
                     "Choose a Python executable before checking this package.".to_string(),
+                ),
+                PythonPackageProbe::IntegrityFailed => (
+                    ReadinessStatus::PermissionProblem,
+                    "The private automation engine failed its integrity check. Reinstall InnPilot."
+                        .to_string(),
                 ),
                 PythonPackageProbe::PythonUnavailable => (
                     ReadinessStatus::NotChecked,
@@ -2576,7 +2672,10 @@ mod tests {
 
     #[test]
     fn missing_python_executable_is_reported() {
-        let item = python_check("definitely_missing_python_for_innpilot_tests.exe");
+        let item = python_check(
+            "definitely_missing_python_for_innpilot_tests.exe",
+            &PythonPackageProbe::PythonUnavailable,
+        );
 
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
     }
@@ -2598,6 +2697,31 @@ mod tests {
         assert_eq!(item.status, ReadinessStatus::MissingConfiguration);
         assert!(item.message.contains("Install the Python packages"));
         assert!(item.message.contains("pypdf"));
+    }
+
+    #[test]
+    fn packaged_worker_uses_the_integrity_checked_probe_without_a_second_process() {
+        let path = r"C:\InnPilot\worker\innpilot-worker.exe";
+        let ready = python_check(path, &PythonPackageProbe::Ready);
+        let changed = python_check(path, &PythonPackageProbe::IntegrityFailed);
+
+        assert_eq!(ready.status, ReadinessStatus::Ready);
+        assert!(ready.message.contains("Private InnPilot"));
+        assert_eq!(changed.status, ReadinessStatus::PermissionProblem);
+        assert!(changed.message.contains("integrity check"));
+    }
+
+    #[test]
+    fn packaged_worker_integrity_failure_blocks_every_dependency() {
+        let checks = python_package_dependency_checks(
+            r"C:\InnPilot\worker\innpilot-worker.exe",
+            &PythonPackageProbe::IntegrityFailed,
+        );
+
+        assert!(!checks.is_empty());
+        assert!(checks
+            .iter()
+            .all(|item| item.status == ReadinessStatus::PermissionProblem));
     }
 
     #[test]

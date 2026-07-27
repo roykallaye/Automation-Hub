@@ -191,6 +191,13 @@ NSIS build, and release-manifest generation. The manifest hashes the installer,
 desktop executable, worker, worker checksum, resolved dependency list, third-party
 notices, and generated release-security audit.
 
+Before InnPilot starts the packaged worker for a readiness check, it hashes the
+worker and compares it with the packaged checksum. A failed integrity check is
+blocking and the worker is never executed. A successful readiness result is
+reused for up to ten minutes only when both the canonical worker path and
+verified SHA-256 digest still match; this avoids repeated one-file worker cold
+starts while preserving fail-closed verification.
+
 The checked-in `release/release-policy.json` is deliberately fail-closed. Every
 commercial field starts empty or false. The Authenticode audit inspects the actual
 installer, desktop executable, and automation worker with Windows trust APIs; it

@@ -9,6 +9,7 @@ $expectedAppData = [IO.Path]::GetFullPath(
 )
 $process = $null
 $duplicateProcess = $null
+$workerReadinessSeconds = $null
 $installedByProbe = $false
 $ownsProfileCleanup = $false
 
@@ -218,7 +219,9 @@ try {
   $process = Start-Process -FilePath $application[0].FullName `
     -ArgumentList "--background" -PassThru -WindowStyle Hidden
   Wait-ForFile $configPath
-  Wait-ForWorkerReadinessProbe $worker
+  $workerReadinessSeconds = [Math]::Round(
+    (Measure-Command { Wait-ForWorkerReadinessProbe $worker }).TotalSeconds, 2
+  )
   if ($process.HasExited) {
     throw "The background launch exited before the runner could remain available."
   }
@@ -282,6 +285,7 @@ try {
     installer = $installers[0].Name
     cleanInstall = "passed"
     backgroundLaunch = "passed"
+    workerReadinessSeconds = $workerReadinessSeconds
     singleInstance = "passed"
     workerChecksum = $actualDigest
     genericConfig = "passed"
