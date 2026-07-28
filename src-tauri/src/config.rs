@@ -1,11 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
+    fs::{self, File, OpenOptions, Permissions},
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
 };
 use tauri::{AppHandle, Manager};
 
 const CONFIG_VERSION: u32 = 2;
+
+const CONFIG_BACKUP_SUFFIX: &str = ".bak";
+const CONFIG_TEMP_ATTEMPTS: u64 = 64;
+static CONFIG_IO_LOCK: Mutex<()> = Mutex::new(());
+static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -306,10 +316,7 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
         .map_err(|error| format!("Could not create app data directory: {error}"))?;
     let config_path = app_data_dir.join("config.json");
 
-    if config_path.exists() {
-        let contents = fs::read_to_string(&config_path)
-            .map_err(|error| format!("Could not read config file: {error}"))?;
-        let (mut config, should_rewrite) = parse_config_with_migration(&contents)?;
+    if let Some((mut config, should_rewrite)) = load_config_with_recovery(&config_path)? {
         let worker_changed = prefer_packaged_worker(app, &mut config);
         if should_rewrite || worker_changed {
             write_config(&config_path, &config)?;
@@ -441,9 +448,311 @@ fn merge_json(
 }
 
 fn write_config(config_path: &Path, config: &HubConfig) -> Result<(), String> {
-    let contents = serde_json::to_string_pretty(config)
+    let _io_guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "Configuration persistence lock is unavailable.".to_string())?;
+    write_config_with_primary_activation(config_path, config, atomic_activate_file)
+}
+
+fn write_config_with_primary_activation<F>(
+    config_path: &Path,
+    config: &HubConfig,
+    activate_primary: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&Path, &Path) -> Result<(), String>,
+{
+    let contents = serde_json::to_vec_pretty(config)
         .map_err(|error| format!("Could not prepare config: {error}"))?;
-    fs::write(config_path, contents).map_err(|error| format!("Could not write config: {error}"))
+
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| "The config file has no parent folder.".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not prepare config folder: {error}"))?;
+
+    if config_path.exists() {
+        let current_contents = fs::read_to_string(config_path)
+            .map_err(|error| format!("Could not read the current config before saving: {error}"))?;
+        parse_config_with_migration(&current_contents).map_err(|error| {
+            format!(
+                "The current config is invalid, so it was not replaced and its backup was preserved: {error}"
+            )
+        })?;
+        install_last_known_good_backup(config_path, current_contents.as_bytes())?;
+    }
+
+    let permissions = existing_permissions(config_path)?;
+    atomic_write_bytes_with(config_path, &contents, permissions, activate_primary)
+}
+
+fn load_config_with_recovery(config_path: &Path) -> Result<Option<(HubConfig, bool)>, String> {
+    let _io_guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "Configuration persistence lock is unavailable.".to_string())?;
+    load_config_with_recovery_unlocked(config_path)
+}
+
+fn load_config_with_recovery_unlocked(
+    config_path: &Path,
+) -> Result<Option<(HubConfig, bool)>, String> {
+    if config_path.exists() {
+        match read_validated_config(config_path, "primary") {
+            Ok((_, config, should_rewrite)) => {
+                return Ok(Some((config, should_rewrite)));
+            }
+            Err(primary_error) => {
+                return recover_validated_backup(config_path, &primary_error).map(Some);
+            }
+        }
+    }
+
+    let backup_path = config_backup_path(config_path);
+    if backup_path.exists() {
+        return recover_validated_backup(config_path, "The primary config is missing.").map(Some);
+    }
+
+    Ok(None)
+}
+
+fn recover_validated_backup(
+    config_path: &Path,
+    primary_error: &str,
+) -> Result<(HubConfig, bool), String> {
+    let backup_path = config_backup_path(config_path);
+    if !backup_path.exists() {
+        return Err(format!(
+            "{primary_error} No last-known-good config backup is available."
+        ));
+    }
+
+    let (backup_contents, config, should_rewrite) =
+        read_validated_config(&backup_path, "last-known-good backup").map_err(|backup_error| {
+            format!(
+                "{primary_error} Recovery was refused because the last-known-good backup is also invalid: {backup_error}"
+            )
+        })?;
+
+    let permissions = existing_permissions(config_path)?;
+    atomic_write_bytes_with(
+        config_path,
+        backup_contents.as_bytes(),
+        permissions,
+        atomic_activate_file,
+    )
+    .map_err(|error| {
+        format!(
+            "{primary_error} The backup was valid, but the primary config could not be restored safely: {error}"
+        )
+    })?;
+
+    Ok((config, should_rewrite))
+}
+
+fn read_validated_config(path: &Path, label: &str) -> Result<(String, HubConfig, bool), String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read the {label} config: {error}"))?;
+    let (config, should_rewrite) = parse_config_with_migration(&contents)
+        .map_err(|error| format!("The {label} config is invalid: {error}"))?;
+    Ok((contents, config, should_rewrite))
+}
+
+fn install_last_known_good_backup(
+    config_path: &Path,
+    validated_primary: &[u8],
+) -> Result<(), String> {
+    let backup_path = config_backup_path(config_path);
+    let permissions = existing_permissions(config_path)?;
+    atomic_write_bytes_with(
+        &backup_path,
+        validated_primary,
+        permissions,
+        atomic_activate_file,
+    )
+    .map_err(|error| format!("Could not preserve the last-known-good config backup: {error}"))
+}
+
+fn config_backup_path(config_path: &Path) -> PathBuf {
+    let file_name = config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.json");
+    config_path.with_file_name(format!("{file_name}{CONFIG_BACKUP_SUFFIX}"))
+}
+
+fn existing_permissions(path: &Path) -> Result<Option<Permissions>, String> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(Some(metadata.permissions())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Could not inspect config permissions: {error}")),
+    }
+}
+
+fn atomic_write_bytes_with<F>(
+    target: &Path,
+    contents: &[u8],
+    permissions: Option<Permissions>,
+    activate: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&Path, &Path) -> Result<(), String>,
+{
+    let (temp_path, mut temp_file) = create_unique_sibling_temp(target)?;
+    let mut pending = PendingTemp::new(temp_path);
+
+    if let Some(permissions) = permissions {
+        fs::set_permissions(pending.path(), permissions)
+            .map_err(|error| format!("Could not preserve config permissions: {error}"))?;
+    }
+
+    temp_file
+        .write_all(contents)
+        .map_err(|error| format!("Could not write temporary config: {error}"))?;
+    temp_file
+        .flush()
+        .map_err(|error| format!("Could not flush temporary config: {error}"))?;
+    temp_file
+        .sync_all()
+        .map_err(|error| format!("Could not safely sync temporary config: {error}"))?;
+    drop(temp_file);
+
+    activate(pending.path(), target)?;
+    pending.disarm();
+    Ok(())
+}
+
+fn create_unique_sibling_temp(target: &Path) -> Result<(PathBuf, File), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| "The config file has no parent folder.".to_string())?;
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.json");
+
+    for _ in 0..CONFIG_TEMP_ATTEMPTS {
+        let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.{sequence}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((candidate, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("Could not create temporary config: {error}"));
+            }
+        }
+    }
+
+    Err("Could not allocate a unique temporary config file.".to_string())
+}
+
+struct PendingTemp {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl PendingTemp {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingTemp {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn atomic_activate_file(temp: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const REPLACEFILE_WRITE_THROUGH: u32 = 0x0000_0001;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn ReplaceFileW(
+            replaced_file_name: *const u16,
+            replacement_file_name: *const u16,
+            backup_file_name: *const u16,
+            replace_flags: u32,
+            exclude: *mut std::ffi::c_void,
+            reserved: *mut std::ffi::c_void,
+        ) -> i32;
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let temp_wide = wide(temp);
+    let target_wide = wide(target);
+    let replaced = if target.exists() {
+        unsafe {
+            ReplaceFileW(
+                target_wide.as_ptr(),
+                temp_wide.as_ptr(),
+                std::ptr::null(),
+                REPLACEFILE_WRITE_THROUGH,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe {
+            MoveFileExW(
+                temp_wide.as_ptr(),
+                target_wide.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        }
+    };
+
+    if replaced == 0 {
+        Err(format!(
+            "Could not atomically activate config: {}",
+            io::Error::last_os_error()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn atomic_activate_file(temp: &Path, target: &Path) -> Result<(), String> {
+    fs::rename(temp, target)
+        .map_err(|error| format!("Could not atomically activate config: {error}"))?;
+    if let Some(parent) = target.parent() {
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("Could not sync config directory: {error}"))?;
+    }
+    Ok(())
 }
 
 fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
@@ -639,6 +948,133 @@ fn looks_like_automation_root(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn persistence_temp_root(label: &str) -> PathBuf {
+        let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "innpilot_config_persistence_{label}_{}_{}",
+            std::process::id(),
+            sequence
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn assert_no_pending_config_temps(root: &Path) {
+        let pending: Vec<_> = fs::read_dir(root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            pending.is_empty(),
+            "temporary config files were not cleaned up: {pending:?}"
+        );
+    }
+
+    #[test]
+    fn atomic_config_save_reloads_and_preserves_previous_valid_version() {
+        let root = persistence_temp_root("save_reload");
+        let path = root.join("config.json");
+        let mut first = default_config();
+        first.client.display_name = "First Hotel Name".to_string();
+        write_config(&path, &first).unwrap();
+
+        let (loaded_first, _) = load_config_with_recovery(&path).unwrap().unwrap();
+        assert_eq!(loaded_first, first);
+        assert!(!config_backup_path(&path).exists());
+
+        let mut second = first.clone();
+        second.client.display_name = "Current Hotel Name".to_string();
+        write_config(&path, &second).unwrap();
+
+        let (loaded_second, _) = load_config_with_recovery(&path).unwrap().unwrap();
+        let (_, backed_up_first, _) =
+            read_validated_config(&config_backup_path(&path), "test backup").unwrap();
+        assert_eq!(loaded_second, second);
+        assert_eq!(backed_up_first, first);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_primary_recovers_only_from_a_validated_last_known_good_backup() {
+        let root = persistence_temp_root("primary_recovery");
+        let path = root.join("config.json");
+        let mut last_known_good = default_config();
+        last_known_good.client.display_name = "Last Known Good".to_string();
+        write_config(&path, &last_known_good).unwrap();
+
+        let mut current = last_known_good.clone();
+        current.client.display_name = "Current Before Corruption".to_string();
+        write_config(&path, &current).unwrap();
+        fs::write(&path, br#"{"schemaVersion":"#).unwrap();
+
+        let (recovered, _) = load_config_with_recovery(&path).unwrap().unwrap();
+        let (_, restored_primary, _) = read_validated_config(&path, "restored primary").unwrap();
+        assert_eq!(recovered, last_known_good);
+        assert_eq!(restored_primary, last_known_good);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_backup_is_ignored_for_valid_primary_and_refused_for_corrupt_primary() {
+        let root = persistence_temp_root("backup_corruption");
+        let path = root.join("config.json");
+        let mut first = default_config();
+        first.client.display_name = "First".to_string();
+        write_config(&path, &first).unwrap();
+
+        let mut current = first.clone();
+        current.client.display_name = "Current".to_string();
+        write_config(&path, &current).unwrap();
+        let backup = config_backup_path(&path);
+        fs::write(&backup, br#"{"invalid":"#).unwrap();
+
+        let (loaded, _) = load_config_with_recovery(&path).unwrap().unwrap();
+        assert_eq!(loaded, current);
+
+        fs::write(&path, br#"{"also-invalid":"#).unwrap();
+        let primary_before = fs::read(&path).unwrap();
+        let backup_before = fs::read(&backup).unwrap();
+        let error = load_config_with_recovery(&path).unwrap_err();
+        assert!(error.contains("Recovery was refused"));
+        assert!(error.contains("backup is also invalid"));
+        assert_eq!(fs::read(&path).unwrap(), primary_before);
+        assert_eq!(fs::read(&backup).unwrap(), backup_before);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_pre_replace_activation_leaves_complete_primary_and_no_partial_temp() {
+        let root = persistence_temp_root("pre_replace_failure");
+        let path = root.join("config.json");
+        let mut original = default_config();
+        original.client.display_name = "Original".to_string();
+        write_config(&path, &original).unwrap();
+
+        let mut replacement = original.clone();
+        replacement.client.display_name = "Replacement".to_string();
+        let error = write_config_with_primary_activation(&path, &replacement, |temp, target| {
+            assert_eq!(target, path);
+            assert_eq!(temp.parent(), path.parent());
+            let staged = fs::read_to_string(temp).unwrap();
+            let (staged_config, _) = parse_config_with_migration(&staged).unwrap();
+            assert_eq!(staged_config, replacement);
+            Err("simulated failure before atomic replacement".to_string())
+        })
+        .unwrap_err();
+
+        assert!(error.contains("simulated failure"));
+        let (_, persisted, _) = read_validated_config(&path, "primary").unwrap();
+        let (_, backup, _) = read_validated_config(&config_backup_path(&path), "backup").unwrap();
+        assert_eq!(persisted, original);
+        assert_eq!(backup, original);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn default_config_contains_portable_schema_and_generic_defaults() {
