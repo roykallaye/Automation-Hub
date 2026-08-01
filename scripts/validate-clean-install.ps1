@@ -191,18 +191,38 @@ try {
     throw "The clean-install worker failed its checksum."
   }
 
-  $forbiddenExtensions = @(
-    ".csv", ".doc", ".docx", ".eml", ".jpeg", ".jpg", ".msg", ".ods",
-    ".pdf", ".rtf", ".tif", ".tiff", ".xls", ".xlsm", ".xlsx", ".zip"
-  )
-
-  $forbidden = @(
-    Get-ChildItem -LiteralPath $installDirectory -Recurse -File |
-      Where-Object {
-        $_.Name -match "^(gmail_token|gmail_credentials|config\.local|connection|device-key)" -or
-        $_.Extension.ToLowerInvariant() -in $forbiddenExtensions
+  $payloadPolicyPath = Join-Path $root "release\installed-payload-policy.json"
+  $payloadPolicy = Get-Content -LiteralPath $payloadPolicyPath -Raw | ConvertFrom-Json
+  if ($payloadPolicy.schema -ne "innpilot-installed-payload-policy-v1") {
+    throw "The installed payload policy has an unsupported schema."
+  }
+  $forbiddenExtensions = @($payloadPolicy.forbiddenExtensions | ForEach-Object {
+    ([string] $_).ToLowerInvariant()
+  })
+  $textExtensions = @($payloadPolicy.textFileExtensions | ForEach-Object {
+    ([string] $_).ToLowerInvariant()
+  })
+  $forbidden = [Collections.Generic.List[string]]::new()
+  foreach ($file in Get-ChildItem -LiteralPath $installDirectory -Recurse -File) {
+    $relativePath = [IO.Path]::GetRelativePath($installDirectory, $file.FullName).Replace("\", "/")
+    if ($file.Extension.ToLowerInvariant() -in $forbiddenExtensions) {
+      $forbidden.Add("forbidden extension: $relativePath")
+    }
+    foreach ($rule in $payloadPolicy.forbiddenFileNamePatterns) {
+      if ([regex]::IsMatch($relativePath, [string] $rule.pattern)) {
+        $forbidden.Add("$($rule.id): $relativePath")
       }
-  )
+    }
+    if ($file.Extension.ToLowerInvariant() -in $textExtensions -and
+        $file.Length -le [long] $payloadPolicy.maximumTextFileBytes) {
+      $content = Get-Content -LiteralPath $file.FullName -Raw
+      foreach ($rule in $payloadPolicy.forbiddenTextPatterns) {
+        if ([regex]::IsMatch($content, [string] $rule.pattern)) {
+          $forbidden.Add("$($rule.id): $relativePath")
+        }
+      }
+    }
+  }
   if ($forbidden.Count -gt 0) {
     throw "The validation installer contains forbidden operational data."
   }

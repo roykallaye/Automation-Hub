@@ -6,12 +6,42 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::mpsc,
+    process::{Child, Command, Stdio},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
+#[cfg(not(feature = "cloud-e2e-probe"))]
+use tauri::Manager;
 use tauri::{AppHandle, Emitter};
+
+#[cfg(windows)]
+use std::os::windows::{io::AsRawHandle, process::CommandExt};
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
+    System::{
+        Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+        },
+        JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        },
+        Threading::{
+            OpenThread, ResumeThread, CREATE_NO_WINDOW, CREATE_SUSPENDED, THREAD_SUSPEND_RESUME,
+        },
+    },
+};
+
+const MAX_OUTPUT_BYTES_PER_STEP: usize = 1024 * 1024;
+const MAX_OUTPUT_LINE_BYTES: usize = 16 * 1024;
+const OUTPUT_CHANNEL_CAPACITY: usize = 64;
+const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Serialize)]
 struct CommandEvent {
@@ -54,6 +84,12 @@ enum WorkflowImpact {
     High,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkflowRunSource {
+    Local,
+    Remote,
+}
+
 pub(crate) fn ensure_confirmation(command_name: &str, confirmed: bool) -> Result<(), String> {
     if workflow_impact(command_name).is_some() && !confirmed {
         Err("This action needs confirmation before InnPilot can run it.".to_string())
@@ -78,12 +114,55 @@ pub(crate) async fn run_command_inner_controlled<F>(
 where
     F: Fn() -> bool,
 {
-    let config = config::ensure_config(app)?;
+    run_command_inner_controlled_from(
+        app,
+        command_name,
+        dry_run_override,
+        should_cancel,
+        WorkflowRunSource::Local,
+    )
+    .await
+}
+
+pub(crate) async fn run_remote_command_inner_controlled<F>(
+    app: &AppHandle,
+    command_name: &str,
+    dry_run: bool,
+    should_cancel: F,
+) -> Result<RunSummary, String>
+where
+    F: Fn() -> bool,
+{
+    run_command_inner_controlled_from(
+        app,
+        command_name,
+        Some(dry_run),
+        should_cancel,
+        WorkflowRunSource::Remote,
+    )
+    .await
+}
+
+async fn run_command_inner_controlled_from<F>(
+    app: &AppHandle,
+    command_name: &str,
+    dry_run_override: Option<bool>,
+    should_cancel: F,
+    source: WorkflowRunSource,
+) -> Result<RunSummary, String>
+where
+    F: Fn() -> bool,
+{
+    let mut config = config::ensure_config(app)?;
     preflight::ensure_workflow_can_run(command_name, &config)?;
     let reports_dir = activity::activity_reports_dir(app)?;
     let dry_run = dry_run_override.unwrap_or(config.safety.dry_run_default);
     let (automation_name, steps) =
         command_steps(command_name, &config, Some(&reports_dir), dry_run)?;
+    if source == WorkflowRunSource::Remote {
+        ensure_remote_runtime(app, command_name, &config, &steps)?;
+        config.safety.redact_logs = true;
+    }
     let start = Local::now();
     let timer = Instant::now();
     let mut output_tail = VecDeque::with_capacity(100);
@@ -139,6 +218,7 @@ where
             &step,
             &mut output_tail,
             config.safety.redact_logs,
+            &should_cancel,
         )?;
         step_results.push(StepResult {
             name: step.name.to_string(),
@@ -204,6 +284,76 @@ fn workflow_impact(command_name: &str) -> Option<WorkflowImpact> {
         | "process_signed_contracts" => Some(WorkflowImpact::High),
         _ => None,
     }
+}
+
+fn ensure_remote_runtime(
+    _app: &AppHandle,
+    command_name: &str,
+    config: &config::HubConfig,
+    steps: &[CommandStep],
+) -> Result<(), String> {
+    #[cfg(feature = "cloud-e2e-probe")]
+    let trusted_worker = PathBuf::from(&config.automation.python_executable);
+    #[cfg(not(feature = "cloud-e2e-probe"))]
+    let trusted_worker =
+        config::packaged_worker_path(_app).ok_or_else(|| "RUNNER_UNTRUSTED_RUNTIME".to_string())?;
+
+    crate::worker_runtime::verified_trusted_worker_digest(
+        &config.automation.python_executable,
+        &trusted_worker,
+    )
+    .map_err(|_| "RUNNER_UNTRUSTED_RUNTIME".to_string())?;
+    if steps.is_empty() {
+        return Err("RUNNER_UNTRUSTED_RUNTIME".to_string());
+    }
+
+    #[cfg(feature = "cloud-e2e-probe")]
+    let automation_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| "RUNNER_UNTRUSTED_RUNTIME".to_string())?
+        .join("automation");
+    #[cfg(not(feature = "cloud-e2e-probe"))]
+    let automation_root = _app
+        .path()
+        .resource_dir()
+        .map_err(|_| "RUNNER_UNTRUSTED_RUNTIME".to_string())?
+        .join("automation");
+
+    let expected_scripts: &[&str] = match command_name {
+        "process_invoices_and_drafts" => {
+            if config.invoice_delivery_mode == config::InvoiceDeliveryMode::PrepareOnly {
+                &["invoices/process_fatture.py"]
+            } else {
+                &[
+                    "invoices/process_fatture.py",
+                    "gmail_drafts/create_gmail_draft.py",
+                ]
+            }
+        }
+        "copy_scansioni" => &["scans/copy_scans.py"],
+        "process_signed_contracts" => &[
+            "scans/copy_scans.py",
+            "ocr/extract_scan_text.py",
+            "contracts/process_contratti.py",
+        ],
+        _ => return Err("RUNNER_UNTRUSTED_RUNTIME".to_string()),
+    };
+
+    if steps.len() != expected_scripts.len()
+        || steps.iter().zip(expected_scripts).any(|(step, expected)| {
+            step.program != config.automation.python_executable
+                || step.args.first().is_none_or(|path| {
+                    !crate::worker_runtime::trusted_path_matches(
+                        Path::new(path),
+                        &automation_root.join(expected),
+                    )
+                })
+                || step.report_path.is_none()
+        })
+    {
+        return Err("RUNNER_UNTRUSTED_RUNTIME".to_string());
+    }
+    Ok(())
 }
 
 fn command_steps(
@@ -422,12 +572,164 @@ fn reset_gmail_token(path: &str) -> Result<(), String> {
         .map_err(|error| format!("Could not reset the configured Gmail token: {error}"))
 }
 
+#[cfg(windows)]
+fn configure_contained_command(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+}
+
+#[cfg(not(windows))]
+fn configure_contained_command(_command: &mut Command) {}
+
+#[cfg(windows)]
+unsafe fn resume_primary_thread(process_id: u32) -> Result<(), ()> {
+    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(());
+    }
+
+    let mut entry: THREADENTRY32 = std::mem::zeroed();
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    let mut resumed = false;
+    if Thread32First(snapshot, &mut entry) != 0 {
+        loop {
+            if entry.th32OwnerProcessID == process_id {
+                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                if !thread.is_null() {
+                    resumed = ResumeThread(thread) != u32::MAX;
+                    CloseHandle(thread);
+                }
+                break;
+            }
+            if Thread32Next(snapshot, &mut entry) == 0 {
+                break;
+            }
+        }
+    }
+    CloseHandle(snapshot);
+    resumed.then_some(()).ok_or(())
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct ChildContainment {
+    job: Option<HANDLE>,
+}
+
+#[cfg(windows)]
+impl ChildContainment {
+    fn attach(child: &mut Child) -> Result<Self, String> {
+        let result = unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                Err(())
+            } else {
+                let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let configured = SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    std::ptr::addr_of!(limits).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) != 0;
+                let assigned = configured
+                    && AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) != 0;
+                let resumed = assigned && resume_primary_thread(child.id()).is_ok();
+                if !resumed {
+                    if assigned {
+                        TerminateJobObject(job, 1);
+                    }
+                    CloseHandle(job);
+                    Err(())
+                } else {
+                    Ok(Self { job: Some(job) })
+                }
+            }
+        };
+
+        result.map_err(|_| {
+            if child.kill().is_ok() {
+                let _ = child.wait();
+            }
+            "RUNNER_CONTAINMENT_FAILURE".to_string()
+        })
+    }
+
+    fn terminate(&self) -> Result<(), String> {
+        let Some(job) = self.job else {
+            return Err("RUNNER_CONTAINMENT_FAILURE".to_string());
+        };
+        if unsafe { TerminateJobObject(job, 1) } == 0 {
+            return Err("RUNNER_CONTAINMENT_FAILURE".to_string());
+        }
+        Ok(())
+    }
+
+    fn release(&mut self) {
+        if let Some(job) = self.job.take() {
+            unsafe {
+                CloseHandle(job);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ChildContainment {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+#[cfg(not(windows))]
+#[derive(Debug)]
+struct ChildContainment;
+
+#[cfg(not(windows))]
+impl ChildContainment {
+    fn attach(_child: &mut Child) -> Result<Self, String> {
+        Ok(Self)
+    }
+
+    fn release(&mut self) {}
+}
+
+#[cfg(windows)]
+fn terminate_child(child: &mut Child, containment: &mut ChildContainment) -> Result<(), String> {
+    if containment.terminate().is_err() {
+        if child.kill().is_ok() {
+            let _ = child.wait();
+        }
+        containment.release();
+        return Err("RUNNER_CONTAINMENT_FAILURE".to_string());
+    }
+    let _ = child.wait();
+    containment.release();
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn terminate_child(child: &mut Child, containment: &mut ChildContainment) -> Result<(), String> {
+    child
+        .kill()
+        .map_err(|_| "RUNNER_CONTAINMENT_FAILURE".to_string())?;
+    let _ = child.wait();
+    containment.release();
+    Ok(())
+}
+
+#[derive(Debug)]
+struct StreamLine {
+    stream: &'static str,
+    line: String,
+}
+
 fn run_step(
     app: &AppHandle,
     command_name: &str,
     step: &CommandStep,
     output_tail: &mut VecDeque<String>,
     redact_logs: bool,
+    should_cancel: &impl Fn() -> bool,
 ) -> Result<i32, String> {
     crate::worker_runtime::verify_worker(&step.program)?;
     let mut command = Command::new(&step.program);
@@ -436,15 +738,12 @@ fn run_step(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
+    configure_contained_command(&mut command);
 
     let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start {}: {error}", step.name))?;
+    let mut containment = ChildContainment::attach(&mut child)?;
     let stdout = child
         .stdout
         .take()
@@ -453,39 +752,94 @@ fn run_step(
         .stderr
         .take()
         .ok_or_else(|| format!("Could not capture stderr for {}", step.name))?;
-    let (sender, receiver) = mpsc::channel::<(String, String)>();
+    let (sender, receiver) = mpsc::sync_channel::<StreamLine>(OUTPUT_CHANNEL_CAPACITY);
+    let output_bytes = Arc::new(AtomicUsize::new(0));
 
     let stdout_sender = sender.clone();
-    thread::spawn(move || read_stream("stdout", stdout, stdout_sender));
+    let stdout_bytes = Arc::clone(&output_bytes);
+    let stdout_thread =
+        thread::spawn(move || read_stream("stdout", stdout, stdout_sender, stdout_bytes));
     let stderr_sender = sender.clone();
-    thread::spawn(move || read_stream("stderr", stderr, stderr_sender));
+    let stderr_bytes = Arc::clone(&output_bytes);
+    let stderr_thread =
+        thread::spawn(move || read_stream("stderr", stderr, stderr_sender, stderr_bytes));
     drop(sender);
+    let deadline = Instant::now() + STEP_TIMEOUT;
+    let mut stop_error = None;
 
     let exit_code = loop {
-        match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
-            Ok((stream, line)) => {
-                handle_output_line(app, command_name, &stream, &line, output_tail, redact_logs);
-                for (stream, line) in receiver.try_iter() {
-                    handle_output_line(app, command_name, &stream, &line, output_tail, redact_logs);
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(message) => {
+                handle_output_line(
+                    app,
+                    command_name,
+                    message.stream,
+                    &message.line,
+                    output_tail,
+                    redact_logs,
+                );
+                for message in receiver.try_iter().take(OUTPUT_CHANNEL_CAPACITY) {
+                    handle_output_line(
+                        app,
+                        command_name,
+                        message.stream,
+                        &message.line,
+                        output_tail,
+                        redact_logs,
+                    );
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                thread::sleep(std::time::Duration::from_millis(100));
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+
+        if should_cancel() {
+            stop_error = Some("RUNNER_CANCELLED".to_string());
+        } else if Instant::now() >= deadline {
+            stop_error = Some("RUNNER_TIMEOUT".to_string());
+        } else if output_bytes.load(Ordering::Relaxed) > MAX_OUTPUT_BYTES_PER_STEP {
+            stop_error = Some("RUNNER_OUTPUT_LIMIT".to_string());
+        }
+        if stop_error.is_some() {
+            if let Err(error) = terminate_child(&mut child, &mut containment) {
+                stop_error = Some(error);
             }
+            break -1;
         }
 
         match child
             .try_wait()
             .map_err(|error| format!("Could not wait for {}: {error}", step.name))?
         {
-            Some(status) => break status.code().unwrap_or(-1),
+            Some(status) => {
+                containment.release();
+                break status.code().unwrap_or(-1);
+            }
             None => continue,
         }
     };
 
-    for (stream, line) in receiver.iter() {
-        handle_output_line(app, command_name, &stream, &line, output_tail, redact_logs);
+    if stop_error.is_some() {
+        drop(receiver);
+    } else {
+        for message in receiver.iter() {
+            handle_output_line(
+                app,
+                command_name,
+                message.stream,
+                &message.line,
+                output_tail,
+                redact_logs,
+            );
+        }
+    }
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+    if stop_error.is_none() && output_bytes.load(Ordering::Relaxed) > MAX_OUTPUT_BYTES_PER_STEP {
+        stop_error = Some("RUNNER_OUTPUT_LIMIT".to_string());
+    }
+    if let Some(error) = stop_error {
+        return Err(error);
     }
 
     Ok(exit_code)
@@ -504,6 +858,7 @@ fn handle_output_line(
     } else {
         line.to_string()
     };
+    let line = truncate_utf8(line, MAX_OUTPUT_LINE_BYTES);
     push_tail(output_tail, format!("[{stream}] {line}"));
     emit_line(app, command_name, stream, &line);
 }
@@ -511,21 +866,88 @@ fn handle_output_line(
 fn read_stream<R: std::io::Read + Send + 'static>(
     stream: &'static str,
     reader: R,
-    sender: mpsc::Sender<(String, String)>,
+    sender: mpsc::SyncSender<StreamLine>,
+    output_bytes: Arc<AtomicUsize>,
 ) {
     let mut reader = BufReader::new(reader);
-    let mut buffer = Vec::new();
+    let mut line = Vec::with_capacity(MAX_OUTPUT_LINE_BYTES);
+    let mut truncated = false;
     loop {
-        buffer.clear();
-        match reader.read_until(b'\n', &mut buffer) {
-            Ok(0) => break,
-            Ok(_) => {
-                let line = String::from_utf8_lossy(&buffer).trim_end().to_string();
-                let _ = sender.send((stream.to_string(), line));
+        let available = match reader.fill_buf() {
+            Ok(bytes) => bytes,
+            Err(_) => return,
+        };
+        if available.is_empty() {
+            if !line.is_empty() && !send_stream_line(stream, &sender, &mut line, truncated) {
+                return;
             }
-            Err(_) => break,
+            return;
+        }
+
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(available.len(), |index| index + 1);
+        if add_output_bytes(&output_bytes, take) > MAX_OUTPUT_BYTES_PER_STEP {
+            return;
+        }
+        let content_end = newline.unwrap_or(take);
+        let content = &available[..content_end];
+        let remaining = MAX_OUTPUT_LINE_BYTES.saturating_sub(line.len());
+        line.extend_from_slice(&content[..content.len().min(remaining)]);
+        truncated |= content.len() > remaining;
+        reader.consume(take);
+
+        if newline.is_some() {
+            if !send_stream_line(stream, &sender, &mut line, truncated) {
+                return;
+            }
+            truncated = false;
         }
     }
+}
+
+fn send_stream_line(
+    stream: &'static str,
+    sender: &mpsc::SyncSender<StreamLine>,
+    buffer: &mut Vec<u8>,
+    truncated: bool,
+) -> bool {
+    while buffer
+        .last()
+        .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+    {
+        buffer.pop();
+    }
+    let mut line = String::from_utf8_lossy(buffer).into_owned();
+    if truncated {
+        const SUFFIX: &str = " ... [output truncated]";
+        line = truncate_utf8(line, MAX_OUTPUT_LINE_BYTES.saturating_sub(SUFFIX.len()));
+        line.push_str(SUFFIX);
+    } else {
+        line = truncate_utf8(line, MAX_OUTPUT_LINE_BYTES);
+    }
+    buffer.clear();
+    sender.send(StreamLine { stream, line }).is_ok()
+}
+
+fn add_output_bytes(counter: &AtomicUsize, bytes: usize) -> usize {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            Some(value.saturating_add(bytes))
+        })
+        .unwrap_or_else(|value| value)
+        .saturating_add(bytes)
+}
+
+fn truncate_utf8(mut value: String, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+    value
 }
 
 fn emit_line(app: &AppHandle, command_name: &str, stream: &str, line: &str) {
@@ -556,6 +978,7 @@ mod tests {
     };
     use std::{
         fs,
+        io::Cursor,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -812,5 +1235,43 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn stream_reader_caps_each_emitted_line() {
+        let mut input = vec![b'a'; MAX_OUTPUT_LINE_BYTES + 1_000];
+        input.push(b'\n');
+        let expected_bytes = input.len();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let output_bytes = Arc::new(AtomicUsize::new(0));
+
+        read_stream(
+            "stdout",
+            Cursor::new(input),
+            sender,
+            Arc::clone(&output_bytes),
+        );
+        let message = receiver.recv().unwrap();
+
+        assert!(message.line.len() <= MAX_OUTPUT_LINE_BYTES);
+        assert!(message.line.ends_with(" ... [output truncated]"));
+        assert_eq!(output_bytes.load(Ordering::Relaxed), expected_bytes);
+    }
+
+    #[test]
+    fn stream_reader_stops_before_forwarding_output_beyond_the_total_cap() {
+        let input = vec![b'a'; MAX_OUTPUT_BYTES_PER_STEP + 1];
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let output_bytes = Arc::new(AtomicUsize::new(0));
+
+        read_stream(
+            "stdout",
+            Cursor::new(input),
+            sender,
+            Arc::clone(&output_bytes),
+        );
+
+        assert!(receiver.recv().is_err());
+        assert!(output_bytes.load(Ordering::Relaxed) > MAX_OUTPUT_BYTES_PER_STEP);
     }
 }

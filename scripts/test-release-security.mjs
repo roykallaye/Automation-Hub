@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { evaluateReleaseSecurity, normalizeThumbprint } from "./release-security.mjs";
+import { collectReleaseVersions } from "./release-version.mjs";
 
 const roles = ["windows_installer", "desktop_application", "automation_worker"];
 
@@ -96,4 +97,34 @@ test("an HTTP update endpoint cannot pass release readiness", () => {
 
   assert.equal(result.commercialReady, false);
   assert.ok(result.missingGates.includes("pinned HTTPS update endpoint is not configured"));
+});
+
+function synchronizedVersionContents(version = "0.1.0") {
+  return {
+    packageJson: JSON.stringify({ version }),
+    packageLock: JSON.stringify({ version, packages: { "": { version } } }),
+    tauriConfig: JSON.stringify({ version }),
+    cargoToml: `[package]\nname = "innpilot"\nversion = "${version}"\n`,
+    cargoLock: `[[package]]\nname = "innpilot"\nversion = "${version}"\n`,
+  };
+}
+
+test("release versions must match across every package source", () => {
+  const contents = synchronizedVersionContents();
+  assert.equal(collectReleaseVersions(contents).version, "0.1.0");
+
+  assert.throws(
+    () => collectReleaseVersions({
+      ...contents,
+      tauriConfig: JSON.stringify({ version: "0.1.1" }),
+    }),
+    /not synchronized/,
+  );
+});
+
+test("release versions must use semantic versioning", () => {
+  assert.throws(
+    () => collectReleaseVersions(synchronizedVersionContents("release-candidate")),
+    /valid semantic release version/,
+  );
 });

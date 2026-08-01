@@ -107,13 +107,18 @@ pub(crate) async fn process_job(app: &AppHandle, job: CloudJob) -> Result<(), St
         )?;
         return report_pending_result(app, &job.id).await;
     }
-    if job.mode != "dry_run" {
+    let authorization_valid = match job.mode.as_str() {
+        "dry_run" => job.approval.is_none(),
+        "execute" => job.approval.is_some(),
+        _ => false,
+    };
+    if !authorization_valid {
         finish_without_run(
             app,
             &job.id,
             "failed",
-            Some("EXECUTE_NOT_ENABLED"),
-            Some("execute_blocked"),
+            Some("RUNNER_AUTHORIZATION_INVALID"),
+            Some("authorization_rejected"),
         )?;
         return report_pending_result(app, &job.id).await;
     }
@@ -163,7 +168,8 @@ pub(crate) async fn process_job(app: &AppHandle, job: CloudJob) -> Result<(), St
     let heartbeat = spawn_heartbeat(app.clone(), running_update, Arc::clone(&cancelled));
 
     let command_name = command_for_workflow(&job.workflow)?;
-    let result = workflows::run_command_inner_controlled(app, command_name, Some(true), || {
+    let dry_run = job.mode == "dry_run";
+    let result = workflows::run_remote_command_inner_controlled(app, command_name, dry_run, || {
         cancelled.load(Ordering::Relaxed)
     })
     .await;
@@ -171,7 +177,7 @@ pub(crate) async fn process_job(app: &AppHandle, job: CloudJob) -> Result<(), St
     heartbeat.abort();
     let _ = heartbeat.await;
 
-    let (state, counters, error_code, summary_code) = summarize_run(result);
+    let (state, counters, error_code, summary_code) = summarize_run(result, dry_run);
     RunnerLedger::open(app)?.mark_terminal(&job.id, state, &counters, error_code, summary_code)?;
     report_pending_result(app, &job.id).await
 }
@@ -237,12 +243,29 @@ fn finish_without_run(
 
 fn summarize_run(
     result: Result<workflows::RunSummary, String>,
+    dry_run: bool,
 ) -> (
     &'static str,
     JobCounters,
     Option<&'static str>,
     Option<&'static str>,
 ) {
+    let completed = if dry_run {
+        "dry_run_completed"
+    } else {
+        "execute_completed"
+    };
+    let completed_with_warnings = if dry_run {
+        "dry_run_completed_with_warnings"
+    } else {
+        "execute_completed_with_warnings"
+    };
+    let failed = if dry_run {
+        "dry_run_failed"
+    } else {
+        "execute_failed"
+    };
+
     match result {
         Ok(summary) => {
             let input_count = summary.steps.len().min(1_000_000) as u32;
@@ -268,7 +291,7 @@ fn summarize_run(
                         failure_count,
                     },
                     None,
-                    Some("dry_run_completed"),
+                    Some(completed),
                 )
             } else if summary.status == "warning" {
                 (
@@ -280,7 +303,7 @@ fn summarize_run(
                         failure_count,
                     },
                     None,
-                    Some("dry_run_completed_with_warnings"),
+                    Some(completed_with_warnings),
                 )
             } else {
                 (
@@ -292,7 +315,7 @@ fn summarize_run(
                         failure_count: failure_count.max(1),
                     },
                     Some("WORKFLOW_FAILED"),
-                    Some("dry_run_failed"),
+                    Some(failed),
                 )
             }
         }
@@ -307,17 +330,44 @@ fn summarize_run(
             None,
             Some("cancelled_safely"),
         ),
-        Err(_) => (
-            "failed",
-            JobCounters {
-                input_count: 0,
-                success_count: 0,
-                warning_count: 0,
-                failure_count: 1,
-            },
-            Some("WORKFLOW_FAILED"),
-            Some("dry_run_failed"),
-        ),
+        Err(error) => {
+            let (error_code, summary_code) = match error.as_str() {
+                "RUNNER_TIMEOUT" => (
+                    "RUNNER_TIMEOUT",
+                    if dry_run {
+                        "dry_run_timed_out"
+                    } else {
+                        "execute_timed_out"
+                    },
+                ),
+                "RUNNER_OUTPUT_LIMIT" => (
+                    "RUNNER_OUTPUT_LIMIT",
+                    if dry_run {
+                        "dry_run_output_limited"
+                    } else {
+                        "execute_output_limited"
+                    },
+                ),
+                "RUNNER_CONTAINMENT_FAILURE" => {
+                    ("RUNNER_CONTAINMENT_FAILURE", "runner_containment_failed")
+                }
+                "RUNNER_UNTRUSTED_RUNTIME" => {
+                    ("RUNNER_UNTRUSTED_RUNTIME", "runner_runtime_rejected")
+                }
+                _ => ("WORKFLOW_FAILED", failed),
+            };
+            (
+                "failed",
+                JobCounters {
+                    input_count: 0,
+                    success_count: 0,
+                    warning_count: 0,
+                    failure_count: 1,
+                },
+                Some(error_code),
+                Some(summary_code),
+            )
+        }
     }
 }
 
@@ -389,11 +439,41 @@ mod tests {
 
     #[test]
     fn raw_errors_never_enter_cloud_updates() {
-        let (state, counters, error, summary) =
-            summarize_run(Err(r"C:\Hotel\Guest Name\private.pdf failed".to_string()));
+        let (state, counters, error, summary) = summarize_run(
+            Err(r"C:\Hotel\Guest Name\private.pdf failed".to_string()),
+            true,
+        );
         assert_eq!(state, "failed");
         assert_eq!(counters.failure_count, 1);
         assert_eq!(error, Some("WORKFLOW_FAILED"));
         assert_eq!(summary, Some("dry_run_failed"));
+    }
+
+    #[test]
+    fn runner_limits_keep_distinct_sanitized_cloud_codes() {
+        for (local, expected_error, expected_summary) in [
+            ("RUNNER_TIMEOUT", "RUNNER_TIMEOUT", "execute_timed_out"),
+            (
+                "RUNNER_OUTPUT_LIMIT",
+                "RUNNER_OUTPUT_LIMIT",
+                "execute_output_limited",
+            ),
+            (
+                "RUNNER_CONTAINMENT_FAILURE",
+                "RUNNER_CONTAINMENT_FAILURE",
+                "runner_containment_failed",
+            ),
+            (
+                "RUNNER_UNTRUSTED_RUNTIME",
+                "RUNNER_UNTRUSTED_RUNTIME",
+                "runner_runtime_rejected",
+            ),
+        ] {
+            let (state, counters, error, summary) = summarize_run(Err(local.to_string()), false);
+            assert_eq!(state, "failed");
+            assert_eq!(counters.failure_count, 1);
+            assert_eq!(error, Some(expected_error));
+            assert_eq!(summary, Some(expected_summary));
+        }
     }
 }

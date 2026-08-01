@@ -1,0 +1,70 @@
+{
+  "schema": "innpilot-installed-payload-policy-v1",
+  "maximumTextFileBytes": 5242880,
+  "textFileExtensions": [
+    ".cmd",
+    ".conf",
+    ".ini",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".sha256",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml"
+  ],
+  "forbiddenExtensions": [
+    ".csv",
+    ".doc",
+    ".docx",
+    ".eml",
+    ".jpeg",
+    ".jpg",
+    ".msg",
+    ".ods",
+    ".pdf",
+    ".pfx",
+    ".p12",
+    ".rtf",
+    ".tif",
+    ".tiff",
+    ".xls",
+    ".xlsm",
+    ".xlsx",
+    ".zip"
+  ],
+  "forbiddenFileNamePatterns": [
+    {
+      "id": "oauth_or_runner_private_file",
+      "pattern": "(?i)(^|/)(gmail_token|gmail_credentials|client_secret[^/]*|config\\.local|connection|device-key)(\\.[^/]*)?$"
+    }
+  ],
+  "forbiddenTextPatterns": [
+    {
+      "id": "private_key_material",
+      "pattern": "-----BEGIN (?:RSA |EC |OPENSSH |)?PRIVATE KEY-----"
+    },
+    {
+      "id": "google_oauth_client_secret",
+      "pattern": "(?i)(?<![0-9A-Za-z_-])GOCSPX-[0-9A-Za-z_-]{20,}"
+    },
+    {
+      "id": "google_oauth_refresh_token",
+      "pattern": "(?<![0-9A-Za-z_-])1//[0-9A-Za-z_-]{20,}"
+    },
+    {
+      "id": "supabase_secret_key",
+      "pattern": "(?i)(?<![0-9A-Za-z_-])sb_secret_[0-9A-Za-z_-]{20,}"
+    },
+    {
+      "id": "jwt_token",
+      "pattern": "(?<![0-9A-Za-z_-])eyJ[0-9A-Za-z_-]{10,}\\.[0-9A-Za-z_-]{10,}\\.[0-9A-Za-z_-]{10,}"
+    },
+    {
+      "id": "generic_api_secret",
+      "pattern": "(?i)(?<![0-9A-Za-z_-])(?:sk|rk)-(?:proj-)?[0-9A-Za-z_-]{32,}"
+    }
+  ]
+}

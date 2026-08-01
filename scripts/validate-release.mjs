@@ -54,6 +54,11 @@ function assertCleanSource() {
 assertCleanSource();
 
 const gates = [
+  [
+    "Release version coherence",
+    process.execPath,
+    ["scripts/release-version.mjs"],
+  ],
   ["Frontend production build", npm, npmArgs("run", "build")],
   ["Packaged resource inventory", npm, npmArgs("run", "doctor:resources")],
   ["Release security policy tests", npm, npmArgs("run", "test:release-security")],

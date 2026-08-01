@@ -10,16 +10,11 @@ import {
 import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createReleaseSecurityAudit } from "./release-security.mjs";
+import { readReleaseVersion } from "./release-version.mjs";
 
 const root = process.cwd();
-const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const releaseVersion = readReleaseVersion(root).version;
 const gitSafeRoot = root.replaceAll("\\", "/");
-const tauriConfig = JSON.parse(
-  readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"),
-);
-if (packageJson.version !== tauriConfig.version) {
-  throw new Error("package.json and tauri.conf.json must use the same release version.");
-}
 
 const distributionMode =
   process.env.INNPILOT_DISTRIBUTION_MODE || "internal-evaluation";
@@ -104,7 +99,7 @@ for (const staleOutput of [output, output + ".sha256", securityAuditPath]) {
 }
 
 const securityAudit = createReleaseSecurityAudit({
-  version: packageJson.version,
+  version: releaseVersion,
   commit,
   policyPath: join(root, "release", "release-policy.json"),
   signatureScriptPath: join(root, "scripts", "inspect-authenticode.ps1"),
@@ -128,7 +123,7 @@ const commercialApproved =
 const manifest = {
   schema: "innpilot-release-v1",
   generatedAt: new Date().toISOString(),
-  version: packageJson.version,
+  version: releaseVersion,
   commit,
   sourceTreeClean: !trackedChanges,
   distribution: {

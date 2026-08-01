@@ -19,6 +19,10 @@ const FUNCTION_BASE_URL: &str =
 const SYNC_ROUTE: &str = "/automation-runner/sync";
 const CONNECTION_FILE: &str = "connection.json";
 const MAX_RESPONSE_BYTES: usize = 16_384;
+const EXECUTE_AUTHORIZATION_VERSION: u8 = 1;
+const MAX_LEASE_SECONDS: i64 = 120;
+const MIN_LEASE_SECONDS: i64 = 10;
+const MAX_APPROVAL_AGE_SECONDS: i64 = 86_400;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -75,6 +79,15 @@ pub(crate) struct CloudJob {
     pub(crate) status: String,
     pub(crate) lease_expires_at: String,
     pub(crate) cancel_requested: bool,
+    pub(crate) approval: Option<ExecuteApproval>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ExecuteApproval {
+    approved_at: String,
+    approved_by: String,
+    authorization_version: u8,
 }
 
 pub(crate) struct RunnerSyncExchange {
@@ -290,8 +303,10 @@ pub(crate) async fn sync_exchange(
     if payload.code != "SYNCED" || !(5..=300).contains(&payload.sync.next_sync_seconds) {
         return Err("LifeDesk returned an invalid synchronization response.".to_string());
     }
+    let server_time = chrono::DateTime::parse_from_rfc3339(&payload.sync.server_time)
+        .map_err(|_| "LifeDesk returned an invalid synchronization response.".to_string())?;
     if let Some(job) = payload.sync.job.as_ref() {
-        validate_cloud_job(job, capabilities)?;
+        validate_cloud_job(job, capabilities, server_time)?;
     }
     connection.last_sync_at = Some(payload.sync.server_time.clone());
     save_connection(app, &connection)?;
@@ -345,15 +360,47 @@ fn validate_sync_input(
     Ok(())
 }
 
-fn validate_cloud_job(job: &CloudJob, capabilities: &[&str]) -> Result<(), String> {
+fn validate_cloud_job(
+    job: &CloudJob,
+    capabilities: &[&str],
+    server_time: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<(), String> {
+    let lease_expires_at = chrono::DateTime::parse_from_rfc3339(&job.lease_expires_at)
+        .map_err(|_| "LifeDesk returned an invalid leased job.".to_string())?;
+    let lease_seconds = lease_expires_at
+        .signed_duration_since(server_time)
+        .num_seconds();
     if !is_uuid(&job.id)
         || !is_uuid(&job.idempotency_key)
         || !capabilities.contains(&job.workflow.as_str())
         || !matches!(job.mode.as_str(), "dry_run" | "execute")
         || !matches!(job.status.as_str(), "leased" | "running")
-        || chrono::DateTime::parse_from_rfc3339(&job.lease_expires_at).is_err()
+        || !(MIN_LEASE_SECONDS..=MAX_LEASE_SECONDS).contains(&lease_seconds)
     {
         return Err("LifeDesk returned an invalid leased job.".to_string());
+    }
+    match job.mode.as_str() {
+        "dry_run" if job.approval.is_some() => {
+            return Err("LifeDesk returned an invalid leased job.".to_string());
+        }
+        "execute" => {
+            let approval = job
+                .approval
+                .as_ref()
+                .ok_or_else(|| "LifeDesk did not provide execute approval evidence.".to_string())?;
+            let approved_at =
+                chrono::DateTime::parse_from_rfc3339(&approval.approved_at).map_err(|_| {
+                    "LifeDesk did not provide valid execute approval evidence.".to_string()
+                })?;
+            let approval_age = server_time.signed_duration_since(approved_at).num_seconds();
+            if approval.authorization_version != EXECUTE_AUTHORIZATION_VERSION
+                || !is_uuid(&approval.approved_by)
+                || !(0..=MAX_APPROVAL_AGE_SECONDS).contains(&approval_age)
+            {
+                return Err("LifeDesk did not provide valid execute approval evidence.".to_string());
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -682,5 +729,60 @@ mod tests {
             "innpilot-v1:123e4567-e89b-12d3-a456-426614174000:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:extra"
         )
         .is_err());
+    }
+
+    fn leased_job(mode: &str, approval: Option<ExecuteApproval>) -> CloudJob {
+        CloudJob {
+            id: "11111111-1111-4111-8111-111111111111".to_string(),
+            idempotency_key: "22222222-2222-4222-8222-222222222222".to_string(),
+            workflow: "invoices".to_string(),
+            mode: mode.to_string(),
+            status: "leased".to_string(),
+            lease_expires_at: "2026-08-01T10:01:30Z".to_string(),
+            cancel_requested: false,
+            approval,
+        }
+    }
+
+    fn approval(at: &str, version: u8) -> ExecuteApproval {
+        ExecuteApproval {
+            approved_at: at.to_string(),
+            approved_by: "33333333-3333-4333-8333-333333333333".to_string(),
+            authorization_version: version,
+        }
+    }
+
+    #[test]
+    fn dry_runs_reject_approval_evidence() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-08-01T10:00:00Z").unwrap();
+        assert!(validate_cloud_job(&leased_job("dry_run", None), &["invoices"], now).is_ok());
+        assert!(validate_cloud_job(
+            &leased_job("dry_run", Some(approval("2026-08-01T09:59:00Z", 1)),),
+            &["invoices"],
+            now,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn execute_jobs_require_fresh_versioned_approval() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-08-01T10:00:00Z").unwrap();
+        assert!(validate_cloud_job(&leased_job("execute", None), &["invoices"], now).is_err());
+        for invalid in [
+            approval("2026-08-01T09:59:00Z", 2),
+            approval("2026-07-31T09:59:59Z", 1),
+            approval("2026-08-01T10:00:01Z", 1),
+        ] {
+            assert!(
+                validate_cloud_job(&leased_job("execute", Some(invalid)), &["invoices"], now,)
+                    .is_err()
+            );
+        }
+        assert!(validate_cloud_job(
+            &leased_job("execute", Some(approval("2026-08-01T09:59:00Z", 1)),),
+            &["invoices"],
+            now,
+        )
+        .is_ok());
     }
 }

@@ -345,7 +345,7 @@ fn prefer_packaged_worker(app: &AppHandle, config: &mut HubConfig) -> bool {
     true
 }
 
-fn packaged_worker_path(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn packaged_worker_path(app: &AppHandle) -> Option<PathBuf> {
     let worker = app
         .path()
         .resource_dir()

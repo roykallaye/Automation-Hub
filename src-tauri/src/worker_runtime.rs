@@ -30,6 +30,33 @@ pub(crate) fn verified_worker_digest(executable: &str) -> Result<Option<String>,
     verify_worker_files(worker, &checksum_path).map(Some)
 }
 
+pub(crate) fn trusted_path_matches(candidate: &Path, expected: &Path) -> bool {
+    let Ok(candidate) = candidate.canonicalize() else {
+        return false;
+    };
+    let Ok(expected) = expected.canonicalize() else {
+        return false;
+    };
+    candidate == expected
+}
+
+pub(crate) fn verified_trusted_worker_digest(
+    executable: &str,
+    expected_worker: &Path,
+) -> Result<String, String> {
+    let worker = Path::new(executable);
+    if !is_innpilot_worker(executable) || !trusted_path_matches(worker, expected_worker) {
+        return Err(
+            "The configured automation engine is not the packaged InnPilot worker.".to_string(),
+        );
+    }
+    let checksum_path = expected_worker
+        .parent()
+        .ok_or_else(|| "The packaged automation engine path is invalid.".to_string())?
+        .join(CHECKSUM_FILE);
+    verify_worker_files(expected_worker, &checksum_path)
+}
+
 fn verify_worker_files(worker: &Path, checksum_path: &Path) -> Result<String, String> {
     let metadata = worker
         .metadata()
@@ -116,6 +143,34 @@ mod tests {
             .unwrap_err()
             .contains("integrity check"));
         let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn trusted_worker_must_resolve_to_the_exact_packaged_path() {
+        let trusted_root = temp_root("trusted_worker");
+        let lookalike_root = temp_root("lookalike_worker");
+        let trusted = trusted_root.join("innpilot-worker.exe");
+        let lookalike = lookalike_root.join("innpilot-worker.exe");
+        std::fs::write(&trusted, b"trusted worker fixture").unwrap();
+        std::fs::write(&lookalike, b"trusted worker fixture").unwrap();
+        std::fs::write(
+            trusted_root.join(CHECKSUM_FILE),
+            format!("{}  innpilot-worker.exe\n", sha256_file(&trusted).unwrap()),
+        )
+        .unwrap();
+        std::fs::write(
+            lookalike_root.join(CHECKSUM_FILE),
+            format!(
+                "{}  innpilot-worker.exe\n",
+                sha256_file(&lookalike).unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(
+            verified_trusted_worker_digest(trusted.to_string_lossy().as_ref(), &trusted).is_ok()
+        );
+        assert!(
+            verified_trusted_worker_digest(lookalike.to_string_lossy().as_ref(), &trusted).is_err()
+        );
     }
 
     #[test]
