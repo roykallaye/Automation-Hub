@@ -20,6 +20,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let expected_mode = match env::var("INNPILOT_E2E_EXPECTED_MODE") {
+        Ok(value) if matches!(value.as_str(), "dry_run" | "execute") => value,
+        _ => {
+            eprintln!("The cloud probe requires an explicit dry_run or execute mode.");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -29,7 +36,11 @@ fn main() -> ExitCode {
         Err(_) => return ExitCode::FAILURE,
     };
 
-    match runtime.block_on(innpilot_lib::run_cloud_e2e_probe(&pairing_code, &worker)) {
+    match runtime.block_on(innpilot_lib::run_cloud_e2e_probe(
+        &pairing_code,
+        &worker,
+        &expected_mode,
+    )) {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => {
             eprintln!("The InnPilot cloud probe failed safely.");

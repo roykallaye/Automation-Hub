@@ -92,7 +92,14 @@ fn record_diagnostic(app_data: &Path, code: &str) {
     }
 }
 
-pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<(), String> {
+pub async fn run_cloud_e2e_probe(
+    pairing_code: &str,
+    worker: &Path,
+    expected_mode: &str,
+) -> Result<(), String> {
+    if !matches!(expected_mode, "dry_run" | "execute") {
+        return Err("The probe execution mode is invalid.".to_string());
+    }
     let worker = fs::canonicalize(worker)
         .map_err(|_| "The verified automation engine is unavailable.".to_string())?;
     if !worker.is_file() {
@@ -261,7 +268,7 @@ pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<()
         };
         record_diagnostic(&app_data, "SYNC_PASSED");
         if let Some(job) = exchange.job {
-            if job.workflow != "scan_import" || job.mode != "dry_run" {
+            if job.workflow != "scan_import" || job.mode != expected_mode {
                 record_diagnostic(&app_data, "UNEXPECTED_JOB");
                 return Err("The probe received an unexpected cloud job.".to_string());
             }
@@ -269,7 +276,29 @@ pub async fn run_cloud_e2e_probe(pairing_code: &str, worker: &Path) -> Result<()
                 record_diagnostic(&app_data, "JOB_PROCESSING_FAILED");
                 return Err("The isolated cloud job failed safely.".to_string());
             }
-            record_diagnostic(&app_data, "JOB_COMPLETED");
+            let copied_files = fs::read_dir(&scan_cache)
+                .map_err(|_| "Could not verify the synthetic scan cache.".to_string())?
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_file())
+                .count();
+            let source_preserved = scan_source.join("Sharp MFP synthetic.pdf").is_file();
+            let expected_effect = match expected_mode {
+                "dry_run" => copied_files == 0,
+                "execute" => copied_files == 1,
+                _ => false,
+            };
+            if !source_preserved || !expected_effect {
+                record_diagnostic(&app_data, "JOB_EFFECT_MISMATCH");
+                return Err("The synthetic cloud job had an unexpected file effect.".to_string());
+            }
+            record_diagnostic(
+                &app_data,
+                if expected_mode == "execute" {
+                    "EXECUTE_COMPLETED"
+                } else {
+                    "DRY_RUN_COMPLETED"
+                },
+            );
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
