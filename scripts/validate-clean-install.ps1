@@ -54,6 +54,15 @@ function Assert-UnderDirectory([string] $Path, [string] $Directory, [string] $La
   }
 }
 
+function Get-RelativePath([string] $Path, [string] $Directory) {
+  $candidate = Get-NormalizedFullPath $Path
+  $rootPath = (Get-NormalizedFullPath $Directory).TrimEnd("\") + "\"
+  if (-not $candidate.StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Cannot make a relative path outside the expected directory."
+  }
+  return $candidate.Substring($rootPath.Length).Replace("\", "/")
+}
+
 function Stop-ValidationProcess {
   if ($null -ne $script:duplicateProcess -and -not $script:duplicateProcess.HasExited) {
     Stop-Process -Id $script:duplicateProcess.Id -Force
@@ -204,7 +213,7 @@ try {
   })
   $forbidden = [Collections.Generic.List[string]]::new()
   foreach ($file in Get-ChildItem -LiteralPath $installDirectory -Recurse -File) {
-    $relativePath = [IO.Path]::GetRelativePath($installDirectory, $file.FullName).Replace("\", "/")
+    $relativePath = Get-RelativePath $file.FullName $installDirectory
     if ($file.Extension.ToLowerInvariant() -in $forbiddenExtensions) {
       $forbidden.Add("forbidden extension: $relativePath")
     }
