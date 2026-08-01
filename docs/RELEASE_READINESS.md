@@ -44,8 +44,10 @@ The gate proves:
 - packaged resource inventory;
 - compiled worker checksum and synthetic smoke test;
 - 48 Python workflow and safe-file tests;
-- Rust formatting, strict lint, and 143 all-feature/all-target tests;
-- installer contains no recognized hotel documents, credentials, tokens, or
+- Rust formatting, strict lint, and 153 all-feature/all-target tests;
+- version coherence across npm, Tauri, Cargo manifests, and lockfiles;
+- installer contains no recognized hotel documents, credentials, tokens,
+  private-key patterns, Supabase secrets, OAuth material, JWTs, or
   connection/device-key files;
 - first launch creates generic settings and selects the packaged worker;
 - packaged-worker integrity is verified before its readiness process can start,
@@ -58,19 +60,20 @@ The gate proves:
 - reinstall preserves existing settings;
 - uninstall preserves recoverable app data.
 
-## Recorded evidence - 27 July 2026
+## Recorded evidence - 1 August 2026
 
 | Proof | Result |
 | --- | --- |
-| LifeDesk cloud acceptance | 8/8 stages passed; synthetic tenant deleted and verified |
-| LifeDesk tests | 78/78 passed; typecheck and production build passed |
-| InnPilot Rust | 143/143 passed across all features and targets |
+| LifeDesk cloud acceptance | Previous 8/8 baseline passed; rerun required after deploying the execute-authorization migration |
+| LifeDesk local gates | 83/83 passed; Deno check, typecheck, and production build passed |
+| InnPilot Rust | 153/153 passed across all features and targets |
 | InnPilot automation | 48/48 passed |
 | Strict Clippy | Passed with warnings denied |
 | Windows lifecycle | Clean install, background launch, single-instance handoff, upgrade preservation, and safe uninstall passed |
-| Packaged worker SHA-256 | 1d2fe071dbf79ab2b6e91748081e8f33e7cb91c412b07d1162ed04a911c0328d |
-| Installed worker readiness | 39.6 s cold on the validation PC; trusted result is digest-bound and reused for ten minutes |
-| Installer data-leak scan | 0 forbidden operational files |
+| Packaged worker SHA-256 | 9afdad74208a6dfd17a443445260c54dadf2058f19c05fc0de3951e3a51976a9 |
+| Installed worker readiness | 33.26 s cold on the validation PC; trusted result is digest-bound and reused for ten minutes |
+| Installer data/secret scan | 0 forbidden operational files or recognized secret patterns |
+| Installer SHA-256 | 1079462614fcf6f8a5424dd3f61d9f1999b2952713b267b0fc20b13fe3badfad |
 
 The commit carrying this document is the InnPilot evidence revision. LifeDesk
 acceptance evidence is retained on its `dev` branch and must be rerun with
@@ -94,6 +97,11 @@ production credentials before a new commercial release.
 | Duplicate desktop launch | Keep one runner and route the launch to the existing instance | isolated Windows lifecycle probe |
 | Malformed cloud result | Emit bounded status/error codes only | runner protocol and raw-error tests |
 
+| Missing/stale execute approval | Refuse lease or execution; require fresh versioned evidence | database trigger plus cloud/runner protocol tests |
+| Worker process-tree escape | Attach the suspended child to a kill-on-close Windows Job Object before its first instruction | containment implementation, compile, Clippy, and Windows test build |
+| Run exceeds 30 minutes | Terminate the full Job Object and return `RUNNER_TIMEOUT` | bounded runner path and distinct-code tests |
+| Output exceeds 1 MiB or a line exceeds 16 KiB | Stop forwarding at the total cap, truncate individual lines, terminate the job, and return `RUNNER_OUTPUT_LIMIT` | stream-reader boundary tests and distinct-code tests |
+| Untrusted worker or script path | Refuse execution with `RUNNER_UNTRUSTED_RUNTIME` | trusted-runtime path/digest tests |
 ## External gates before commercial distribution
 
 The former PyMuPDF/AGPL packaging blocker has been removed: invoice cropping now

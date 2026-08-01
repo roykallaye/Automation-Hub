@@ -1,17 +1,16 @@
 # LifeDesk and InnPilot pilot handoff
 
 This runbook covers the controlled internal-evaluation package built on
-27 July 2026. It is suitable for synthetic testing and a supervised hotel
+1 August 2026. It is suitable for synthetic testing and a supervised hotel
 pilot. It is not yet approved for unsupervised commercial distribution.
 
 ## Exact package
 
 - Product: InnPilot 0.1.0 for Windows x64
-- Source commit: `0be4bb9da4203bb8cf0f1d6438c1ab3cbd14a91d`
 - Installer: `src-tauri/target/release/bundle/nsis/InnPilot_0.1.0_x64-setup.exe`
-- Installer bytes: `124630490`
+- Installer bytes: `124647269`
 - Installer SHA-256:
-  `eb774c1e35263233db643e7e555e99aa9d1bf35c1cb063d1764f65bfb3748eca`
+  `1079462614fcf6f8a5424dd3f61d9f1999b2952713b267b0fc20b13fe3badfad`
 - Release manifest: `build/release/innpilot-release.json`
 - Security audit: `build/release/innpilot-release-security.json`
 
@@ -33,9 +32,14 @@ supervised-pilot approval. Windows SmartScreen may warn on first installation.
   restricted to administrators and managers.
 - A one-time code links one named hotel PC to one hotel.
 - Only a recently connected, compatible runner can receive a request.
-- The current remote request button creates a safe-mode dry run.
-- Jobs support approval, cancellation, leasing, progress, completion,
-  sanitized failure status, audit history, and retention.
+- **Prova sicura** creates a dry run with no approval evidence and no file
+  modifications.
+- **Esegui davvero** requires explicit confirmation. Reception requests wait
+  for a named administrator or manager; leaders authorize their own requests.
+- Execute authorization is versioned, personal, and must be no more than 24
+  hours old when the runner leases the job.
+- Jobs support review, rejection, cancellation, leasing, progress, completion,
+  distinct sanitized failure status, audit history, and retention.
 - The dashboard shows PCs, shared-folder health, queue, history, and audit
   events.
 
@@ -59,6 +63,12 @@ supervised-pilot approval. Windows SmartScreen may warn on first installation.
   recovery, cooperative cancellation, and a single-workflow lock.
 - Pairing uses a per-PC Ed25519 identity protected by Windows DPAPI. Only
   signed outbound HTTPS requests are used; no inbound port is opened.
+- Every remotely started worker is the exact integrity-checked packaged
+  executable and every script path is the exact packaged allowlisted path.
+- Windows Job Objects contain the full child-process tree. Cancellation,
+  30-minute timeout, 1 MiB total output, 16 KiB line limits, containment
+  failure, or untrusted runtime all fail closed with separate sanitized codes.
+- Remote stdout and stderr are bounded and forcibly redacted.
 - Paths, filenames, documents, OCR text, recipients, OAuth material, private
   keys, stdout, stderr, and raw errors remain on the PC.
 - InnPilot can start with Windows, remain in the notification area, and
@@ -100,7 +110,7 @@ On the destination PC, open PowerShell in the installer folder and run:
 
 Success:
 
-`eb774c1e35263233db643e7e555e99aa9d1bf35c1cb063d1764f65bfb3748eca`
+`1079462614fcf6f8a5424dd3f61d9f1999b2952713b267b0fc20b13fe3badfad`
 
 Failure:
 
@@ -249,13 +259,13 @@ Failure:
 - Still offline: leave InnPilot open for one minute, select
   **Controlla collegamento**, and record the sanitized error.
 
-## Run the first LifeDesk-to-InnPilot job
+## Run the first safe preview
 
 1. Keep safe mode enabled in InnPilot.
 2. In LifeDesk, open **Automation Hub**.
 3. Select the online `PC Manager`.
-4. Under **Automazioni disponibili**, request one safe test for a configured
-   workflow.
+4. Under **Automazioni disponibili**, choose **Prova sicura** for one
+   configured workflow.
 5. Watch the LifeDesk queue and InnPilot Activity page.
 
 Success:
@@ -280,6 +290,52 @@ Failure:
 
 Do not use copied personal credentials or tokens. The installer contains none.
 
+
+## Approve and run one real execution
+
+Do this only after the preview has been reviewed and a recovery point or
+normal hotel backup is available.
+
+Reception flow:
+
+1. Select the correct online PC and workflow.
+2. Choose **Esegui davvero** and read the confirmation.
+3. Confirm only if the workflow, PC, and described file effects are correct.
+4. Ask a named administrator or manager to review the pending request in
+   **Attività recente**.
+5. The leader reads the second confirmation and chooses **Approva**, or
+   **Rifiuta** if anything is unclear.
+
+Administrator or manager flow:
+
+1. Choose **Esegui davvero** and read the confirmation.
+2. Confirming creates a personally authorized queued job immediately.
+3. Monitor queued, running, warning/failure, and completed counters in
+   LifeDesk; inspect item-level detail only in InnPilot Activity.
+
+Success:
+
+- LifeDesk labels the job **Esecuzione reale**, never as a preview.
+- Only the reviewed allowlisted workflow runs.
+- LifeDesk shows **Esecuzione completata** only after InnPilot reports a
+  successful real run.
+- The authorization identity and time remain in the control plane; no paths,
+  filenames, document content, OCR text, or raw logs leave the PC.
+
+Failure and cancellation:
+
+- A requester can cancel a pending request. A leader can reject it.
+- **Annulla** stops queued/leased work or requests cooperative cancellation of
+  running work; the Windows Job Object terminates the complete worker tree.
+- `RUNNER_TIMEOUT`, `RUNNER_OUTPUT_LIMIT`, `RUNNER_CONTAINMENT_FAILURE`, and
+  `RUNNER_UNTRUSTED_RUNTIME` require local support review before retrying.
+- `RUNNER_AUTHORIZATION_INVALID` or `EXECUTE_AUTHORIZATION_EXPIRED` means the
+  execute evidence was missing, malformed, from the future, wrong-versioned,
+  or older than 24 hours. Create and approve a new request; never edit the
+  database evidence manually.
+- On any unexpected file result, cancel, stop InnPilot from the tray, preserve
+  AppData and the local recovery point, and restore with the hotel's normal
+  approved backup procedure.
 1. Complete the file-only invoice rehearsal first.
 2. Have the hotel create or approve its own Google OAuth desktop application.
 3. In InnPilot Configuration, choose the hotel's
