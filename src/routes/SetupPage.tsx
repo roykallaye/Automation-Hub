@@ -4,7 +4,6 @@ import { useState } from "react";
 import { FocusFlow } from "../components/FocusFlow";
 import { PageHeader } from "../components/PageHeader";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
-import { SetupStatusPanel } from "../components/SetupStatusPanel";
 import { SetupWizard } from "../components/SetupWizard/SetupWizard";
 import { useI18n } from "../i18n";
 import { staffMessage } from "../messages";
@@ -59,7 +58,7 @@ export function SetupPage({
 
   // Focus mode: the wizard replaces the whole page so the user sees one
   // task at a time, with a permanent way back. No Escape shortcut here —
-  // closing throws away in-progress answers, so leaving stays deliberate.
+  // progress is saved locally as the user moves through the guided flow.
   if (showWizard) {
     return (
       <FocusFlow
@@ -143,18 +142,6 @@ export function SetupPage({
         </div>
       </details>
 
-      <details className="rounded-lg border border-white/60 bg-white/52 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          {t("setup.technicalDetails")}
-        </summary>
-        <div className="mt-4">
-          <SetupStatusPanel
-            configStatus={configStatus}
-            loading={loading}
-            onRefresh={onRefresh}
-          />
-        </div>
-      </details>
     </div>
   );
 }

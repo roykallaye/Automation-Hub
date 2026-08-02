@@ -24,7 +24,6 @@ import type {
   AppConfigStatus,
   ActivityRecord,
   AutomationAction,
-  CommandEvent,
   LatestLog,
   ManagedAutomationInstallResult,
   RunStatus,
@@ -36,7 +35,6 @@ function App() {
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [checkingReadiness, setCheckingReadiness] = useState(true);
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
-  const [liveOutput, setLiveOutput] = useState<string[]>([]);
   const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
   const [latestLogs, setLatestLogs] = useState<LatestLog[]>([]);
   const [activityHistory, setActivityHistory] = useState<ActivityRecord[]>([]);
@@ -82,13 +80,7 @@ function App() {
       }
     });
 
-    const unlistenOutput = listen<CommandEvent>("command-output", (event) => {
-      const prefix = event.payload.stream === "stderr" ? "stderr" : event.payload.stream;
-      setLiveOutput((current) => {
-        const next = [...current, `[${prefix}] ${event.payload.line}`];
-        return next.slice(-500);
-      });
-    });
+
     const unlistenFinished = listen<RunSummary>("command-finished", (event) => {
       setLastSummary(event.payload);
       setStatus(event.payload.status);
@@ -99,7 +91,6 @@ function App() {
     });
 
     return () => {
-      void unlistenOutput.then((unlisten) => unlisten());
       void unlistenFinished.then((unlisten) => unlisten());
     };
   }, []);
@@ -242,7 +233,6 @@ function App() {
   async function runAction(action: AutomationAction, confirmed: boolean) {
     setPendingAction(null);
     setRunningCommand(action.commandName);
-    setLiveOutput([]);
     setStatus("idle");
     setNotice(t("app.runningAction", { action: action.label }));
 
@@ -332,7 +322,6 @@ function App() {
           configStatus={configStatus}
           latestLogs={latestLogs}
           activityHistory={activityHistory}
-          liveOutput={liveOutput}
           lastSummary={lastSummary}
           onOpenPath={openPath}
           onOpenActivityReport={openActivityReport}
@@ -354,8 +343,6 @@ function App() {
       {currentPage === "support" && (
         <SupportPage
           configStatus={configStatus}
-          latestLogs={latestLogs}
-          lastSummary={lastSummary}
           onOpenPath={openPath}
           onRefresh={refreshAll}
           onInstallAutomation={installManagedAutomationScripts}

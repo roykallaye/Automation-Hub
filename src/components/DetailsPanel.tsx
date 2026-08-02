@@ -71,6 +71,7 @@ export function DetailsPanel({
             </div>
           </div>
 
+          {showDeveloperDetails && (
           <details>
             <summary className="cursor-pointer text-sm font-semibold text-slate-800">
               {t("details.technicalLastRun")}
@@ -81,6 +82,7 @@ export function DetailsPanel({
                 : t("details.noCapturedOutput")}
             </pre>
           </details>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border border-white/70 bg-white/60 p-5 text-sm font-medium leading-6 text-slate-700">
@@ -88,24 +90,28 @@ export function DetailsPanel({
         </div>
       )}
 
+
+      {showDeveloperDetails && (
       <details className="mt-5 border-t border-white/60 pt-5">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          {t("support.logs")}
-        </summary>
-        <div className="mt-3 space-y-2">
-          {latestLogs.map((log) => (
-            <button
-              key={log.key}
-              className="flex w-full items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2 text-left text-xs transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!log.path}
-              onClick={() => onOpenPath(log.path)}
-            >
-              <span className="font-semibold text-slate-700">{log.label}</span>
-              <FileText className="h-4 w-4 shrink-0 text-brand-700" />
-            </button>
-          ))}
-        </div>
-      </details>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+                {t("support.logs")}
+              </summary>
+              <div className="mt-3 space-y-2">
+                {latestLogs.map((log) => (
+                  <button
+                    key={log.key}
+                    className="flex w-full items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2 text-left text-xs transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!log.path}
+                    onClick={() => onOpenPath(log.path)}
+                  >
+                    <span className="font-semibold text-slate-700">{log.label}</span>
+                    <FileText className="h-4 w-4 shrink-0 text-brand-700" />
+                  </button>
+                ))}
+              </div>
+            </details>
+      )}
+
 
       {showDeveloperDetails && <DeveloperDetails configStatus={configStatus} />}
     </aside>

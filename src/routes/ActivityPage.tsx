@@ -1,9 +1,7 @@
-import { CheckCircle2, Clipboard, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { CheckCircle2, ShieldCheck } from "lucide-react";
 
 import { DetailsPanel } from "../components/DetailsPanel";
 import { EmptyState } from "../components/EmptyState";
-import { LiveOutputPanel } from "../components/LiveOutputPanel";
 import { PageHeader } from "../components/PageHeader";
 import { StatusOrb, type StatusTone } from "../components/StatusOrb";
 import { useI18n, type TranslationKey } from "../i18n";
@@ -19,13 +17,12 @@ import type {
 
 /*
   Activity is an operations journal: a day-grouped timeline telling the story
-  of each run in plain words. Technical material stays behind "Details".
+  of each run in plain words, with support-only output kept out of sight.
 */
 export function ActivityPage({
   configStatus,
   latestLogs,
   activityHistory,
-  liveOutput,
   lastSummary,
   onOpenPath,
   onOpenActivityReport,
@@ -35,7 +32,6 @@ export function ActivityPage({
   configStatus: AppConfigStatus | null;
   latestLogs: LatestLog[];
   activityHistory: ActivityRecord[];
-  liveOutput: string[];
   lastSummary: RunSummary | null;
   onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
@@ -88,7 +84,6 @@ export function ActivityPage({
                           record={record}
                           deliveryMode={configStatus?.config.invoiceDeliveryMode}
                           language={language}
-                          onOpenPath={onOpenPath}
                           onOpenActivityReport={onOpenActivityReport}
                         />
                       ))}
@@ -106,14 +101,6 @@ export function ActivityPage({
             )}
           </section>
 
-          <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-              {t("activity.runProgress")}
-            </summary>
-            <div className="mt-4">
-              <LiveOutputPanel liveOutput={liveOutput} />
-            </div>
-          </details>
         </section>
 
         <div className="h-fit">
@@ -135,26 +122,21 @@ function JournalEntry({
   record,
   deliveryMode,
   language,
-  onOpenPath,
   onOpenActivityReport,
 }: {
   record: ActivityRecord;
   deliveryMode?: InvoiceDeliveryMode;
   language: string;
-  onOpenPath: (path?: string | null) => void;
   onOpenActivityReport: (path?: string | null) => void;
 }) {
   const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
   const summary = record.summary;
   const isInvoiceRun = record.workflowCommandName === "process_invoices_and_drafts";
   const touchesGmail = isInvoiceRun || record.workflowCommandName === "reconnect_gmail";
   const hasDetails =
     record.warnings.length > 0 ||
     record.errors.length > 0 ||
-    Boolean(record.reportPath) ||
-    Boolean(record.logPath) ||
-    record.technicalSnippet.length > 0;
+    Boolean(record.reportPath);
 
   const metrics: [string, number][] = [
     [t("activity.found"), summary.found ?? 0],
@@ -233,32 +215,7 @@ function JournalEntry({
                     {t("activity.openReport")}
                   </button>
                 )}
-                {record.logPath && (
-                  <button
-                    className="rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                    onClick={() => onOpenPath(record.logPath)}
-                  >
-                    {t("activity.openLog")}
-                  </button>
-                )}
-                {record.technicalSnippet.length > 0 && (
-                  <button
-                    className="inline-flex items-center gap-1.5 rounded-md border border-white/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(
-                          record.technicalSnippet.join("\n"),
-                        );
-                        setCopied(true);
-                      } catch {
-                        setCopied(false);
-                      }
-                    }}
-                  >
-                    <Clipboard className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
-                    {copied ? t("common.copied") : t("activity.copyTechnical")}
-                  </button>
-                )}
+
               </div>
             </div>
           </details>

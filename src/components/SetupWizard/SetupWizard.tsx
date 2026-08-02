@@ -3,7 +3,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   Building2,
   CheckCircle2,
-  Copy,
   FileCheck2,
   FolderTree,
   Mail,
@@ -12,7 +11,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useI18n, type TranslationKey } from "../../i18n";
 import type {
@@ -27,7 +26,6 @@ import type {
   WorkspaceInitResult,
 } from "../../types";
 import { staffMessage } from "../../messages";
-import { buildConfigPreview } from "./configPreview";
 import {
   createRuleId,
   createSetupDraft,
@@ -99,14 +97,25 @@ export function SetupWizard({
   onSetupSaved: () => void | Promise<void>;
 }) {
   const { t } = useI18n();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
-  const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(false);
+  const [initialSession] = useState(() => loadSetupSession(config));
+  const [currentStepKey, setCurrentStepKey] = useState(
+    initialSession?.stepKey ?? "welcome",
+  );
+  const [draft, setDraft] = useState<SetupDraft>(
+    () => initialSession?.draft ?? createSetupDraft(config),
+  );
+  const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(
+    initialSession?.showAdvancedWorkflows ?? false,
+  );
   const [setupResult, setSetupResult] = useState<SetupActionResult | null>(null);
   const [setupAction, setSetupAction] = useState<string | null>(null);
   const [inspections, setInspections] = useState<Record<string, FolderInspectionState>>({});
-  const [completedActions, setCompletedActions] = useState<SetupAction[]>([]);
-  const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>([]);
+  const [completedActions, setCompletedActions] = useState<SetupAction[]>(
+    initialSession?.completedActions ?? [],
+  );
+  const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>(
+    initialSession?.createdFolderPaths ?? [],
+  );
   const steps = useMemo<WizardStepMeta[]>(
     () =>
       stepDefinitions
@@ -115,10 +124,33 @@ export function SetupWizard({
         .map((step) => ({ key: step.key, title: t(step.titleKey) })),
     [draft.setupMode, showAdvancedWorkflows, t],
   );
-  const preview = useMemo(() => buildConfigPreview(draft), [draft]);
+  const storedStepIndex = steps.findIndex((step) => step.key === currentStepKey);
+  const stepIndex = storedStepIndex >= 0 ? storedStepIndex : 0;
   const currentStep = steps[stepIndex];
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === steps.length - 1;
+
+  useEffect(() => {
+    if (!steps.some((step) => step.key === currentStepKey)) {
+      setCurrentStepKey(steps[0]?.key ?? "welcome");
+    }
+  }, [currentStepKey, steps]);
+
+  useEffect(() => {
+    saveSetupSession({
+      version: 1,
+      draft,
+      showAdvancedWorkflows,
+      stepKey: currentStepKey,
+      completedActions,
+      createdFolderPaths,
+    });
+  }, [completedActions, createdFolderPaths, currentStepKey, draft, showAdvancedWorkflows]);
+
+  function moveStep(offset: number) {
+    const nextIndex = Math.min(steps.length - 1, Math.max(0, stepIndex + offset));
+    setCurrentStepKey(steps[nextIndex]?.key ?? "welcome");
+  }
 
   function update<K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -363,127 +395,90 @@ export function SetupWizard({
     setSetupResult(null);
   }
 
-  async function runSetupAction(action: SetupAction) {
-    if (
-      (action === "initialize" || action === "save") &&
-      !window.confirm(
-        action === "initialize"
-          ? t("wizard.confirmCreateFolders")
-          : t("wizard.confirmSaveSetup"),
-      )
-    ) {
-      return;
-    }
+  async function finishSetup() {
+    if (!window.confirm(t("wizard.confirmFinishSetup"))) return;
 
-    setSetupAction(action);
+    setSetupAction("finish");
     setSetupResult(null);
     try {
-      if (action === "preview") {
-        const result = await invoke<SetupPreview>("preview_setup", { draft });
-        setSetupResult({
-          kind: "success",
-          title: t("wizard.previewReady"),
-          message: t("wizard.previewMessage", {
-            folders: result.folderPlan.length,
-            warnings: result.warnings.length,
-            warningWord:
-              result.warnings.length === 1
-                ? t("wizard.warningSingular")
-                : t("wizard.warningPlural"),
-          }),
-          details: result,
-        });
-        markActionComplete("preview");
-      } else if (action === "initialize") {
-        const result = await invoke<WorkspaceInitResult>("initialize_workspace", {
-          draft,
-          confirmed: true,
-        });
-        const created = result.folders.filter((folder) => folder.action === "created").length;
-        const alreadyExists = result.folders.filter(
-          (folder) => folder.action === "alreadyExists",
-        ).length;
-        const failed = result.folders.filter((folder) => folder.action === "failed").length;
-        const invalidPathFailure = result.folders.some((folder) =>
-          folder.message.includes("os error 123") ||
-          folder.message.toLowerCase().includes("invalid path"),
+      await invoke<SetupPreview>("preview_setup", { draft });
+
+      const workspaceResult = await invoke<WorkspaceInitResult>("initialize_workspace", {
+        draft,
+        confirmed: true,
+      });
+      const created = workspaceResult.folders.filter(
+        (folder) => folder.action === "created",
+      ).length;
+      const alreadyExists = workspaceResult.folders.filter(
+        (folder) => folder.action === "alreadyExists",
+      ).length;
+      const failed = workspaceResult.folders.filter(
+        (folder) => folder.action === "failed",
+      ).length;
+      const createdPaths = workspaceResult.folders
+        .filter((folder) => folder.action === "created")
+        .map((folder) => folder.path);
+      setCreatedFolderPaths(createdPaths);
+
+      if (failed) {
+        const invalidPathFailure = workspaceResult.folders.some(
+          (folder) =>
+            folder.message.includes("os error 123") ||
+            folder.message.toLowerCase().includes("invalid path"),
         );
+        setCompletedActions(["preview"]);
         setSetupResult({
-          kind: failed ? "warning" : "success",
-          title: failed
-            ? invalidPathFailure
-              ? t("wizard.invalidFolderPath")
-              : t("wizard.actionNeedsAttention")
-            : t("wizard.createdFolders"),
-          message: failed
-            ? invalidPathFailure
-              ? t("wizard.invalidFolderMessage")
-              : t("wizard.foldersNeedAttention", {
-                  failed,
-                  folderWord:
-                    failed === 1 ? t("wizard.folderSingular") : t("wizard.folderPlural"),
-                  created,
-                  alreadyExists,
-                })
-            : t("wizard.createdMessage", { created, alreadyExists }),
-          details: result,
-        });
-        if (!failed) {
-          markActionComplete("initialize");
-          setCreatedFolderPaths(
-            result.folders
-              .filter((folder) => folder.action === "created")
-              .map((folder) => folder.path),
-          );
-        }
-        await onSetupSaved();
-      } else if (action === "save") {
-        const result = await invoke<SaveSetupResult>("save_setup_config", {
-          draft,
-          confirmed: true,
-        });
-        const blocking = result.validation.workflows.filter(
-          (workflow) => workflow.commandName && !workflow.canRun,
-        ).length;
-        const guidance = validationGuidance(result.validation, t);
-        setSetupResult({
-          kind: blocking ? "warning" : "success",
-          title: blocking ? t("wizard.savedOneStep") : t("wizard.setupReady"),
-          message: blocking
-            ? `${guidance} ${t("wizard.backupsCreated", {
-                count: result.backups.length,
-                backupWord:
-                  result.backups.length === 1
-                    ? t("wizard.backupSingular")
-                    : t("wizard.backupPlural"),
-              })}`
-            : t("wizard.setupSavedBackups", {
-                count: result.backups.length,
-                backupWord:
-                  result.backups.length === 1
-                    ? t("wizard.backupSingular")
-                    : t("wizard.backupPlural"),
+          kind: "warning",
+          title: invalidPathFailure
+            ? t("wizard.invalidFolderPath")
+            : t("wizard.actionNeedsAttention"),
+          message: invalidPathFailure
+            ? t("wizard.invalidFolderMessage")
+            : t("wizard.foldersNeedAttention", {
+                failed,
+                folderWord:
+                  failed === 1 ? t("wizard.folderSingular") : t("wizard.folderPlural"),
+                created,
+                alreadyExists,
               }),
-          details: result,
         });
-        markActionComplete("save");
-        await onSetupSaved();
-      } else {
-        const result = await invoke<PreflightReport>("validate_setup");
-        const blocking = result.workflows.filter(
-          (workflow) => workflow.commandName && !workflow.canRun,
-        ).length;
-        setSetupResult({
-          kind: blocking ? "warning" : "success",
-          title: blocking ? t("wizard.setupNeedsStep") : t("wizard.setupCheckPassed"),
-          message: blocking
-            ? validationGuidance(result, t)
-            : t("wizard.setupReadyGo"),
-          details: result,
-        });
-        if (!blocking) markActionComplete("validate");
-        await onSetupSaved();
+        return;
       }
+
+      const result = await invoke<SaveSetupResult>("save_setup_config", {
+        draft,
+        confirmed: true,
+      });
+      const blocking = result.validation.workflows.filter(
+        (workflow) => workflow.commandName && !workflow.canRun,
+      ).length;
+      const guidance = validationGuidance(result.validation, t);
+      setCompletedActions(
+        blocking
+          ? ["preview", "initialize", "save"]
+          : ["preview", "initialize", "save", "validate"],
+      );
+      setSetupResult({
+        kind: blocking ? "warning" : "success",
+        title: blocking ? t("wizard.savedOneStep") : t("wizard.setupReady"),
+        message: blocking
+          ? `${guidance} ${t("wizard.backupsCreated", {
+              count: result.backups.length,
+              backupWord:
+                result.backups.length === 1
+                  ? t("wizard.backupSingular")
+                  : t("wizard.backupPlural"),
+            })}`
+          : t("wizard.setupSavedBackups", {
+              count: result.backups.length,
+              backupWord:
+                result.backups.length === 1
+                  ? t("wizard.backupSingular")
+                  : t("wizard.backupPlural"),
+            }),
+      });
+      await onSetupSaved();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const invalidPathMessage =
@@ -494,13 +489,11 @@ export function SetupWizard({
         kind: "error",
         title: t("wizard.actionCouldNotFinish"),
         message: invalidPathMessage,
-        details: invalidPathMessage === message ? undefined : { technicalError: message },
       });
     } finally {
       setSetupAction(null);
     }
   }
-
   async function cleanupCreatedFolders() {
     if (!createdFolderPaths.length) return;
     if (
@@ -541,12 +534,6 @@ export function SetupWizard({
     } finally {
       setSetupAction(null);
     }
-  }
-
-  function markActionComplete(action: SetupAction) {
-    setCompletedActions((current) =>
-      current.includes(action) ? current : [...current, action],
-    );
   }
 
   return (
@@ -623,50 +610,40 @@ export function SetupWizard({
           />
         )}
         {currentStep.key === "safety" && <SafetyStep draft={draft} update={update} />}
-        {currentStep.key === "review" && (
-          <ReviewStep
-            draft={draft}
-            preview={preview}
-            busyAction={setupAction}
-            completedActions={completedActions}
-            setupResult={setupResult}
-            onSetupAction={runSetupAction}
-            onCleanupCreatedFolders={cleanupCreatedFolders}
-            createdFolderCount={createdFolderPaths.length}
-          />
-        )}
+        {currentStep.key === "review" && <ReviewStep draft={draft} />}
         {currentStep.key === "finish" && (
           <FinishStep
-            busyAction={setupAction}
-            completedActions={completedActions}
+            busy={setupAction === "finish"}
+            saved={completedActions.includes("save")}
             setupResult={setupResult}
-            onSetupAction={runSetupAction}
+            onFinish={finishSetup}
+            onDone={onClose}
             onCleanupCreatedFolders={cleanupCreatedFolders}
             createdFolderCount={createdFolderPaths.length}
           />
         )}
 
-        <div className="flex items-center justify-between rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
           <button
             className="rounded-md border border-white/70 bg-white/65 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
             disabled={isFirst}
-            onClick={() => setStepIndex((current) => Math.max(0, current - 1))}
+            onClick={() => moveStep(-1)}
           >
             {t("wizard.back")}
           </button>
-          {isLast ? (
+          <p className="hidden text-xs font-semibold text-slate-500 sm:block">
+            {t("wizard.progressSaved")}
+          </p>
+          {!isLast && (
             <button
               className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
-              onClick={onClose}
+              onClick={() => moveStep(1)}
             >
-              {t("wizard.returnSetup")}
-            </button>
-          ) : (
-            <button
-              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
-              onClick={() => setStepIndex((current) => Math.min(steps.length - 1, current + 1))}
-            >
-              {isFirst ? t("wizard.startSetup") : t("wizard.next")}
+              {isFirst
+                ? t("wizard.startSetup")
+                : currentStep.key === "review"
+                  ? t("wizard.reviewAndSave")
+                  : t("wizard.next")}
             </button>
           )}
         </div>
@@ -800,6 +777,80 @@ type SetupActionResult = {
   details?: unknown;
 };
 
+const SETUP_SESSION_STORAGE_KEY = "innpilot.setup-session.v1";
+
+type SetupWizardSession = {
+  version: 1;
+  draft: SetupDraft;
+  showAdvancedWorkflows: boolean;
+  stepKey: string;
+  completedActions: SetupAction[];
+  createdFolderPaths: string[];
+};
+
+function loadSetupSession(config?: HubConfig | null): SetupWizardSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SETUP_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<SetupWizardSession>;
+    if (value.version !== 1 || !value.draft || typeof value.draft !== "object") {
+      return null;
+    }
+
+    const defaults = createSetupDraft(config);
+    const candidate = value.draft as Partial<SetupDraft>;
+    const recipientRules = Array.isArray(candidate.recipientRules)
+      ? candidate.recipientRules.filter(
+          (rule): rule is RecipientRuleDraft =>
+            Boolean(rule) &&
+            typeof rule.id === "string" &&
+            typeof rule.matchText === "string" &&
+            typeof rule.email === "string",
+        )
+      : defaults.recipientRules;
+    const completedActions = Array.isArray(value.completedActions)
+      ? value.completedActions.filter((action): action is SetupAction =>
+          ["preview", "initialize", "save", "validate"].includes(action),
+        )
+      : [];
+
+    return {
+      version: 1,
+      draft: {
+        ...defaults,
+        ...candidate,
+        invoiceInputPatterns: Array.isArray(candidate.invoiceInputPatterns)
+          ? candidate.invoiceInputPatterns
+          : defaults.invoiceInputPatterns,
+        recipientRules: recipientRules.length ? recipientRules : defaults.recipientRules,
+        scannerFilenamePrefixes: Array.isArray(candidate.scannerFilenamePrefixes)
+          ? candidate.scannerFilenamePrefixes
+          : defaults.scannerFilenamePrefixes,
+        contractMarkerTexts: Array.isArray(candidate.contractMarkerTexts)
+          ? candidate.contractMarkerTexts
+          : defaults.contractMarkerTexts,
+      },
+      showAdvancedWorkflows: Boolean(value.showAdvancedWorkflows),
+      stepKey: typeof value.stepKey === "string" ? value.stepKey : "welcome",
+      completedActions,
+      createdFolderPaths: Array.isArray(value.createdFolderPaths)
+        ? value.createdFolderPaths.filter((path): path is string => typeof path === "string")
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSetupSession(session: SetupWizardSession) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SETUP_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Setup continues even if private browser storage is unavailable.
+  }
+}
 function WelcomeStep({
   showAdvancedWorkflows,
   onShowAdvancedWorkflows,
@@ -1564,25 +1615,7 @@ function SafetyStep({
   );
 }
 
-function ReviewStep({
-  draft,
-  preview,
-  busyAction,
-  completedActions,
-  setupResult,
-  onSetupAction,
-  onCleanupCreatedFolders,
-  createdFolderCount,
-}: {
-  draft: SetupDraft;
-  preview: ReturnType<typeof buildConfigPreview>;
-  busyAction: string | null;
-  completedActions: SetupAction[];
-  setupResult: SetupActionResult | null;
-  onSetupAction: (action: SetupAction) => void;
-  onCleanupCreatedFolders: () => void;
-  createdFolderCount: number;
-}) {
+function ReviewStep({ draft }: { draft: SetupDraft }) {
   const { t } = useI18n();
   const filledRules = draft.recipientRules.filter(
     (rule) => rule.matchText.trim() || rule.email.trim(),
@@ -1609,7 +1642,7 @@ function ReviewStep({
         <SummaryCard title={t("wizard.contractYear")} value={draft.contractYear || t("wizard.notSet")} />
         <SummaryCard title={t("wizard.python")} value={draft.pythonExecutable || t("wizard.notSet")} />
         <SummaryCard
-          title="Safety"
+          title={t("wizard.safetyTitle")}
           value={[
             draft.safeMode ? t("wizard.safeMode") : t("wizard.realRunDefault"),
             draft.archiveOriginals ? t("wizard.archiveOriginals") : t("wizard.noArchivePreference"),
@@ -1617,48 +1650,27 @@ function ReviewStep({
           ].join(", ")}
         />
       </div>
-
-      <details className="mt-5 max-w-full rounded-md bg-ink/95 p-4">
-        <summary className="cursor-pointer text-sm font-semibold text-brand-200">
-          {t("wizard.technicalDetails")}
-        </summary>
-        <button
-          className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/20"
-          type="button"
-          onClick={() => void navigator.clipboard?.writeText(JSON.stringify(preview, null, 2))}
-        >
-          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("wizard.copyDetails")}
-        </button>
-        <pre className="mt-3 max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/30 p-4 font-mono text-xs leading-5 text-slate-100">
-          {JSON.stringify(preview, null, 2)}
-        </pre>
-      </details>
-
-      <SetupActionPanel
-        busyAction={busyAction}
-        completedActions={completedActions}
-        setupResult={setupResult}
-        onSetupAction={onSetupAction}
-        onCleanupCreatedFolders={onCleanupCreatedFolders}
-        createdFolderCount={createdFolderCount}
-      />
+      <p className="mt-5 rounded-lg bg-brand-50/75 px-4 py-3 text-sm font-semibold text-brand-900">
+        {t("wizard.reviewSaveHint")}
+      </p>
     </SetupStep>
   );
 }
 
 function FinishStep({
-  busyAction,
-  completedActions,
+  busy,
+  saved,
   setupResult,
-  onSetupAction,
+  onFinish,
+  onDone,
   onCleanupCreatedFolders,
   createdFolderCount,
 }: {
-  busyAction: string | null;
-  completedActions: SetupAction[];
+  busy: boolean;
+  saved: boolean;
   setupResult: SetupActionResult | null;
-  onSetupAction: (action: SetupAction) => void;
+  onFinish: () => void;
+  onDone: () => void;
   onCleanupCreatedFolders: () => void;
   createdFolderCount: number;
 }) {
@@ -1666,98 +1678,17 @@ function FinishStep({
   return (
     <SetupStep
       icon={<CheckCircle2 className="h-6 w-6" />}
-      title={t("wizard.finishTitle")}
-      helper={t("wizard.finishHelper")}
+      title={saved ? t("wizard.setupReady") : t("wizard.finishTitle")}
+      helper={saved ? t("wizard.setupReadyGo") : t("wizard.finishHelper")}
     >
-      <div className="rounded-md bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-900">
+      <div className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold leading-6 text-emerald-900">
         {t("wizard.finishNote")}
       </div>
-      <SetupActionPanel
-        busyAction={busyAction}
-        completedActions={completedActions}
-        setupResult={setupResult}
-        onSetupAction={onSetupAction}
-        onCleanupCreatedFolders={onCleanupCreatedFolders}
-        createdFolderCount={createdFolderCount}
-      />
-    </SetupStep>
-  );
-}
 
-function SetupActionPanel({
-  busyAction,
-  completedActions,
-  setupResult,
-  onSetupAction,
-  onCleanupCreatedFolders,
-  createdFolderCount,
-}: {
-  busyAction: string | null;
-  completedActions: SetupAction[];
-  setupResult: SetupActionResult | null;
-  onSetupAction: (action: SetupAction) => void;
-  onCleanupCreatedFolders: () => void;
-  createdFolderCount: number;
-}) {
-  const { t } = useI18n();
-  const hasPreview = completedActions.includes("preview");
-  const hasInitialize = completedActions.includes("initialize");
-  const hasSave = completedActions.includes("save");
-  return (
-    <div className="mt-5 rounded-lg bg-white/60 p-4">
-      <ol className="mb-4 grid gap-2 text-sm font-semibold text-slate-700 md:grid-cols-4">
-        {[
-          ["1", t("wizard.previewSetup")],
-          ["2", t("wizard.createFolders")],
-          ["3", t("wizard.saveSetup")],
-          ["4", t("wizard.checkSetup")],
-        ].map(([number, label]) => (
-          <li key={label} className="rounded-md bg-white/65 px-3 py-2">
-            <span className="mr-2 text-brand-700">{number}.</span>
-            {label}
-          </li>
-        ))}
-      </ol>
-      <div className="grid gap-3 md:grid-cols-4">
-        <SetupActionButton
-          label={t("wizard.previewSetup")}
-          busy={busyAction === "preview"}
-          disabled={Boolean(busyAction)}
-          onClick={() => onSetupAction("preview")}
-        />
-        <SetupActionButton
-          label={t("wizard.createFolders")}
-          busy={busyAction === "initialize"}
-          disabled={Boolean(busyAction) || !hasPreview}
-          onClick={() => onSetupAction("initialize")}
-        />
-        <SetupActionButton
-          label={t("wizard.saveSetup")}
-          busy={busyAction === "save"}
-          disabled={Boolean(busyAction) || !hasInitialize}
-          onClick={() => onSetupAction("save")}
-        />
-        <SetupActionButton
-          label={t("wizard.checkSetup")}
-          busy={busyAction === "validate"}
-          disabled={Boolean(busyAction) || !hasSave}
-          onClick={() => onSetupAction("validate")}
-        />
-      </div>
-      {createdFolderCount > 0 && (
-        <button
-          className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={Boolean(busyAction)}
-          onClick={onCleanupCreatedFolders}
-          type="button"
-        >
-          {t("wizard.cleanupFolders")}
-        </button>
-      )}
       {setupResult && (
         <div
           className={[
-            "mt-4 rounded-md p-4 text-sm font-semibold leading-6",
+            "mt-4 rounded-lg p-4 text-sm font-semibold leading-6",
             setupResult.kind === "success"
               ? "bg-emerald-50 text-emerald-900"
               : setupResult.kind === "warning"
@@ -1767,51 +1698,42 @@ function SetupActionPanel({
         >
           <p>{setupResult.title}</p>
           <p className="mt-1 font-medium">{setupResult.message}</p>
-          {setupResult.details !== undefined && (
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-bold">{t("wizard.technicalDetails")}</summary>
-              <button
-                className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/20"
-                type="button"
-                onClick={() => void navigator.clipboard?.writeText(JSON.stringify(setupResult.details, null, 2))}
-              >
-                <Copy className="h-3.5 w-3.5" />
-                {t("wizard.copyDetails")}
-              </button>
-              <pre className="mt-3 max-h-80 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-ink p-3 font-mono text-xs leading-5 text-slate-100">
-                {JSON.stringify(setupResult.details, null, 2)}
-              </pre>
-            </details>
-          )}
         </div>
       )}
-    </div>
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+        {saved ? (
+          <button
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
+            onClick={onDone}
+            type="button"
+          >
+            {t("wizard.done")}
+          </button>
+        ) : (
+          <button
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={busy}
+            onClick={onFinish}
+            type="button"
+          >
+            {busy ? t("wizard.savingAndFinishing") : t("wizard.saveAndFinish")}
+          </button>
+        )}
+        {createdFolderCount > 0 && !saved && (
+          <button
+            className="min-h-12 rounded-lg border border-amber-200 bg-amber-50 px-4 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            disabled={busy}
+            onClick={onCleanupCreatedFolders}
+            type="button"
+          >
+            {t("wizard.cleanupFolders")}
+          </button>
+        )}
+      </div>
+    </SetupStep>
   );
 }
-
-function SetupActionButton({
-  label,
-  busy,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  busy: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <button
-      className="rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {busy ? t("wizard.working") : label}
-    </button>
-  );
-}
-
 function PathField({
   label,
   value,

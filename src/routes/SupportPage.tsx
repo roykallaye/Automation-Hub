@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Clipboard,
   Cpu,
-  FileText,
   FolderOpen,
   HeartPulse,
   PackageCheck,
@@ -11,7 +10,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { DeveloperDetails } from "../components/DeveloperDetails";
 import { InfoHint } from "../components/InfoHint";
 import { PageHeader } from "../components/PageHeader";
 import { ReadinessBadge } from "../components/StatusBadges";
@@ -20,31 +18,25 @@ import { useI18n } from "../i18n";
 import type {
   AppConfigStatus,
   AppPage,
-  LatestLog,
   ManagedAutomationInstallResult,
   PreflightItem,
   RecoveryActionResult,
   RecoveryStatus,
-  RunSummary,
 } from "../types";
 
 /*
   Support is a calm diagnostic center: a health summary first, then guided
-  fixes with in-app buttons. Raw paths, preflight tables, and JSON live behind
-  one "Technical details" area at the end.
+  fixes with in-app buttons. Private support information is copied only after
+  the user explicitly enables Support mode.
 */
 export function SupportPage({
   configStatus,
-  latestLogs,
-  lastSummary,
   onOpenPath,
   onRefresh,
   onInstallAutomation,
   onNavigate,
 }: {
   configStatus: AppConfigStatus | null;
-  latestLogs: LatestLog[];
-  lastSummary: RunSummary | null;
   onOpenPath: (path?: string | null) => void;
   onRefresh: () => void;
   onInstallAutomation: () => Promise<ManagedAutomationInstallResult>;
@@ -56,6 +48,7 @@ export function SupportPage({
   const [installError, setInstallError] = useState<string | null>(null);
   const [copiedPythonCommand, setCopiedPythonCommand] = useState(false);
   const [copiedSupportBundle, setCopiedSupportBundle] = useState(false);
+  const [supportMode, setSupportMode] = useState(false);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<"create" | "restore" | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState("");
@@ -112,28 +105,6 @@ export function SupportPage({
       ]
     : [];
 
-  const paths = config
-    ? [
-        ["Automation scripts folder", config.automation.automationRootFolder],
-        ["Automation setup file", config.automation.automationConfigPath],
-        ["Automation engine", config.automation.pythonExecutable],
-        ["Invoice script", config.scripts.invoiceWorkflowScript],
-        ["Gmail draft script", config.scripts.gmailDraftScript],
-        ["Copy scanned documents script", config.scripts.copyScansioniScript],
-        ["Document reading script", config.scripts.ocrPreprocessingScript],
-        ["Contracts script", config.scripts.contractProcessingScript],
-        ["Invoice input folder", config.folders.invoiceInputFolder],
-        ["Invoice output folder", config.folders.invoiceOutputFolder],
-        ["Invoice archive folder", config.folders.invoiceArchiveFolder],
-        ["Invoice log folder", config.folders.invoiceLogFolder],
-        ["Shared scan folder", config.folders.scansioniNetworkShare],
-        ["Local scan cache", config.folders.scansioniLocalCacheFolder],
-        ["Document text output", config.folders.ocrTextOutputFolder],
-        ["Contracts output folder", config.folders.contractsOutputFolder],
-        ["Contract log folder", config.folders.contractLogFolder],
-        ["Gmail sign-in file", config.gmail.tokenPath],
-      ]
-    : [];
 
   const latestRecovery =
     recoveryStatus?.points.find((point) => point.integrity === "ready") ??
@@ -219,12 +190,26 @@ export function SupportPage({
   return (
     <div className="space-y-5">
       <PageHeader title={t("support.title")}>
-        <button
-          className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-          onClick={onRefresh}
-        >
-          {t("support.checkAgain")}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-white/70 bg-white/65 px-3 text-xs font-semibold text-slate-700 hover:bg-white"
+            title={t("support.modeHint")}
+          >
+            <input
+              checked={supportMode}
+              className="h-4 w-4 accent-brand-700"
+              onChange={(event) => setSupportMode(event.target.checked)}
+              type="checkbox"
+            />
+            {t("support.mode")}
+          </label>
+          <button
+            className="rounded-lg border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+            onClick={onRefresh}
+          >
+            {t("support.checkAgain")}
+          </button>
+        </div>
       </PageHeader>
 
       <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
@@ -417,14 +402,7 @@ export function SupportPage({
               <FolderOpen className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
               {t("support.fixFolders")}
             </button>
-            <button
-              className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md border border-white/70 bg-white/65 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!configStatus}
-              onClick={() => void copySupportBundle()}
-            >
-              <Clipboard className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
-              {copiedSupportBundle ? t("support.copiedBundle") : t("support.copyBundle")}
-            </button>
+
           </div>
         </section>
       </details>
@@ -527,91 +505,31 @@ export function SupportPage({
         </div>
       </details>
 
-      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          {t("support.technicalDetails")}
-        </summary>
-        <div className="mt-4 grid gap-5 xl:grid-cols-2">
-          <section>
-            <h3 className="text-base font-semibold text-slate-950">{t("support.configuredPaths")}</h3>
-            <p className="mt-1 text-sm font-medium text-slate-600">
-              {t("support.tokenHidden")}
-            </p>
-            <div className="mt-3 space-y-2">
-              {paths.map(([label, value]) => (
-                <div key={label} className="rounded-md bg-white/55 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
-                  <p className="mt-1 break-words font-mono text-xs leading-5 text-slate-700">
-                    {value || t("support.notConfigured")}
-                  </p>
-                </div>
-              ))}
-              {!paths.length && (
-                <p className="rounded-md bg-white/55 p-4 text-sm font-medium text-slate-700">
-                  {t("support.detailsUnavailable")}
-                </p>
-              )}
-            </div>
-          </section>
-
-          <div className="space-y-5">
-            <section>
-              <h3 className="text-base font-semibold text-slate-950">{t("support.preflight")}</h3>
-              <div className="mt-3 space-y-2">
-                {items.slice(0, 8).map((item) => (
-                  <div
-                    key={item.key}
-                    className="flex items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2"
-                  >
-                    <span className="text-xs font-semibold text-slate-700">{item.label}</span>
-                    <ReadinessBadge status={item.status} />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <h3 className="text-base font-semibold text-slate-950">{t("support.dependencies")}</h3>
-              <div className="mt-3 space-y-2">
-                {configStatus?.preflight.dependencies.map((item) => (
-                  <div
-                    key={item.key}
-                    className="flex items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2"
-                  >
-                    <span className="text-xs font-semibold text-slate-700">{item.label}</span>
-                    <ReadinessBadge status={item.status} />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <h3 className="text-base font-semibold text-slate-950">{t("support.logs")}</h3>
-              <div className="mt-3 space-y-2">
-                {latestLogs.map((log) => (
-                  <button
-                    key={log.key}
-                    className="flex w-full items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2 text-left text-xs transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!log.path}
-                    onClick={() => onOpenPath(log.path)}
-                  >
-                    <span className="font-semibold text-slate-700">{log.label}</span>
-                    <FileText className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <h3 className="text-base font-semibold text-slate-950">{t("support.lastCode")}</h3>
-              <p className="mt-2 text-sm font-medium text-slate-600">
-                {lastSummary ? String(lastSummary.exit_code) : t("support.noRunYet")}
-              </p>
-            </section>
+      {supportMode && (
+        <section className="flex flex-col gap-3 rounded-xl border border-brand-100 bg-brand-50/75 p-4 shadow-glass sm:flex-row sm:items-center sm:justify-between">
+          <div className="group relative w-fit">
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Clipboard className="h-4 w-4 text-brand-700" aria-hidden="true" />
+              {t("support.supportInfo")}
+            </span>
+            <span
+              className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 w-72 rounded-lg bg-ink px-3 py-2 text-xs font-medium leading-5 text-white opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100"
+              role="tooltip"
+            >
+              {t("support.modeHint")}
+            </span>
           </div>
-        </div>
-        <DeveloperDetails configStatus={configStatus} />
-      </details>
+          <button
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white hover:bg-ink-soft disabled:opacity-50"
+            disabled={!configStatus}
+            onClick={() => void copySupportBundle()}
+            type="button"
+          >
+            <Clipboard className="h-4 w-4" aria-hidden="true" />
+            {copiedSupportBundle ? t("support.supportCopied") : t("support.copySupportInfo")}
+          </button>
+        </section>
+      )}
     </div>
   );
 }
