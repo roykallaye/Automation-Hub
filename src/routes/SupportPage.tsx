@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 
 import { InfoHint } from "../components/InfoHint";
 import { PageHeader } from "../components/PageHeader";
+import { RefreshButton } from "../components/RefreshButton";
 import { ReadinessBadge } from "../components/StatusBadges";
 import { StatusHint, type StatusTone } from "../components/StatusOrb";
 import { useI18n } from "../i18n";
@@ -203,12 +204,7 @@ export function SupportPage({
             />
             {t("support.mode")}
           </label>
-          <button
-            className="rounded-lg border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-            onClick={onRefresh}
-          >
-            {t("support.checkAgain")}
-          </button>
+          <RefreshButton label={t("support.checkAgain")} onClick={onRefresh} />
         </div>
       </PageHeader>
 
@@ -258,7 +254,7 @@ export function SupportPage({
             />
           </div>
           <button
-            className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-cta px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-60"
             disabled={installing}
             onClick={async () => {
               const confirmed = window.confirm(
@@ -520,7 +516,7 @@ export function SupportPage({
             </span>
           </div>
           <button
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white hover:bg-ink-soft disabled:opacity-50"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cta px-4 text-sm font-semibold text-white hover:bg-cta-soft disabled:opacity-50"
             disabled={!configStatus}
             onClick={() => void copySupportBundle()}
             type="button"

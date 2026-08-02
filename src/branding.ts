@@ -42,22 +42,22 @@ export const BRAND_PALETTES: BrandPalette[] = [
   {
     id: "innpilotDefault",
     name: "InnPilot Default",
-    tagline: "Calm teal with warm neutrals",
+    tagline: "Graphite, warm grey, and restrained oxblood",
     brand: {
-      50: "240 253 250",
-      100: "204 251 241",
-      200: "153 246 228",
-      300: "94 234 212",
-      700: "15 118 110",
-      800: "17 94 89",
-      900: "19 78 74",
-      950: "4 47 46",
+      50: "253 246 246",
+      100: "248 231 232",
+      200: "239 204 206",
+      300: "222 157 161",
+      700: "153 43 51",
+      800: "126 32 39",
+      900: "101 25 31",
+      950: "57 13 17",
     },
     background: {
-      base: "#eef2f4",
-      from: "#f8fafc",
-      via: "#e5eeee",
-      to: "#f4efe8",
+      base: "#f2f2f1",
+      from: "#fafafa",
+      via: "#efefee",
+      to: "#f7f7f6",
     },
   },
   {
@@ -337,21 +337,13 @@ const TINT_SLOTS: { key: string; hueOffset: number }[] = [
 /** Applies hotel branding to the design tokens in src/styles.css. */
 export function applyBrandingToDocument(branding?: ClientBranding | null) {
   const resolved = branding ?? DEFAULT_BRANDING;
-  const palette = resolvePalette(resolved.palette);
+  const palette = BRAND_PALETTES[0];
   const root = document.documentElement.style;
 
   const brandScale = { ...palette.brand };
-  const primaryOverride = hexToRgbTriplet(resolved.primaryColor);
-  if (primaryOverride) {
-    brandScale[700] = primaryOverride;
-    brandScale[800] = mixTriplet(primaryOverride, "0 0 0", 0.18);
-    brandScale[900] = mixTriplet(primaryOverride, "0 0 0", 0.32);
-    brandScale[950] = mixTriplet(primaryOverride, "0 0 0", 0.6);
-    brandScale[50] = mixTriplet(primaryOverride, "255 255 255", 0.94);
-    brandScale[100] = mixTriplet(primaryOverride, "255 255 255", 0.85);
-    brandScale[200] = mixTriplet(primaryOverride, "255 255 255", 0.7);
-    brandScale[300] = mixTriplet(primaryOverride, "255 255 255", 0.5);
-  }
+  void resolved.palette;
+  void resolved.primaryColor;
+  void resolved.accentColor;
   root.setProperty("--brand-50", brandScale[50]);
   root.setProperty("--brand-100", brandScale[100]);
   root.setProperty("--brand-200", brandScale[200]);
@@ -361,17 +353,15 @@ export function applyBrandingToDocument(branding?: ClientBranding | null) {
   root.setProperty("--brand-900", brandScale[900]);
   root.setProperty("--brand-950", brandScale[950]);
 
-  // Call to action: the palette's signature color (not near-black), so every
-  // primary button changes with the palette. accentColor still overrides.
-  const accentOverride = hexToRgbTriplet(resolved.accentColor);
-  root.setProperty("--ink", accentOverride ?? brandScale[800]);
-  root.setProperty(
-    "--ink-soft",
-    accentOverride ? mixTriplet(accentOverride, "0 0 0", 0.16) : brandScale[900],
-  );
+  // Black carries selection and hierarchy; oxblood is reserved for actions.
+  root.setProperty("--ink", "24 24 27");
+  root.setProperty("--ink-soft", "39 39 42");
+  root.setProperty("--cta", brandScale[700]);
+  root.setProperty("--cta-soft", brandScale[800]);
 
-  // Decorative tints, all derived from the brand hue.
-  const [baseHue, baseSat] = rgbToHsl(brandScale[700]);
+  // Decorative tints stay neutral so cards do not compete with primary actions.
+  const [baseHue] = rgbToHsl(brandScale[700]);
+  const baseSat = 0;
   for (const slot of TINT_SLOTS) {
     if (slot.key === "brand") {
       setTintVars(root, slot.key, {
@@ -424,22 +414,6 @@ function setTintVars(
   root.setProperty(`--tint-${key}-wash`, parts.wash);
 }
 
-function hexToRgbTriplet(hex?: string): string | null {
-  if (!hex) return null;
-  const match = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!match) return null;
-  const value = parseInt(match[1], 16);
-  return `${(value >> 16) & 255} ${(value >> 8) & 255} ${value & 255}`;
-}
-
-/** Mixes an "r g b" triplet toward another by the given amount (0..1). */
-function mixTriplet(triplet: string, toward: string, amount: number): string {
-  const from = triplet.split(" ").map(Number);
-  const to = toward.split(" ").map(Number);
-  return from
-    .map((channel, index) => Math.round(channel + (to[index] - channel) * amount))
-    .join(" ");
-}
 
 /** Hue (0..360) and saturation (0..1) of an "r g b" triplet. */
 function rgbToHsl(triplet: string): [number, number, number] {

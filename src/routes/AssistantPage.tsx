@@ -215,7 +215,7 @@ export function AssistantPage() {
                   placeholder={t("assistant.placeholder")}
                 />
                 <button
-                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!request.trim()}
                   onClick={previewCustom}
                 >
@@ -261,7 +261,7 @@ export function AssistantPage() {
           </ol>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-cta px-5 text-sm font-semibold text-white transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
               disabled={savingBrief || Boolean(savedBrief)}
               onClick={saveDiscoveryBrief}
             >

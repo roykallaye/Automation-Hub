@@ -87,7 +87,7 @@ export function BrandingPanel({
   return (
     <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
       <div className="flex items-center gap-3">
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-amber-tile ring-1">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200">
           <Building2 className="h-5 w-5" aria-hidden="true" />
         </div>
         <h2 className="text-lg font-semibold text-slate-950">{t("branding.title")}</h2>
@@ -134,15 +134,17 @@ export function BrandingPanel({
               </button>
             )}
           </div>
-          <p className="mt-2 truncate text-xs font-medium text-slate-500" title={draft.logoPath}>
-            {draft.logoPath || t("branding.noLogo")}
-          </p>
+          {draft.logoPath && (
+            <p className="mt-2 truncate text-xs font-semibold text-zinc-500" title={draft.logoPath}>
+              {logoFileName(draft.logoPath)}
+            </p>
+          )}
         </div>
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <button
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
           disabled={saving || !isDirty}
           onClick={() => void save()}
         >
@@ -162,4 +164,9 @@ export function BrandingPanel({
       </div>
     </section>
   );
+}
+
+function logoFileName(path: string) {
+  const parts = path.split(/[/\\\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }

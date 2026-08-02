@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  Building2,
   CheckCircle2,
   FileCheck2,
   FolderTree,
@@ -25,6 +24,7 @@ import type {
   WorkflowPreflight,
   WorkspaceInitResult,
 } from "../../types";
+import { InfoHint } from "../InfoHint";
 import { staffMessage } from "../../messages";
 import {
   createRuleId,
@@ -623,11 +623,12 @@ export function SetupWizard({
           />
         )}
 
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
+        <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white/95 p-3 shadow-lift backdrop-blur-xl">
           <button
-            className="rounded-md border border-white/70 bg-white/65 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={isFirst}
             onClick={() => moveStep(-1)}
+            type="button"
           >
             {t("wizard.back")}
           </button>
@@ -636,8 +637,9 @@ export function SetupWizard({
           </p>
           {!isLast && (
             <button
-              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
+              className="min-w-32 rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft"
               onClick={() => moveStep(1)}
+              type="button"
             >
               {isFirst
                 ? t("wizard.startSetup")
@@ -927,22 +929,11 @@ function ProfileStep({
   const { t } = useI18n();
   return (
     <SetupStep
-      icon={<Building2 className="h-6 w-6" />}
+      icon={<Mail className="h-6 w-6" />}
       title={t("wizard.profileTitle")}
       helper={t("wizard.profileHelper")}
     >
-      <div className="grid gap-4 md:grid-cols-2">
-        <FieldLabel
-          label={t("wizard.hotelDisplayName")}
-          help={t("wizard.hotelDisplayHelp")}
-        >
-          <input
-            className={inputClassName}
-            value={draft.hotelDisplayName}
-            onChange={(event) => update("hotelDisplayName", event.target.value)}
-            placeholder={t("branding.hotelPlaceholder")}
-          />
-        </FieldLabel>
+      <div className="max-w-xl">
         <FieldLabel
           label={t("wizard.emailSignatureName")}
           help={t("wizard.emailSignatureHelp")}
@@ -983,9 +974,6 @@ function WorkspaceStep({
         onChange={onWorkspaceChange}
         onChoose={onChooseFolder}
       />
-      <p className="mt-3 text-sm font-medium text-slate-600">
-        {t("wizard.suggestedFolder", { path: "C:\\InnPilot\\workspace" })}
-      </p>
     </SetupStep>
   );
 }
@@ -1004,9 +992,7 @@ function FolderPreviewStep({ draft }: { draft: SetupDraft }) {
         {workspaceFolders(draft).map((folder) => (
           <div key={folder.relativePath} className="rounded-md border border-white/70 bg-white/70 p-3">
             <p className="text-sm font-semibold text-slate-900">/{folder.relativePath}</p>
-            <p className="mt-1 break-words text-xs font-medium leading-5 text-slate-600">
-              {folder.fullPath}
-            </p>
+
           </div>
         ))}
         </div>
@@ -1106,9 +1092,7 @@ function ExistingFoldersStep({
                 >
                   {inspection?.kind === "loading" ? t("wizard.inspecting") : t("wizard.inspectFolder")}
                 </button>
-                <span className="text-xs font-semibold text-slate-500">
-                  {t("wizard.discoverySafeNote")}
-                </span>
+
               </div>
               {inspection && (
                 <FolderInspectionPanel
@@ -1575,7 +1559,7 @@ function SafetyStep({
                     placeholder={managedPythonExecutable()}
                   />
                   <button
-                    className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                    className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
                     type="button"
                     onClick={() => update("pythonExecutable", managedPythonExecutable())}
                   >
@@ -1627,7 +1611,6 @@ function ReviewStep({ draft }: { draft: SetupDraft }) {
       helper={t("wizard.reviewHelper")}
     >
       <div className="grid gap-3 md:grid-cols-2">
-        <SummaryCard title={t("wizard.hotel")} value={draft.hotelDisplayName || t("wizard.notSet")} />
         <SummaryCard title={t("wizard.stepWorkspace")} value={draft.workspaceBase || t("wizard.notSet")} />
         <SummaryCard title={t("wizard.invoiceDelivery")} value={deliveryModeSummary(draft.invoiceDeliveryMode, t)} />
         <SummaryCard title={t("wizard.invoiceFiles")} value={fileSelectionSummary(draft, t)} />
@@ -1704,7 +1687,7 @@ function FinishStep({
       <div className="mt-5 flex flex-col gap-2 sm:flex-row">
         {saved ? (
           <button
-            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft"
             onClick={onDone}
             type="button"
           >
@@ -1712,7 +1695,7 @@ function FinishStep({
           </button>
         ) : (
           <button
-            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-55"
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-55"
             disabled={busy}
             onClick={onFinish}
             type="button"
@@ -1764,7 +1747,7 @@ function PathField({
           placeholder={placeholder}
         />
         <button
-          className="rounded-md border border-white/70 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+          className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
           onClick={onChoose}
           type="button"
         >
@@ -1784,7 +1767,6 @@ function PathField({
         >
           {t(status.labelKey)}
         </span>
-        <span className="text-xs font-medium leading-5 text-slate-600">{hint}</span>
       </div>
     </FieldLabel>
   );
@@ -1932,19 +1914,11 @@ function ToggleCard({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-white/65 bg-white/65 p-4">
-      <span>
-        <span className="block text-sm font-semibold text-slate-950">{title}</span>
-        {help && (
-          <span
-            className="ml-2 inline-grid h-5 w-5 place-items-center rounded-full bg-brand-50 text-xs font-bold text-brand-800 ring-1 ring-brand-100"
-            title={help}
-            aria-label={help}
-          >
-            ?
-          </span>
-        )}
-        <span className="mt-1 block text-sm font-medium leading-6 text-slate-600">{text}</span>
+    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-white p-4">
+      <span className="inline-flex items-center gap-2">
+        <span className="text-sm font-semibold text-zinc-950">{title}</span>
+        {help && <InfoHint text={help} />}
+        <span className="sr-only">{text}</span>
       </span>
       <input
         className="h-5 w-5 accent-brand-700"

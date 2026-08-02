@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import type { AppConfigStatus, LatestLog, RunSummary } from "../types";
 import { DeveloperDetails } from "./DeveloperDetails";
 import { StatusPill } from "./StatusBadges";
+import { RefreshButton } from "./RefreshButton";
 
 export function DetailsPanel({
   summary,
@@ -30,12 +31,7 @@ export function DetailsPanel({
           </div>
           <h2 className="text-xl font-semibold text-slate-950">{t("details.lastRun")}</h2>
         </div>
-        <button
-          className="rounded-md border border-white/70 bg-white/60 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-          onClick={onRefresh}
-        >
-          {t("common.refresh")}
-        </button>
+        <RefreshButton label={t("common.refresh")} onClick={onRefresh} />
       </div>
 
       {summary ? (

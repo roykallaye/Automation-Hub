@@ -93,7 +93,7 @@ export function HomePage({
               </div>
             </div>
             <button
-              className="shrink-0 rounded-md bg-ink px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft"
+              className="shrink-0 rounded-md bg-cta px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft"
               onClick={() => onNavigate(nextAction.targetPage)}
             >
               {nextAction.buttonLabel}

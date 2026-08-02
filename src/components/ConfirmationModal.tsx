@@ -111,7 +111,7 @@ export function ConfirmationModal({
           </button>
           <button
             ref={confirmRef}
-            className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-white transition hover:bg-ink-soft"
+            className="rounded-md bg-cta px-4 py-3 text-sm font-semibold text-white transition hover:bg-cta-soft"
             onClick={onConfirm}
           >
             {t("common.startRun")}

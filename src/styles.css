@@ -12,52 +12,54 @@
 */
 :root {
   /* Brand accent scale (default: InnPilot deep teal) */
-  --brand-50: 240 253 250;
-  --brand-100: 204 251 241;
-  --brand-200: 153 246 228;
-  --brand-300: 94 234 212;
-  --brand-700: 15 118 110;
-  --brand-800: 17 94 89;
-  --brand-900: 19 78 74;
-  --brand-950: 4 47 46;
+  --brand-50: 253 246 246;
+  --brand-100: 248 231 232;
+  --brand-200: 239 204 206;
+  --brand-300: 222 157 161;
+  --brand-700: 153 43 51;
+  --brand-800: 126 32 39;
+  --brand-900: 101 25 31;
+  --brand-950: 57 13 17;
 
   /* Primary action / CTA ("ink") surface — derives from brand at runtime
      (see applyBrandingToDocument). Default mirrors the teal brand-800/900. */
-  --ink: 17 94 89;
-  --ink-soft: 19 78 74;
+  --ink: 24 24 27;
+  --ink-soft: 39 39 42;
+  --cta: 153 43 51;
+  --cta-soft: 126 32 39;
 
   /* Decorative card tints (palette-derived at runtime). These fallbacks use
      the default teal family so cards are never unstyled before JS runs. */
-  --tint-brand-bg: 204 251 241;
-  --tint-brand-fg: 17 94 89;
-  --tint-brand-ring: 153 246 228;
-  --tint-brand-wash: 240 253 250;
-  --tint-sky-bg: 204 251 241;
-  --tint-sky-fg: 17 94 89;
-  --tint-sky-ring: 153 246 228;
-  --tint-sky-wash: 240 253 250;
-  --tint-violet-bg: 204 251 241;
-  --tint-violet-fg: 17 94 89;
-  --tint-violet-ring: 153 246 228;
-  --tint-violet-wash: 240 253 250;
-  --tint-amber-bg: 204 251 241;
-  --tint-amber-fg: 17 94 89;
-  --tint-amber-ring: 153 246 228;
-  --tint-amber-wash: 240 253 250;
-  --tint-emerald-bg: 204 251 241;
-  --tint-emerald-fg: 17 94 89;
-  --tint-emerald-ring: 153 246 228;
-  --tint-emerald-wash: 240 253 250;
-  --tint-rose-bg: 204 251 241;
-  --tint-rose-fg: 17 94 89;
-  --tint-rose-ring: 153 246 228;
-  --tint-rose-wash: 240 253 250;
+  --tint-brand-bg: 248 231 232;
+  --tint-brand-fg: 126 32 39;
+  --tint-brand-ring: 239 204 206;
+  --tint-brand-wash: 253 246 246;
+  --tint-sky-bg: 244 244 245;
+  --tint-sky-fg: 63 63 70;
+  --tint-sky-ring: 228 228 231;
+  --tint-sky-wash: 250 250 250;
+  --tint-violet-bg: 244 244 245;
+  --tint-violet-fg: 63 63 70;
+  --tint-violet-ring: 228 228 231;
+  --tint-violet-wash: 250 250 250;
+  --tint-amber-bg: 251 247 239;
+  --tint-amber-fg: 117 70 23;
+  --tint-amber-ring: 232 209 170;
+  --tint-amber-wash: 253 251 247;
+  --tint-emerald-bg: 244 245 244;
+  --tint-emerald-fg: 53 61 56;
+  --tint-emerald-ring: 214 219 216;
+  --tint-emerald-wash: 250 250 250;
+  --tint-rose-bg: 248 231 232;
+  --tint-rose-fg: 126 32 39;
+  --tint-rose-ring: 239 204 206;
+  --tint-rose-wash: 253 246 246;
 
   /* App background wash */
-  --app-bg: #eef2f4;
-  --app-bg-from: #f8fafc;
-  --app-bg-via: #e5eeee;
-  --app-bg-to: #f4efe8;
+  --app-bg: #f2f2f1;
+  --app-bg-from: #fafafa;
+  --app-bg-via: #efefee;
+  --app-bg-to: #f7f7f6;
 
   /* Branded watermark */
   --watermark-opacity: 0.06;
@@ -315,4 +317,12 @@ pre {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+@keyframes setup-check-settle {
+  from { opacity: 0; transform: scale(0.78); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.setup-step-check {
+  animation: setup-check-settle 180ms ease-out both;
 }

@@ -90,7 +90,7 @@ export function DesktopServicePanel() {
         </div>
 
         <button
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!status || !status.changesAvailable || saving}
           onClick={toggleStartup}
           type="button"

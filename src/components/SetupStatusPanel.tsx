@@ -1,9 +1,9 @@
-import { RefreshCw } from "lucide-react";
 
 import { useI18n } from "../i18n";
 import { friendlyWorkflowLabel, staffMessage } from "../messages";
 import type { AppConfigStatus } from "../types";
 import { ReadinessBadge } from "./StatusBadges";
+import { RefreshButton } from "./RefreshButton";
 
 export function SetupStatusPanel({
   configStatus,
@@ -35,13 +35,7 @@ export function SetupStatusPanel({
                 : t("app.setupLoadFailed")}
           </p>
         </div>
-        <button
-          className="inline-flex items-center gap-2 rounded-md border border-white/70 bg-white/65 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-          onClick={onRefresh}
-        >
-          <RefreshCw className="h-4 w-4 text-brand-700" />
-          {t("common.refresh")}
-        </button>
+        <RefreshButton label={t("common.refresh")} onClick={onRefresh} />
       </div>
       {automationConfig && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-md bg-white/60 p-3">

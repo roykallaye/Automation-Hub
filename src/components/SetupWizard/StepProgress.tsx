@@ -1,3 +1,5 @@
+import { Check } from "lucide-react";
+
 import { useI18n } from "../../i18n";
 
 export type WizardStepMeta = {
@@ -14,7 +16,7 @@ export function StepProgress({
 }) {
   const { t } = useI18n();
   return (
-    <div className="rounded-xl border border-white/65 bg-white/55 p-4 shadow-glass backdrop-blur-xl">
+    <div className="rounded-xl border border-zinc-200/80 bg-white/86 p-4 shadow-glass backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase text-slate-500">{t("wizard.progress")}</p>
         <p className="text-xs font-bold text-slate-800">
@@ -26,28 +28,32 @@ export function StepProgress({
           const active = index === currentIndex;
           const complete = index < currentIndex;
           return (
-            <div
+            <div aria-current={active ? "step" : undefined}
               key={step.key}
               className={[
-                "flex min-w-fit items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold xl:min-w-0",
+                "flex min-w-fit items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition xl:min-w-0",
                 active
-                  ? "bg-ink text-white"
+                  ? "border-ink bg-ink text-white"
                   : complete
-                    ? "bg-emerald-50 text-emerald-900"
-                    : "bg-white/55 text-slate-600",
+                    ? "border-zinc-200 bg-zinc-100 text-zinc-800"
+                    : "border-transparent bg-white/45 text-zinc-500",
               ].join(" ")}
             >
               <span
                 className={[
                   "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs",
                   active
-                    ? "bg-brand-200 text-slate-950"
+                    ? "bg-white/10 text-white"
                     : complete
-                      ? "bg-emerald-200 text-emerald-950"
-                      : "bg-slate-100 text-slate-600",
+                      ? "bg-white text-zinc-950 ring-1 ring-zinc-200"
+                      : "bg-zinc-100 text-zinc-500",
                 ].join(" ")}
               >
-                {index + 1}
+                {complete ? (
+                  <Check aria-hidden="true" className="setup-step-check h-3.5 w-3.5" />
+                ) : (
+                  index + 1
+                )}
               </span>
               <span>{step.title}</span>
             </div>

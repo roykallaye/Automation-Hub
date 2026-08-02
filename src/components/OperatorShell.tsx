@@ -1,4 +1,10 @@
-import { AlertTriangle, CheckCircle2, LoaderCircle, Settings2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  LoaderCircle,
+  MonitorSmartphone,
+  Settings2,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useI18n } from "../i18n";
@@ -10,6 +16,7 @@ import "../operator-experience.css";
 
 export function OperatorShell({
   children,
+  browserPreview,
   currentPage,
   displayName,
   logoDataUrl,
@@ -18,6 +25,7 @@ export function OperatorShell({
   statusLabel,
 }: {
   children: ReactNode;
+  browserPreview: boolean;
   currentPage: AppPage;
   displayName: string;
   logoDataUrl?: string | null;
@@ -63,7 +71,14 @@ export function OperatorShell({
               )}
               {working ? words.shellWorking : needsAttention ? words.shellAttention : statusLabel}
             </span>
-            <LifeDeskStatusChip onOpen={() => onPageChange("settings")} />
+            {browserPreview ? (
+              <span className="op-cloud-chip" title={words.shellPreviewHint}>
+                <MonitorSmartphone aria-hidden="true" size={15} />
+                <span>{words.shellPreview}</span>
+              </span>
+            ) : (
+              <LifeDeskStatusChip onOpen={() => onPageChange("settings")} />
+            )}
             <button
               aria-label={words.navSettings}
               className="op-icon-button"

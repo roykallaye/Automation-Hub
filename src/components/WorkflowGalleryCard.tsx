@@ -117,7 +117,7 @@ export function WorkflowGalleryCard({
             <p className="text-sm font-semibold leading-5 text-amber-900">{disabledReason}</p>
             {onFix && (
               <button
-                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-ink-soft"
+                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-md bg-cta px-3 text-xs font-semibold text-white transition hover:bg-cta-soft"
                 onClick={onFix}
               >
                 <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
@@ -127,7 +127,7 @@ export function WorkflowGalleryCard({
           </div>
         ) : (
           <button
-            className="inline-flex min-h-14 w-full items-center justify-center gap-3 rounded-md bg-ink px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-55"
+            className="inline-flex min-h-14 w-full items-center justify-center gap-3 rounded-md bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-55"
             disabled={anyRunning}
             onClick={onRun}
           >

@@ -31,7 +31,7 @@ export function AppShell({
 
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-cta focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
       >
         {t("app.skipToContent")}
       </a>
@@ -145,7 +145,7 @@ function GuidanceBanner({
           <p className="mt-1 text-sm font-medium opacity-80">{nextAction.shortMessage}</p>
         </div>
         <button
-          className="shrink-0 rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft"
+          className="shrink-0 rounded-md bg-cta px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft"
           onClick={() => onPageChange(nextAction.targetPage)}
         >
           {nextAction.buttonLabel}

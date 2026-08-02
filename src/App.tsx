@@ -44,6 +44,8 @@ function App() {
   const [currentPage, setCurrentPage] = useState<AppPage>("home");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const configRefreshId = useRef(0);
+  const browserPreview =
+    typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -274,11 +276,16 @@ function App() {
   return (
     <I18nProvider language={configStatus?.config.language}>
       <OperatorShell
+        browserPreview={browserPreview}
         currentPage={currentPage}
         displayName={displayName}
         logoDataUrl={logoDataUrl}
         status={runningCommand ? "warning" : status}
-        statusLabel={runningLabel ?? (notice || t("app.loadingSetup"))}
+        statusLabel={
+          browserPreview
+            ? t("app.browserPreview")
+            : runningLabel ?? (notice || t("app.loadingSetup"))
+        }
         onPageChange={setCurrentPage}
       >
       {currentPage === "home" && (

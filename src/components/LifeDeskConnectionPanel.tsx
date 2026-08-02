@@ -161,7 +161,7 @@ export function LifeDeskConnectionPanel() {
                 />
               </dl>
               <button
-                className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:opacity-60"
+                className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-cta px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:opacity-60"
                 disabled={Boolean(busy)}
                 onClick={() => void sync()}
                 type="button"
@@ -195,7 +195,7 @@ export function LifeDeskConnectionPanel() {
                   value={pairingCode}
                 />
                 <button
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-ink px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!pairingCode.trim() || Boolean(busy)}
                   onClick={() => void pair()}
                   type="button"

@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { FocusFlow } from "../components/FocusFlow";
 import { PageHeader } from "../components/PageHeader";
+import { RefreshButton } from "../components/RefreshButton";
 import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupWizard } from "../components/SetupWizard/SetupWizard";
 import { useI18n } from "../i18n";
@@ -79,12 +80,7 @@ export function SetupPage({
   return (
     <div className="space-y-5">
       <PageHeader title={t("setup.title")}>
-        <button
-          className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-          onClick={onRefresh}
-        >
-          {t("common.refresh")}
-        </button>
+        <RefreshButton label={t("common.refresh")} onClick={onRefresh} />
       </PageHeader>
 
       <section
@@ -123,7 +119,7 @@ export function SetupPage({
               </button>
             )}
             <button
-              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
+              className="rounded-md bg-cta px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft"
               onClick={() => setShowWizard(true)}
             >
               {setupReady ? t("setup.reviewSetup") : t("setup.continueSetup")}

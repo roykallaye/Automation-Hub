@@ -3,6 +3,7 @@ import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { DetailsPanel } from "../components/DetailsPanel";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { RefreshButton } from "../components/RefreshButton";
 import { StatusOrb, type StatusTone } from "../components/StatusOrb";
 import { useI18n, type TranslationKey } from "../i18n";
 import type {
@@ -47,12 +48,7 @@ export function ActivityPage({
   return (
     <div className="space-y-5">
       <PageHeader title={t("activity.title")}>
-        <button
-          className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
-          onClick={onRefresh}
-        >
-          {t("common.refresh")}
-        </button>
+        <RefreshButton label={t("common.refresh")} onClick={onRefresh} />
       </PageHeader>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
