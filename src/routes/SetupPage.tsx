@@ -14,13 +14,11 @@ import type {
   PreflightItem,
   WorkflowPreflight,
 } from "../types";
-import type { NextAction } from "../nextAction";
 
 export function SetupPage({
   configStatus,
   modules,
   loading,
-  nextAction,
   onRefresh,
   onGoToAutomations,
   onGoToSupport,
@@ -28,7 +26,6 @@ export function SetupPage({
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
   loading: boolean;
-  nextAction: NextAction;
   onRefresh: () => void;
   onGoToAutomations: () => void;
   onGoToSupport: () => void;
@@ -82,7 +79,7 @@ export function SetupPage({
 
   return (
     <div className="space-y-5">
-      <PageHeader title={t("setup.title")} eyebrow={t("setup.eyebrow")}>
+      <PageHeader title={t("setup.title")}>
         <button
           className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
@@ -107,68 +104,35 @@ export function SetupPage({
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
                 {guidance.detail}
               </p>
-              <p
-                className={[
-                  "mt-3 text-sm font-semibold",
-                  guidance.tone === "ready" ? "text-emerald-900" : "text-amber-900",
-                ].join(" ")}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            {setupReady && (
+              <button
+                className="rounded-md border border-white/80 bg-white/70 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-white"
+                onClick={onGoToAutomations}
               >
-                {guidance.summary}
-              </p>
-            </div>
-          </div>
-          <button
-            className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
-            onClick={() => setShowWizard(true)}
-          >
-            {nextAction.targetPage === "setup"
-              ? nextAction.buttonLabel
-              : setupReady
-                ? t("setup.reviewSetup")
-                : t("setup.continueSetup")}
-          </button>
-        </div>
-      </section>
-
-      {setupReady && (
-        <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-glass">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-emerald-950">{t("setup.readyTitle")}</h2>
-              <p className="mt-1 text-sm font-medium text-emerald-800">
-                {t("setup.readyDetail")}
-              </p>
-            </div>
-            <button
-              className="shrink-0 rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white hover:bg-ink-soft"
-              onClick={onGoToAutomations}
-            >
-              {t("setup.goAutomations")}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {!setupReady && nextIssue && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-glass">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-amber-950">{guidance.title}</p>
-              <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
-                {guidance.detail}
-              </p>
-            </div>
+                {t("setup.goAutomations")}
+              </button>
+            )}
             {scriptsNeedSupport && (
               <button
-                className="shrink-0 rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-ink-soft"
+                className="rounded-md border border-white/80 bg-white/70 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-white"
                 onClick={onGoToSupport}
               >
                 {t("setup.openSupport")}
               </button>
             )}
+            <button
+              className="rounded-md bg-ink px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-ink-soft"
+              onClick={() => setShowWizard(true)}
+            >
+              {setupReady ? t("setup.reviewSetup") : t("setup.continueSetup")}
+            </button>
           </div>
-        </section>
-      )}
+        </div>
+      </section>
+
 
       <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">

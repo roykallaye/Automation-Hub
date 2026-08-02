@@ -50,7 +50,7 @@ export function ActivityPage({
 
   return (
     <div className="space-y-5">
-      <PageHeader title={t("activity.title")} eyebrow={t("activity.eyebrow")}>
+      <PageHeader title={t("activity.title")}>
         <button
           className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}

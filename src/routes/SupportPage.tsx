@@ -8,7 +8,6 @@ import {
   PackageCheck,
   RotateCcw,
   Save,
-  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -219,7 +218,7 @@ export function SupportPage({
 
   return (
     <div className="space-y-5">
-      <PageHeader title={t("support.title")} eyebrow={t("support.eyebrow")}>
+      <PageHeader title={t("support.title")}>
         <button
           className="rounded-md border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
           onClick={onRefresh}
@@ -254,7 +253,11 @@ export function SupportPage({
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-2">
+      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          {t("support.repairTools")}
+        </summary>
+        <div className="mt-4 grid gap-5 xl:grid-cols-2">
         <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
@@ -382,17 +385,14 @@ export function SupportPage({
             </div>
           )}
         </section>
-      </div>
+        </div>
+      </details>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-amber-tile ring-1">
-              <FolderOpen className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <h2 className="text-xl font-semibold text-slate-950">{t("support.foldersShortcuts")}</h2>
-            <InfoHint text={t("support.foldersHint")} />
-          </div>
+      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+          {t("support.foldersShortcuts")}
+        </summary>
+        <section className="mt-4 rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
           <div className="mt-4 grid gap-2">
             {[
               [t("support.openInvoiceInput"), config?.folders.invoiceInputFolder],
@@ -427,55 +427,20 @@ export function SupportPage({
             </button>
           </div>
         </section>
+      </details>
 
-        <section className="rounded-xl border border-brand-100 bg-brand-50/80 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/70 text-brand-800 ring-1 ring-brand-100">
-              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-slate-950">{t("support.safeRehearsal")}</h2>
-              <p className="mt-1 text-sm font-medium leading-6 text-slate-700">
-                {t("support.safeRehearsalText")}
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 rounded-md bg-white/60 p-3 text-sm font-semibold text-slate-800">
-            {t("support.safeModeIs", {
-              value: config?.safety.dryRunDefault ? t("common.on") : t("common.off"),
-            })}
-          </div>
-          <ol className="mt-4 space-y-2 text-sm font-medium leading-6 text-slate-700">
-            <li>1. {t("support.rehearsal1")}</li>
-            <li>2. {t("support.rehearsal2")}</li>
-            <li>3. {t("support.rehearsal3")}</li>
-            <li>4. {t("support.rehearsal4")}</li>
-          </ol>
-          <p className="mt-4 rounded-md border border-brand-100 bg-white/70 p-3 font-mono text-xs text-slate-700">
-            docs\FAKE_WORKSPACE_REHEARSAL.md
-          </p>
-        </section>
-      </div>
-
-      <section className="overflow-hidden rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/90 via-white/70 to-sky-50/80 shadow-glass backdrop-blur-xl">
-        <div className="grid gap-5 p-5 lg:grid-cols-[1.2fr_0.8fr]">
+      <details className="overflow-hidden rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/90 via-white/70 to-sky-50/80 shadow-glass backdrop-blur-xl">
+        <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-900">
+          <span className="inline-flex items-center gap-2">
+            <Save className="h-4 w-4 text-emerald-800" aria-hidden="true" />
+            {t("support.recoveryTitle")}
+          </span>
+        </summary>
+        <div className="grid gap-5 px-5 pb-5 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
-            <div className="flex items-start gap-3">
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white/80 text-emerald-800 ring-1 ring-emerald-100">
-                <Save className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
-                  {t("support.recoveryEyebrow")}
-                </p>
-                <h2 className="mt-1 text-xl font-semibold text-slate-950">
-                  {t("support.recoveryTitle")}
-                </h2>
-                <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-700">
-                  {t("support.recoveryText", { count: recoveryStatus?.retentionLimit ?? 10 })}
-                </p>
-              </div>
-            </div>
+            <p className="max-w-2xl text-sm font-medium leading-6 text-slate-700">
+              {t("support.recoveryText", { count: recoveryStatus?.retentionLimit ?? 10 })}
+            </p>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <button
@@ -560,7 +525,7 @@ export function SupportPage({
             </div>
           </div>
         </div>
-      </section>
+      </details>
 
       <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
         <summary className="cursor-pointer text-sm font-semibold text-slate-800">

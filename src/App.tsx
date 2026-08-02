@@ -47,6 +47,10 @@ function App() {
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const configRefreshId = useRef(0);
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [currentPage]);
+
   const branding = configStatus?.config.client.branding;
   useEffect(() => {
     applyBrandingToDocument(branding);
@@ -317,7 +321,6 @@ function App() {
           configStatus={configStatus}
           modules={modules}
           loading={loadingConfig}
-          nextAction={nextAction}
           onRefresh={refreshAll}
           onGoToAutomations={() => setCurrentPage("automations")}
           onGoToSupport={() => setCurrentPage("support")}

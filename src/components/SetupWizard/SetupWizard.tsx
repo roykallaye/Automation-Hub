@@ -814,27 +814,13 @@ function WelcomeStep({
       title={t("wizard.setUpTitle")}
       helper={t("wizard.setUpHelper")}
     >
-      <div className="grid gap-3 md:grid-cols-3">
-        <InfoCard title={t("wizard.emailChoice")} text={t("wizard.emailChoiceText")} />
-        <InfoCard title={t("wizard.confirmFirst")} text={t("wizard.confirmFirstText")} />
-        <InfoCard title={t("wizard.guidedSetup")} text={t("wizard.guidedSetupText")} />
-      </div>
-      <label className="mt-5 flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-white/70 bg-white/65 p-4 transition hover:bg-white">
+      <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-white/70 bg-white/65 p-4 transition hover:bg-white">
         <span>
-          <span className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-950">
-            {showAdvancedWorkflows
-              ? t("wizard.advancedLaunchTitle")
-              : t("wizard.quickLaunchTitle")}
-            {!showAdvancedWorkflows && (
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
-                {t("wizard.recommended")}
-              </span>
-            )}
+          <span className="block text-sm font-bold text-slate-950">
+            {t("wizard.advancedLaunchTitle")}
           </span>
           <span className="mt-1 block max-w-2xl text-sm font-medium leading-6 text-slate-600">
-            {showAdvancedWorkflows
-              ? t("wizard.advancedLaunchText")
-              : t("wizard.quickLaunchText")}
+            {t("wizard.scopeHelper")}
           </span>
         </span>
         <input
@@ -2009,14 +1995,6 @@ function pathStatus(value: string) {
   return { kind: "ready", labelKey: "wizard.looksUsable" } as const;
 }
 
-function InfoCard({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-lg border border-white/65 bg-white/65 p-4">
-      <p className="text-sm font-semibold text-slate-950">{title}</p>
-      <p className="mt-2 text-sm font-medium leading-6 text-slate-600">{text}</p>
-    </div>
-  );
-}
 
 function ToggleCard({
   title,
