@@ -156,7 +156,11 @@ where
     let mut config = config::ensure_config(app)?;
     preflight::ensure_workflow_can_run(command_name, &config)?;
     let reports_dir = activity::activity_reports_dir(app)?;
-    let dry_run = dry_run_override.unwrap_or(config.safety.dry_run_default);
+    let dry_run = if command_name == "reconnect_gmail" {
+        false
+    } else {
+        dry_run_override.unwrap_or(config.safety.dry_run_default)
+    };
     let (automation_name, steps) =
         command_steps(command_name, &config, Some(&reports_dir), dry_run)?;
     if source == WorkflowRunSource::Remote {
@@ -402,6 +406,18 @@ fn command_steps(
         false,
         cmd_success.clone(),
     );
+    let mut gmail_authorization = build_step(
+        "Authorize Gmail",
+        &scripts.gmail_draft_script,
+        false,
+        false,
+        cmd_success.clone(),
+    );
+    if is_python_script(&scripts.gmail_draft_script) {
+        gmail_authorization
+            .args
+            .push("--authorize-only".to_string());
+    }
     let copy_success = if is_python_script(&scripts.copy_scansioni_script) {
         cmd_success.clone()
     } else {
@@ -440,7 +456,15 @@ fn command_steps(
                 ))
             }
         }
-        "reconnect_gmail" => Ok(("Reconnect Gmail", vec![gmail])),
+        "reconnect_gmail" => {
+            if !is_python_script(&scripts.gmail_draft_script) {
+                return Err(
+                    "Gmail reconnection needs the updated InnPilot authorization helper. Update the local automation package before reconnecting."
+                        .to_string(),
+                );
+            }
+            Ok(("Reconnect Gmail", vec![gmail_authorization]))
+        }
         "copy_scansioni" => Ok(("Copy Scansioni", vec![copy_scansioni])),
         "ocr_preprocessing" => Ok(("Run OCR Preprocessing", vec![ocr])),
         "process_signed_contracts" => Ok((
@@ -1077,6 +1101,47 @@ mod tests {
         assert_eq!(steps[0].name, "Process invoice PDFs");
         assert!(steps[0].args.contains(&"--dry-run".to_string()));
         assert!(steps[0].args.contains(&"--json-report".to_string()));
+    }
+
+    #[test]
+    fn reconnect_gmail_uses_authorization_only_without_dry_run() {
+        let root = temp_root("gmail_authorization_only");
+        let config = config_with_fake_workspace(&root);
+        let reports_dir = root.join("app-data").join("activity").join("reports");
+
+        let (title, steps) = command_steps(
+            "reconnect_gmail",
+            &config,
+            Some(&reports_dir),
+            config.safety.dry_run_default,
+        )
+        .unwrap();
+
+        assert_eq!(title, "Reconnect Gmail");
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].name, "Authorize Gmail");
+        assert!(steps[0].args.contains(&"--authorize-only".to_string()));
+        assert!(!steps[0].args.contains(&"--dry-run".to_string()));
+        assert!(steps[0].args.contains(&"--json-report".to_string()));
+    }
+
+    #[test]
+    fn reconnect_gmail_rejects_legacy_wrappers_that_may_ignore_authorize_only() {
+        let root = temp_root("gmail_legacy_reconnect");
+        let mut config = config_with_fake_workspace(&root);
+        let legacy_wrapper = root.join("scripts").join("run_create_gmail_draft.cmd");
+        fs::write(&legacy_wrapper, b"echo unsafe legacy wrapper").unwrap();
+        config.scripts.gmail_draft_script = legacy_wrapper.to_string_lossy().to_string();
+
+        let error = command_steps(
+            "reconnect_gmail",
+            &config,
+            Some(&root.join("reports")),
+            config.safety.dry_run_default,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("updated InnPilot authorization helper"));
     }
 
     #[test]

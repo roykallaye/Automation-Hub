@@ -181,7 +181,7 @@ export function AutomationsPage({
             whatItDoes: t("automations.gmailDescription"),
             tint: "rose",
             primaryLabel: t("automations.gmailPrimary"),
-            safety: t("delivery.draftsOnlyReassurance"),
+            safety: t("confirm.reconnectWont"),
           })}
 
         <FutureWorkflowCard

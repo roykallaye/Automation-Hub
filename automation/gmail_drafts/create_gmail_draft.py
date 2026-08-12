@@ -5,6 +5,7 @@ import re
 import sys
 from datetime import datetime
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from draft_safety import load_receipt, prepare_draft_once  # noqa: E402
@@ -122,6 +123,11 @@ def unique_path(path: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create Gmail drafts for prepared invoice PDFs.")
     parser.add_argument("--dry-run", action="store_true", help="Report draft candidates without calling Gmail or moving files.")
+    parser.add_argument(
+        "--authorize-only",
+        action="store_true",
+        help="Renew Gmail authorization without reading invoice groups or creating drafts.",
+    )
     parser.add_argument("--config", type=Path, help="Optional InnPilot automation JSON config file.")
     parser.add_argument("--json-report", type=Path, help="Optional path for the JSON report.")
     return parser.parse_args()
@@ -344,10 +350,59 @@ def gmail_report_item(
     return item
 
 
+def authorize_gmail_only(started_at: str) -> None:
+    """Complete local OAuth without entering any invoice or draft workflow."""
+    log("=== START Gmail authorization ===")
+    log("No invoice files will be inspected and no Gmail drafts will be created.")
+    try:
+        get_service()
+    except Exception as error:
+        error_type = type(error).__name__
+        report = standard_report(
+            workflow="gmail_authorization",
+            mode="execute",
+            started_at=started_at,
+            finished_at=now_iso(),
+            status="failed",
+            summary={"authorized": 0, "failed": 1},
+            items=[],
+            warnings=[],
+            errors=["Gmail authorization did not complete."],
+            report_path=REPORT_FILE,
+            log_path=LOG_FILE,
+        )
+        write_report(REPORT_FILE, report)
+        log(f"Gmail authorization needs attention: {error_type}")
+        log("=== END ===")
+        raise RuntimeError("Gmail authorization did not complete.") from None
+
+    report = standard_report(
+        workflow="gmail_authorization",
+        mode="execute",
+        started_at=started_at,
+        finished_at=now_iso(),
+        status="success",
+        summary={"authorized": 1, "failed": 0},
+        items=[],
+        warnings=[],
+        errors=[],
+        report_path=REPORT_FILE,
+        log_path=LOG_FILE,
+    )
+    write_report(REPORT_FILE, report)
+    log("Gmail authorization completed. No drafts were created.")
+    log(f"Report: {REPORT_FILE}")
+    log("=== END ===")
+
+
 def main(args: argparse.Namespace | None = None):
     args = args or parse_args()
     configure_run(args)
     started_at = now_iso()
+    if getattr(args, "authorize_only", False):
+        authorize_gmail_only(started_at)
+        return
+
     dry_run = args.dry_run
     input_pdfs = sorted(path for path in INPUT_DIR.glob("*.pdf") if path.is_file())
 

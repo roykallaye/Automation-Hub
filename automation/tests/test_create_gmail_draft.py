@@ -1,12 +1,59 @@
 from __future__ import annotations
 
+import argparse
 import json
 import unittest
+from unittest.mock import patch
 
+from automation.gmail_drafts import create_gmail_draft as gmail_draft
 from helpers import InnPilotWorkspace, count_files, latest_log_text, run_script
 
 
 class CreateGmailDraftTests(unittest.TestCase):
+    def test_authorize_only_never_reads_or_changes_invoice_work(self) -> None:
+        with InnPilotWorkspace() as workspace:
+            input_pdf = workspace.invoice_input / "unprocessed.pdf"
+            input_pdf.write_bytes(b"%PDF-1.4\n")
+            recipient_folder = workspace.invoice_output / "test@example.com"
+            recipient_folder.mkdir(parents=True)
+            ready_pdf = recipient_folder / "ready.pdf"
+            ready_pdf.write_bytes(b"%PDF-1.4\n")
+            body = recipient_folder / "email_body.txt"
+            body.write_text("Do not touch this draft body.", encoding="utf-8")
+            report = workspace.root / "gmail-authorization-report.json"
+            args = argparse.Namespace(
+                authorize_only=True,
+                config=workspace.config_path,
+                dry_run=False,
+                json_report=report,
+            )
+
+            with (
+                patch.object(gmail_draft, "get_service") as get_service,
+                patch.object(
+                    gmail_draft,
+                    "find_recipient_groups",
+                    side_effect=AssertionError("authorization inspected invoice groups"),
+                ),
+                patch.object(
+                    gmail_draft,
+                    "recover_completed_receipts",
+                    side_effect=AssertionError("authorization entered archive recovery"),
+                ),
+            ):
+                gmail_draft.main(args)
+
+            get_service.assert_called_once_with()
+            self.assertEqual(input_pdf.read_bytes(), b"%PDF-1.4\n")
+            self.assertEqual(ready_pdf.read_bytes(), b"%PDF-1.4\n")
+            self.assertEqual(body.read_text(encoding="utf-8"), "Do not touch this draft body.")
+            self.assertEqual(count_files(workspace.invoice_archive), 0)
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(data["workflow"], "gmail_authorization")
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["summary"], {"authorized": 1, "failed": 0})
+            self.assertEqual(data["items"], [])
+
     def test_dry_run_reports_drafts_without_auth_or_file_moves(self) -> None:
         with InnPilotWorkspace() as workspace:
             recipient_folder = workspace.invoice_output / "test@example.com"
