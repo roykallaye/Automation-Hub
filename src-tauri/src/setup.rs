@@ -17,6 +17,9 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 static SETUP_BACKUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -75,6 +78,12 @@ pub(crate) struct SetupDraft {
     safe_mode: bool,
     archive_originals: bool,
     redact_logs: bool,
+}
+
+impl SetupDraft {
+    pub(crate) fn workspace_base(&self) -> &str {
+        &self.workspace_base
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,6 +177,14 @@ pub(crate) enum FolderPlanStatus {
 pub(crate) struct WorkspaceInitResult {
     folders: Vec<FolderActionResult>,
     warnings: Vec<String>,
+    #[serde(skip)]
+    created_paths: Vec<String>,
+}
+
+impl WorkspaceInitResult {
+    pub(crate) fn created_paths(&self) -> Vec<String> {
+        self.created_paths.clone()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -320,38 +337,56 @@ pub(crate) fn initialize_workspace(
 
     let generated = GeneratedSetup::from_draft(&draft)?;
     let mut results = Vec::new();
+    let mut created_paths = Vec::new();
     for spec in &generated.folder_specs {
         let path = &spec.path;
-        if path.exists() {
-            if path.is_dir() {
+        if let Err(error) = reject_existing_reparse_components(path) {
+            results.push(FolderActionResult {
+                label: spec.label.to_string(),
+                path: path.to_string_lossy().to_string(),
+                action: FolderAction::Failed,
+                message: error,
+            });
+            continue;
+        }
+        let mut created_for_spec = Vec::new();
+        match create_directory_tree_exact(path, &mut created_for_spec) {
+            Ok(final_created) => {
+                if let Err(error) = reject_existing_reparse_components(path) {
+                    for created in created_for_spec.iter().rev() {
+                        let _ = fs::remove_dir(created);
+                    }
+                    results.push(FolderActionResult {
+                        label: spec.label.to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        action: FolderAction::Failed,
+                        message: error,
+                    });
+                    continue;
+                }
+                for created in created_for_spec {
+                    let created = created.to_string_lossy().to_string();
+                    if !created_paths.contains(&created) {
+                        created_paths.push(created);
+                    }
+                }
                 results.push(FolderActionResult {
                     label: spec.label.to_string(),
                     path: path.to_string_lossy().to_string(),
-                    action: FolderAction::AlreadyExists,
-                    message: if folder_has_entries(path) {
+                    action: if final_created {
+                        FolderAction::Created
+                    } else {
+                        FolderAction::AlreadyExists
+                    },
+                    message: if final_created {
+                        "Folder created.".to_string()
+                    } else if folder_has_entries(path) {
                         "Folder already exists and was left unchanged.".to_string()
                     } else {
                         "Empty folder already exists.".to_string()
                     },
-                });
-            } else {
-                results.push(FolderActionResult {
-                    label: spec.label.to_string(),
-                    path: path.to_string_lossy().to_string(),
-                    action: FolderAction::Failed,
-                    message: "A file already exists at this location.".to_string(),
-                });
+                })
             }
-            continue;
-        }
-
-        match fs::create_dir_all(path) {
-            Ok(()) => results.push(FolderActionResult {
-                label: spec.label.to_string(),
-                path: path.to_string_lossy().to_string(),
-                action: FolderAction::Created,
-                message: "Folder created.".to_string(),
-            }),
             Err(error) => results.push(FolderActionResult {
                 label: spec.label.to_string(),
                 path: path.to_string_lossy().to_string(),
@@ -364,7 +399,72 @@ pub(crate) fn initialize_workspace(
     Ok(WorkspaceInitResult {
         folders: results,
         warnings: generated.warnings,
+        created_paths,
     })
+}
+
+/// Creates each missing component with `create_dir` and records only calls
+/// that atomically succeeded in this process. `AlreadyExists` is never treated
+/// as InnPilot provenance, closing the exists/create race used by cleanup.
+fn create_directory_tree_exact(path: &Path, created: &mut Vec<PathBuf>) -> std::io::Result<bool> {
+    match fs::create_dir(path) {
+        Ok(()) => {
+            created.push(path.to_path_buf());
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if path.is_dir() {
+                Ok(false)
+            } else {
+                Err(error)
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let Some(parent) = path.parent() else {
+                return Err(error);
+            };
+            if parent == path {
+                return Err(error);
+            }
+            create_directory_tree_exact(parent, created)?;
+            match fs::create_dir(path) {
+                Ok(()) => {
+                    created.push(path.to_path_buf());
+                    Ok(true)
+                }
+                Err(race) if race.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {
+                    Ok(false)
+                }
+                Err(race) => Err(race),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn reject_existing_reparse_components(path: &Path) -> Result<(), String> {
+    for ancestor in path.ancestors() {
+        let metadata = match fs::symlink_metadata(ancestor) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not verify the setup path before creating folders: {error}"
+                ))
+            }
+        };
+        #[cfg(windows)]
+        let is_reparse = metadata.file_attributes() & 0x400 != 0;
+        #[cfg(not(windows))]
+        let is_reparse = metadata.file_type().is_symlink();
+        if is_reparse {
+            return Err(
+                "Setup will not create folders through a link or Windows reparse point."
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn remove_setup_created_empty_folders(
@@ -381,15 +481,20 @@ pub(crate) fn remove_setup_created_empty_folders(
 
     let workspace = clean_path(&workspace_base)?;
     validate_workspace_base(&workspace)?;
-    let mut ordered_paths = paths
-        .into_iter()
-        .map(|path| PathBuf::from(path.trim()))
-        .filter(|path| !path.as_os_str().is_empty())
-        .collect::<Vec<_>>();
+    let canonical_workspace = fs::canonicalize(&workspace)
+        .map_err(|error| format!("Could not verify the setup workspace before cleanup: {error}"))?;
+    let mut skipped = Vec::new();
+    let mut ordered_paths = Vec::new();
+    for path in paths {
+        match clean_path(&path) {
+            Ok(path) if !path.as_os_str().is_empty() => ordered_paths.push(path),
+            Ok(_) => {}
+            Err(_) => skipped.push(format!("{} - invalid setup path", path.trim())),
+        }
+    }
     ordered_paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
 
     let mut removed = Vec::new();
-    let mut skipped = Vec::new();
     let mut failed = Vec::new();
 
     for path in ordered_paths {
@@ -404,6 +509,19 @@ pub(crate) fn remove_setup_created_empty_folders(
         }
         if !path.is_dir() {
             skipped.push(format!("{path_text} - not a folder"));
+            continue;
+        }
+        let canonical_path = match fs::canonicalize(&path) {
+            Ok(path) => path,
+            Err(error) => {
+                failed.push(format!("{path_text} - could not verify folder: {error}"));
+                continue;
+            }
+        };
+        if !path_starts_with(&canonical_path, &canonical_workspace) {
+            skipped.push(format!(
+                "{path_text} - resolves outside the selected workspace"
+            ));
             continue;
         }
         if folder_has_entries(&path) {
@@ -1094,7 +1212,11 @@ fn load_configuration_pair(app_config_path: &Path) -> Result<ConfigurationPair, 
     })
 }
 
-fn configuration_revision(app_bytes: &[u8], automation_bytes: Option<&[u8]>) -> String {
+/// Stable revision for the installed app/automation configuration pair.
+///
+/// Onboarding and future proposal services use the same digest as setup so a
+/// proposal can never be applied to a different configuration snapshot.
+pub(crate) fn configuration_revision(app_bytes: &[u8], automation_bytes: Option<&[u8]>) -> String {
     let mut digest = Sha256::new();
     digest.update(b"innpilot-configuration-pair-v1\0");
     digest.update((app_bytes.len() as u64).to_be_bytes());
@@ -1892,7 +2014,9 @@ fn clean_path(path: &str) -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("Choose a workspace folder before continuing.".to_string());
     }
-    Ok(PathBuf::from(repair_concatenated_absolute_path(trimmed)))
+    let path = PathBuf::from(repair_concatenated_absolute_path(trimmed));
+    reject_parent_traversal(&path)?;
+    Ok(path)
 }
 
 fn setup_path_or_default(
@@ -1907,11 +2031,23 @@ fn setup_path_or_default(
     }
 
     let path = PathBuf::from(trimmed);
-    if path.is_absolute() || looks_like_windows_absolute(trimmed) {
-        return Ok(path);
-    }
+    let path = if path.is_absolute() || looks_like_windows_absolute(trimmed) {
+        path
+    } else {
+        workspace_base.join(path)
+    };
+    reject_parent_traversal(&path)?;
+    Ok(path)
+}
 
-    Ok(workspace_base.join(path))
+fn reject_parent_traversal(path: &Path) -> Result<(), String> {
+    if path
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        return Err("Setup folders cannot contain parent-directory traversal (`..`).".to_string());
+    }
+    Ok(())
 }
 
 fn setup_path_for_mode(
@@ -2260,12 +2396,50 @@ mod tests {
     }
 
     #[test]
+    fn exact_directory_creation_never_claims_an_existing_folder() {
+        let root = temp_root("atomic_creation_claim");
+        let existing = root.join("existing");
+        fs::create_dir_all(&existing).unwrap();
+        let mut created = Vec::new();
+
+        assert!(!create_directory_tree_exact(&existing, &mut created).unwrap());
+        assert!(created.is_empty());
+
+        let new_child = existing.join("new").join("leaf");
+        assert!(create_directory_tree_exact(&new_child, &mut created).unwrap());
+        assert!(created.contains(&existing.join("new")));
+        assert!(created.contains(&new_child));
+        assert!(!created.contains(&existing));
+    }
+
+    #[test]
+    fn parent_traversal_is_rejected_before_folder_creation() {
+        let root = temp_root("parent_traversal");
+        let mut draft = draft_for_root(&root);
+        draft.invoice_input_folder = root
+            .join("workspace")
+            .join("..")
+            .join("outside")
+            .to_string_lossy()
+            .to_string();
+
+        let error = initialize_workspace(draft, true).unwrap_err();
+        assert!(error.contains("parent-directory traversal"));
+        assert!(!root.join("outside").exists());
+    }
+
+    #[test]
     fn remove_setup_created_empty_folders_only_removes_empty_workspace_folders() {
         let root = temp_root("cleanup");
         let keep = root.join("Invoices").join("Input");
         let remove = root.join("Support").join("Diagnostics");
+        let traversal_target = root.parent().unwrap().join(format!(
+            "{}-outside",
+            root.file_name().unwrap().to_string_lossy()
+        ));
         fs::create_dir_all(&keep).unwrap();
         fs::create_dir_all(&remove).unwrap();
+        fs::create_dir_all(&traversal_target).unwrap();
         fs::write(keep.join("keep.txt"), b"keep").unwrap();
 
         let result = remove_setup_created_empty_folders(
@@ -2274,6 +2448,10 @@ mod tests {
                 keep.to_string_lossy().to_string(),
                 remove.to_string_lossy().to_string(),
                 temp_root("outside").to_string_lossy().to_string(),
+                root.join("..")
+                    .join(traversal_target.file_name().unwrap())
+                    .to_string_lossy()
+                    .to_string(),
             ],
             true,
         )
@@ -2282,8 +2460,9 @@ mod tests {
         assert!(remove.starts_with(&root));
         assert!(!remove.exists());
         assert!(keep.exists());
+        assert!(traversal_target.exists());
         assert_eq!(result.removed.len(), 1);
-        assert_eq!(result.skipped.len(), 2);
+        assert_eq!(result.skipped.len(), 3);
     }
 
     #[test]

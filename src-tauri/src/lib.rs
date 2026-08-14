@@ -10,6 +10,7 @@ mod desktop_service;
 mod discovery;
 mod folder_discovery;
 mod logs;
+mod onboarding;
 mod paths;
 mod preflight;
 mod recovery;
@@ -53,7 +54,16 @@ pub fn run() {
         })
         .setup(|app| {
             setup::reconcile_incomplete_setup(app.handle()).map_err(std::io::Error::other)?;
+            // Capture this before `ensure_config` creates first-run defaults so
+            // onboarding can distinguish a new installation from an upgrade.
+            let config_preexisted = config::app_config_path(app.handle())?.is_file();
             config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
+            // A damaged or newer onboarding record must not prevent InnPilot
+            // from opening. The typed command routes the UI to Support and
+            // preserves the record for explicit recovery.
+            if onboarding::reconcile_startup(app.handle(), config_preexisted).is_err() {
+                eprintln!("InnPilot onboarding state needs recovery or a newer app version.");
+            }
             desktop_service::setup(app)?;
             runner_service::start(app.handle().clone());
             Ok(())
@@ -74,6 +84,16 @@ pub fn run() {
             get_config_status,
             refresh_config_status,
             validate_configuration,
+            get_onboarding_state,
+            begin_or_resume_onboarding,
+            record_onboarding_progress,
+            prepare_onboarding_apply,
+            record_onboarding_setup_saved,
+            complete_onboarding,
+            mark_onboarding_failed,
+            restart_onboarding,
+            import_legacy_onboarding_progress,
+            recover_onboarding_state,
             get_setup_snapshot,
             preview_setup,
             initialize_workspace,
@@ -264,6 +284,119 @@ fn validate_configuration(app: AppHandle) -> Result<preflight::PreflightReport, 
 }
 
 #[tauri::command]
+fn get_onboarding_state(
+    app: AppHandle,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::get(&app)
+}
+
+#[tauri::command]
+fn begin_or_resume_onboarding(
+    app: AppHandle,
+    mode: onboarding::OnboardingMode,
+    expected_revision: u64,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::begin_or_resume(&app, mode, expected_revision, request_id)
+}
+
+#[tauri::command]
+fn record_onboarding_progress(
+    app: AppHandle,
+    checkpoint: onboarding::ManualSetupCheckpoint,
+    expected_revision: u64,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::record_progress(&app, checkpoint, expected_revision, request_id)
+}
+
+#[tauri::command]
+fn prepare_onboarding_apply(
+    app: AppHandle,
+    expected_revision: u64,
+    expected_config_revision: String,
+    approval_reference: String,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::prepare_apply(
+        &app,
+        expected_revision,
+        expected_config_revision,
+        approval_reference,
+        request_id,
+    )
+}
+
+#[tauri::command]
+fn record_onboarding_setup_saved(
+    app: AppHandle,
+    expected_revision: u64,
+    resulting_config_revision: String,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::record_setup_saved(
+        &app,
+        expected_revision,
+        resulting_config_revision,
+        request_id,
+    )
+}
+
+#[tauri::command]
+fn complete_onboarding(
+    app: AppHandle,
+    expected_revision: u64,
+    resulting_config_revision: String,
+    deferred_items: Vec<String>,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::complete(
+        &app,
+        expected_revision,
+        resulting_config_revision,
+        deferred_items,
+        request_id,
+    )
+}
+
+#[tauri::command]
+fn mark_onboarding_failed(
+    app: AppHandle,
+    expected_revision: u64,
+    failure_code: String,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::mark_failed(&app, expected_revision, failure_code, request_id)
+}
+
+#[tauri::command]
+fn restart_onboarding(
+    app: AppHandle,
+    mode: onboarding::OnboardingMode,
+    expected_revision: u64,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::restart(&app, mode, expected_revision, request_id)
+}
+
+#[tauri::command]
+fn import_legacy_onboarding_progress(
+    app: AppHandle,
+    raw_json: String,
+    expected_revision: u64,
+    request_id: String,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::import_legacy(&app, raw_json, expected_revision, request_id)
+}
+
+#[tauri::command]
+fn recover_onboarding_state(
+    app: AppHandle,
+) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
+    onboarding::recover(&app)
+}
+
+#[tauri::command]
 fn get_setup_snapshot(app: AppHandle) -> Result<setup::SetupSnapshot, String> {
     setup::get_setup_snapshot(&app)
 }
@@ -279,10 +412,30 @@ fn preview_setup(
 
 #[tauri::command]
 fn initialize_workspace(
+    app: AppHandle,
     draft: setup::SetupDraft,
     confirmed: Option<bool>,
-) -> Result<setup::WorkspaceInitResult, String> {
-    setup::initialize_workspace(draft, confirmed.unwrap_or(false))
+    expected_onboarding_revision: u64,
+    request_id: String,
+) -> Result<InitializeWorkspaceCommandResult, onboarding::OnboardingError> {
+    let (workspace, onboarding) = onboarding::initialize_workspace(
+        &app,
+        draft,
+        confirmed.unwrap_or(false),
+        expected_onboarding_revision,
+        request_id,
+    )?;
+    Ok(InitializeWorkspaceCommandResult {
+        workspace,
+        onboarding,
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InitializeWorkspaceCommandResult {
+    workspace: setup::WorkspaceInitResult,
+    onboarding: Option<onboarding::OnboardingSnapshot>,
 }
 
 #[tauri::command]
@@ -292,11 +445,31 @@ fn assert_setup_revision(app: AppHandle, expected_revision: String) -> Result<()
 
 #[tauri::command]
 fn remove_setup_created_empty_folders(
-    workspace_base: String,
-    paths: Vec<String>,
+    app: AppHandle,
+    expected_onboarding_revision: u64,
     confirmed: Option<bool>,
-) -> Result<setup::SetupCleanupResult, String> {
-    setup::remove_setup_created_empty_folders(workspace_base, paths, confirmed.unwrap_or(false))
+) -> Result<CleanupCreatedFoldersCommandResult, onboarding::OnboardingError> {
+    if !confirmed.unwrap_or(false) {
+        return Err(onboarding::OnboardingError {
+            code: "confirmation_required".to_string(),
+            message: "Empty-folder cleanup requires confirmation.".to_string(),
+            recoverable: true,
+            current_revision: Some(expected_onboarding_revision),
+        });
+    }
+    let (cleanup, onboarding) =
+        onboarding::cleanup_created_folders(&app, expected_onboarding_revision)?;
+    Ok(CleanupCreatedFoldersCommandResult {
+        cleanup,
+        onboarding,
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupCreatedFoldersCommandResult {
+    cleanup: setup::SetupCleanupResult,
+    onboarding: onboarding::OnboardingSnapshot,
 }
 
 #[tauri::command]
