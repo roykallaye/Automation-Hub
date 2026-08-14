@@ -26,24 +26,23 @@ pub(crate) fn save_client_branding(
     app: &AppHandle,
     draft: ClientBrandingDraft,
 ) -> Result<preflight::AppConfigStatus, String> {
-    let (mut hub_config, _) = config::ensure_config_with_path(app)?;
-
-    let display_name = draft.display_name.trim();
-    if !display_name.is_empty() {
-        hub_config.client.display_name = display_name.to_string();
-    }
-    hub_config.client.branding = config::BrandingConfig {
-        palette: draft.palette,
-        logo_path: draft.logo_path,
-        primary_color: draft.primary_color,
-        accent_color: draft.accent_color,
-        background_style: draft.background_style,
-        watermark_enabled: draft.watermark_enabled,
-        watermark_opacity: draft.watermark_opacity,
-    }
-    .sanitized();
-
-    let config_path = config::save_config_for_app(app, &hub_config)?;
+    let (hub_config, config_path) = config::update_config_for_app(app, |hub_config| {
+        let display_name = draft.display_name.trim();
+        if !display_name.is_empty() {
+            hub_config.client.display_name = display_name.to_string();
+        }
+        hub_config.client.branding = config::BrandingConfig {
+            palette: draft.palette,
+            logo_path: draft.logo_path,
+            primary_color: draft.primary_color,
+            accent_color: draft.accent_color,
+            background_style: draft.background_style,
+            watermark_enabled: draft.watermark_enabled,
+            watermark_opacity: draft.watermark_opacity,
+        }
+        .sanitized();
+        Ok(())
+    })?;
     Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
         hub_config,

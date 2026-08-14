@@ -1,0 +1,30 @@
+{
+  "paths": {
+    "invoice_process_command": "D:\\LegacyFixture\\Scripts\\process_fatture.cmd",
+    "gmail_draft_command": "D:\\LegacyFixture\\Scripts\\create_draft.cmd",
+    "gmail_token": "D:\\LegacyFixture\\Secrets\\gmail_token.json",
+    "invoices_input": "D:\\LegacyFixture\\Fatture\\Input",
+    "ready_invoices": "D:\\LegacyFixture\\Fatture\\Pronte",
+    "fatture_logs": "D:\\LegacyFixture\\Fatture\\Log",
+    "copy_scansioni_command": "D:\\LegacyFixture\\Scripts\\copy_scansioni.cmd",
+    "network_scans": "\\\\LEGACY-FIXTURE-SERVER\\Shared\\Scansioni",
+    "local_scans_cache": "D:\\LegacyFixture\\Scansioni\\Cache",
+    "ocr_preprocess_script": "D:\\LegacyFixture\\Scripts\\ocr.ps1",
+    "ocr_text_output": "D:\\LegacyFixture\\Scansioni\\Text",
+    "contract_process_command": "D:\\LegacyFixture\\Scripts\\contracts.cmd",
+    "signed_contracts": "D:\\LegacyFixture\\Contratti\\Firmati",
+    "codex_scripts": "D:\\LegacyFixture\\Codex\\Scripts",
+    "legacy_custom_drop": "D:\\LegacyFixture\\CustomDrop",
+    "legacy_scanner_metadata": {
+      "prefixes": ["Legacy Fixture Scanner", "Legacy Fixture Reception"]
+    }
+  },
+  "hotel_custom": {
+    "preserveExactly": true,
+    "hotelCode": "legacy-fixture-001"
+  },
+  "legacy_support": {
+    "contact": "support@fixture-hotel.invalid",
+    "enabled": true
+  }
+}

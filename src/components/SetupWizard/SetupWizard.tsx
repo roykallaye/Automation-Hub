@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n, type TranslationKey } from "../../i18n";
 import type {
@@ -21,6 +21,7 @@ import type {
   PreflightItem,
   SaveSetupResult,
   SetupPreview,
+  SetupSnapshot,
   WorkflowPreflight,
   WorkspaceInitResult,
 } from "../../types";
@@ -30,6 +31,7 @@ import {
   createRuleId,
   createSetupDraft,
   defaultPathsForWorkspace,
+  diffSetupDraft,
   managedPythonExecutable,
   repairConcatenatedAbsolutePath,
   type RecipientRuleDraft,
@@ -104,6 +106,11 @@ export function SetupWizard({
   const [draft, setDraft] = useState<SetupDraft>(
     () => initialSession?.draft ?? createSetupDraft(config),
   );
+  const [baseRevision, setBaseRevision] = useState<string | null>(
+    initialSession?.baseRevision ?? null,
+  );
+  const baseDraftRef = useRef<SetupDraft | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(true);
   const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(
     initialSession?.showAdvancedWorkflows ?? false,
   );
@@ -131,21 +138,56 @@ export function SetupWizard({
   const isLast = stepIndex === steps.length - 1;
 
   useEffect(() => {
+    let cancelled = false;
+    void invoke<SetupSnapshot>("get_setup_snapshot")
+      .then((snapshot) => {
+        if (cancelled) return;
+        baseDraftRef.current = snapshot.draft;
+        setBaseRevision(snapshot.revision);
+        // A persisted draft is useful only when it was based on this exact
+        // configuration pair. Older/unbound sessions are deliberately ignored.
+        if (initialSession?.baseRevision === snapshot.revision) {
+          setDraft(initialSession.draft);
+        } else {
+          setDraft(snapshot.draft);
+          setCompletedActions([]);
+          setCreatedFolderPaths([]);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSetupResult({
+          kind: "error",
+          title: t("wizard.actionCouldNotFinish"),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setSnapshotLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!steps.some((step) => step.key === currentStepKey)) {
       setCurrentStepKey(steps[0]?.key ?? "welcome");
     }
   }, [currentStepKey, steps]);
 
   useEffect(() => {
+    if (snapshotLoading) return;
     saveSetupSession({
       version: 1,
       draft,
+      baseRevision,
       showAdvancedWorkflows,
       stepKey: currentStepKey,
       completedActions,
       createdFolderPaths,
     });
-  }, [completedActions, createdFolderPaths, currentStepKey, draft, showAdvancedWorkflows]);
+  }, [baseRevision, completedActions, createdFolderPaths, currentStepKey, draft, showAdvancedWorkflows, snapshotLoading]);
 
   function moveStep(offset: number) {
     const nextIndex = Math.min(steps.length - 1, Math.max(0, stepIndex + offset));
@@ -398,10 +440,26 @@ export function SetupWizard({
   async function finishSetup() {
     if (!window.confirm(t("wizard.confirmFinishSetup"))) return;
 
+    if (!baseRevision || !baseDraftRef.current) {
+      setSetupResult({
+        kind: "error",
+        title: t("wizard.actionCouldNotFinish"),
+        message: "InnPilot has not finished loading the current configuration. Try again.",
+      });
+      return;
+    }
+
     setSetupAction("finish");
     setSetupResult(null);
     try {
-      await invoke<SetupPreview>("preview_setup", { draft });
+      // Refuse a known-stale wizard before creating even empty workspace
+      // folders. The save command repeats this check under its own lock/CAS.
+      await invoke("assert_setup_revision", { expectedRevision: baseRevision });
+      const patch = diffSetupDraft(baseDraftRef.current, draft);
+      await invoke<SetupPreview>("preview_setup", {
+        patch,
+        expectedRevision: baseRevision,
+      });
 
       const workspaceResult = await invoke<WorkspaceInitResult>("initialize_workspace", {
         draft,
@@ -447,9 +505,12 @@ export function SetupWizard({
       }
 
       const result = await invoke<SaveSetupResult>("save_setup_config", {
-        draft,
+        patch,
+        expectedRevision: baseRevision,
         confirmed: true,
       });
+      baseDraftRef.current = draft;
+      setBaseRevision(result.revision);
       const blocking = result.validation.workflows.filter(
         (workflow) => workflow.commandName && !workflow.canRun,
       ).length;
@@ -479,6 +540,7 @@ export function SetupWizard({
             }),
       });
       await onSetupSaved();
+      clearSetupSession();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const invalidPathMessage =
@@ -617,6 +679,7 @@ export function SetupWizard({
             saved={completedActions.includes("save")}
             setupResult={setupResult}
             onFinish={finishSetup}
+            disabled={snapshotLoading || !baseRevision}
             onDone={onClose}
             onCleanupCreatedFolders={cleanupCreatedFolders}
             createdFolderCount={createdFolderPaths.length}
@@ -784,6 +847,7 @@ const SETUP_SESSION_STORAGE_KEY = "innpilot.setup-session.v1";
 type SetupWizardSession = {
   version: 1;
   draft: SetupDraft;
+  baseRevision: string | null;
   showAdvancedWorkflows: boolean;
   stepKey: string;
   completedActions: SetupAction[];
@@ -833,6 +897,7 @@ function loadSetupSession(config?: HubConfig | null): SetupWizardSession | null 
           ? candidate.contractMarkerTexts
           : defaults.contractMarkerTexts,
       },
+      baseRevision: typeof value.baseRevision === "string" ? value.baseRevision : null,
       showAdvancedWorkflows: Boolean(value.showAdvancedWorkflows),
       stepKey: typeof value.stepKey === "string" ? value.stepKey : "welcome",
       completedActions,
@@ -851,6 +916,15 @@ function saveSetupSession(session: SetupWizardSession) {
     window.localStorage.setItem(SETUP_SESSION_STORAGE_KEY, JSON.stringify(session));
   } catch {
     // Setup continues even if private browser storage is unavailable.
+  }
+}
+
+function clearSetupSession() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(SETUP_SESSION_STORAGE_KEY);
+  } catch {
+    // A successful backend save remains valid even if browser storage is unavailable.
   }
 }
 function WelcomeStep({
@@ -1648,6 +1722,7 @@ function FinishStep({
   onDone,
   onCleanupCreatedFolders,
   createdFolderCount,
+  disabled,
 }: {
   busy: boolean;
   saved: boolean;
@@ -1656,6 +1731,7 @@ function FinishStep({
   onDone: () => void;
   onCleanupCreatedFolders: () => void;
   createdFolderCount: number;
+  disabled: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -1696,7 +1772,7 @@ function FinishStep({
         ) : (
           <button
             className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-cta px-5 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-55"
-            disabled={busy}
+            disabled={busy || disabled}
             onClick={onFinish}
             type="button"
           >

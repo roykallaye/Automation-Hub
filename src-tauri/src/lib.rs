@@ -52,6 +52,7 @@ pub fn run() {
             last_run: Mutex::new(None),
         })
         .setup(|app| {
+            setup::reconcile_incomplete_setup(app.handle()).map_err(std::io::Error::other)?;
             config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
             desktop_service::setup(app)?;
             runner_service::start(app.handle().clone());
@@ -73,8 +74,10 @@ pub fn run() {
             get_config_status,
             refresh_config_status,
             validate_configuration,
+            get_setup_snapshot,
             preview_setup,
             initialize_workspace,
+            assert_setup_revision,
             remove_setup_created_empty_folders,
             save_setup_config,
             validate_setup,
@@ -261,8 +264,17 @@ fn validate_configuration(app: AppHandle) -> Result<preflight::PreflightReport, 
 }
 
 #[tauri::command]
-fn preview_setup(draft: setup::SetupDraft) -> Result<setup::SetupPreview, String> {
-    setup::preview_setup(draft)
+fn get_setup_snapshot(app: AppHandle) -> Result<setup::SetupSnapshot, String> {
+    setup::get_setup_snapshot(&app)
+}
+
+#[tauri::command]
+fn preview_setup(
+    app: AppHandle,
+    patch: setup::SetupPatch,
+    expected_revision: String,
+) -> Result<setup::SetupPreview, String> {
+    setup::preview_setup(&app, patch, &expected_revision)
 }
 
 #[tauri::command]
@@ -271,6 +283,11 @@ fn initialize_workspace(
     confirmed: Option<bool>,
 ) -> Result<setup::WorkspaceInitResult, String> {
     setup::initialize_workspace(draft, confirmed.unwrap_or(false))
+}
+
+#[tauri::command]
+fn assert_setup_revision(app: AppHandle, expected_revision: String) -> Result<(), String> {
+    setup::assert_setup_revision(&app, &expected_revision)
 }
 
 #[tauri::command]
@@ -285,10 +302,11 @@ fn remove_setup_created_empty_folders(
 #[tauri::command]
 fn save_setup_config(
     app: AppHandle,
-    draft: setup::SetupDraft,
+    patch: setup::SetupPatch,
+    expected_revision: String,
     confirmed: Option<bool>,
 ) -> Result<setup::SaveSetupResult, String> {
-    setup::save_setup_config(&app, draft, confirmed.unwrap_or(false))
+    setup::save_setup_config(&app, patch, expected_revision, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]

@@ -172,44 +172,47 @@ pub async fn run_cloud_e2e_probe(
     )
     .map_err(|_| "Could not store the synthetic automation setup.".to_string())?;
 
-    let mut local_config = config::ensure_config(app_handle)?;
-    local_config.client.display_name = "InnPilot cloud probe".to_string();
-    local_config.automation.automation_root_folder = automation.to_string_lossy().to_string();
-    local_config.automation.automation_config_path =
-        automation_config_path.to_string_lossy().to_string();
-    local_config.automation.python_executable = worker.to_string_lossy().to_string();
-    local_config.scripts.invoice_workflow_script = automation
-        .join("invoices/process_fatture.py")
-        .to_string_lossy()
-        .to_string();
-    local_config.scripts.gmail_draft_script = automation
-        .join("gmail_drafts/create_gmail_draft.py")
-        .to_string_lossy()
-        .to_string();
-    local_config.scripts.copy_scansioni_script = automation
-        .join("scans/copy_scans.py")
-        .to_string_lossy()
-        .to_string();
-    local_config.scripts.ocr_preprocessing_script = automation
-        .join("ocr/extract_scan_text.py")
-        .to_string_lossy()
-        .to_string();
-    local_config.scripts.contract_processing_script = automation
-        .join("contracts/process_contratti.py")
-        .to_string_lossy()
-        .to_string();
-    local_config.folders.invoice_input_folder = invoice_input.to_string_lossy().to_string();
-    local_config.folders.invoice_output_folder = invoice_output.to_string_lossy().to_string();
-    local_config.folders.invoice_archive_folder = invoice_archive.to_string_lossy().to_string();
-    local_config.folders.invoice_log_folder = invoice_logs.to_string_lossy().to_string();
-    local_config.folders.scansioni_network_share = scan_source.to_string_lossy().to_string();
-    local_config.folders.scansioni_local_cache_folder = scan_cache.to_string_lossy().to_string();
-    local_config.folders.ocr_text_output_folder = ocr_output.to_string_lossy().to_string();
-    local_config.folders.contracts_output_folder = contract_output.to_string_lossy().to_string();
-    local_config.folders.contract_log_folder = contract_logs.to_string_lossy().to_string();
-    local_config.gmail.token_path = gmail.join("token.json").to_string_lossy().to_string();
-    local_config.safety.dry_run_default = true;
-    config::save_config_for_app(app_handle, &local_config)?;
+    let (local_config, _) = config::update_config_for_app(app_handle, |local_config| {
+        local_config.client.display_name = "InnPilot cloud probe".to_string();
+        local_config.automation.automation_root_folder = automation.to_string_lossy().to_string();
+        local_config.automation.automation_config_path =
+            automation_config_path.to_string_lossy().to_string();
+        local_config.automation.python_executable = worker.to_string_lossy().to_string();
+        local_config.scripts.invoice_workflow_script = automation
+            .join("invoices/process_fatture.py")
+            .to_string_lossy()
+            .to_string();
+        local_config.scripts.gmail_draft_script = automation
+            .join("gmail_drafts/create_gmail_draft.py")
+            .to_string_lossy()
+            .to_string();
+        local_config.scripts.copy_scansioni_script = automation
+            .join("scans/copy_scans.py")
+            .to_string_lossy()
+            .to_string();
+        local_config.scripts.ocr_preprocessing_script = automation
+            .join("ocr/extract_scan_text.py")
+            .to_string_lossy()
+            .to_string();
+        local_config.scripts.contract_processing_script = automation
+            .join("contracts/process_contratti.py")
+            .to_string_lossy()
+            .to_string();
+        local_config.folders.invoice_input_folder = invoice_input.to_string_lossy().to_string();
+        local_config.folders.invoice_output_folder = invoice_output.to_string_lossy().to_string();
+        local_config.folders.invoice_archive_folder = invoice_archive.to_string_lossy().to_string();
+        local_config.folders.invoice_log_folder = invoice_logs.to_string_lossy().to_string();
+        local_config.folders.scansioni_network_share = scan_source.to_string_lossy().to_string();
+        local_config.folders.scansioni_local_cache_folder =
+            scan_cache.to_string_lossy().to_string();
+        local_config.folders.ocr_text_output_folder = ocr_output.to_string_lossy().to_string();
+        local_config.folders.contracts_output_folder =
+            contract_output.to_string_lossy().to_string();
+        local_config.folders.contract_log_folder = contract_logs.to_string_lossy().to_string();
+        local_config.gmail.token_path = gmail.join("token.json").to_string_lossy().to_string();
+        local_config.safety.dry_run_default = true;
+        Ok(())
+    })?;
 
     if let Some(blocker) = preflight::workflow_blocker_key("copy_scansioni", &local_config) {
         let blocker = blocker

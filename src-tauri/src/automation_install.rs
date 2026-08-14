@@ -62,9 +62,10 @@ pub(crate) fn install_managed_automation_scripts(
     let destination_root = managed_automation_root(app)?;
     let mut result = copy_canonical_files(&source_root, &destination_root)?;
 
-    let (mut app_config, _) = config::ensure_config_with_path(app)?;
-    apply_managed_root_to_config(&mut app_config, &destination_root);
-    let config_path = config::save_config_for_app(app, &app_config)?;
+    let (app_config, config_path) = config::update_config_for_app(app, |app_config| {
+        apply_managed_root_to_config(app_config, &destination_root);
+        Ok(())
+    })?;
     result.config_path = Some(config_path.to_string_lossy().to_string());
     result.preflight = Some(preflight::build_preflight_report(&app_config));
 

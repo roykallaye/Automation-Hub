@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "client": {
+    "displayName": "Incomplete Fixture Hotel",
+    "legacyDeskCode": "fixture-desk-9"
+  },
+  "automation": {
+    "automationRootFolder": "D:\\IncompleteFixture\\automation",
+    "automationConfigPath": "__AUTOMATION_CONFIG_PATH__",
+    "localExtension": {
+      "keep": "unchanged"
+    }
+  },
+  "scripts": {
+    "invoiceWorkflowScript": "D:\\IncompleteFixture\\scripts\\invoice.py",
+    "hotelSpecificScript": "D:\\IncompleteFixture\\scripts\\custom.py"
+  },
+  "folders": {
+    "invoiceInputFolder": "D:\\IncompleteFixture\\Invoices\\Input",
+    "invoiceOutputFolder": "",
+    "scansioniNetworkShare": "\\\\INCOMPLETE-FIXTURE\\Scansioni",
+    "futureFolder": "D:\\IncompleteFixture\\Future"
+  },
+  "gmail": {
+    "tokenPath": "",
+    "accountHint": "incomplete@fixture-hotel.invalid"
+  },
+  "safety": {
+    "dryRunDefault": true,
+    "experimentalGuard": "preserve-me"
+  },
+  "incompleteExtension": {
+    "enabled": true,
+    "notes": ["fixture", "not production"]
+  }
+}

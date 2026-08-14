@@ -254,6 +254,11 @@ export type SetupPreview = {
   warnings: string[];
 };
 
+export type SetupSnapshot = {
+  draft: import("./components/SetupWizard/setupDraft").SetupDraft;
+  revision: string;
+};
+
 export type SetupFolderActionResult = {
   label: string;
   path: string;
@@ -271,6 +276,7 @@ export type SaveSetupResult = {
   automationConfigPath: string;
   backups: string[];
   validation: PreflightReport;
+  revision: string;
 };
 
 export type ManagedAutomationInstallResult = {

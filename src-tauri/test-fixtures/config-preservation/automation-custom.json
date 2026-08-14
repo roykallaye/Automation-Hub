@@ -1,0 +1,113 @@
+{
+  "client": {
+    "displayName": "Hotel Fixture Aurora",
+    "emailSignatureName": "Team Aurora Fixture",
+    "propertyId": "fixture-property-42",
+    "departmentAliases": {
+      "frontOffice": "Ricevimento fixture",
+      "backOffice": "Amministrazione fixture"
+    }
+  },
+  "paths": {
+    "invoiceInputDir": "D:\\FakeHotel\\Fatture\\Da elaborare",
+    "invoiceOutputDir": "D:\\FakeHotel\\Fatture\\Pronte",
+    "invoiceArchiveDir": "D:\\FakeHotel\\Fatture\\Archivio",
+    "invoiceLogDir": "D:\\FakeHotel\\Fatture\\Log",
+    "gmailCredentialsFile": "D:\\FakeHotel\\Secrets\\gmail_credentials.json",
+    "gmailTokenFile": "D:\\FakeHotel\\Secrets\\gmail_token.json",
+    "scanSourceDir": "\\\\FAKE-HOTEL-SERVER\\Shared\\Scansioni",
+    "scanCacheDir": "D:\\FakeHotel\\Scansioni\\Cache",
+    "contractInputShortcut": "D:\\FakeHotel\\Shortcuts\\Scansioni.lnk",
+    "contractInputDir": "D:\\FakeHotel\\Scansioni\\Cache\\Contratti",
+    "contractDestinationDir": "D:\\FakeHotel\\Contratti\\2027\\Firmati",
+    "contractOcrTextDir": "D:\\FakeHotel\\Scansioni\\Testo",
+    "contractLogDir": "D:\\FakeHotel\\Contratti\\Log",
+    "nightAuditExportDir": "D:\\FakeHotel\\Audit\\Exports"
+  },
+  "ocr": {
+    "languages": ["ita", "deu"],
+    "tessdataDir": "D:\\FakeHotel\\Runtime\\tessdata",
+    "maxPages": 77,
+    "dpi": 450,
+    "minEmbeddedChars": 31,
+    "maxFileMb": 123,
+    "engine": "fixture-ocr-engine",
+    "languageDetection": {
+      "enabled": true,
+      "minimumConfidence": 0.82
+    }
+  },
+  "gmail": {
+    "subject": "Documenti contabili fixture - {date}",
+    "ccEmail": "accounting-copy@fixture-hotel.invalid",
+    "bodyTemplate": "Fixture body for {invoiceCount} invoices.\\n{signature}",
+    "replyTo": "front-office@fixture-hotel.invalid"
+  },
+  "invoice": {
+    "deliveryMode": "gmailDrafts",
+    "fileSelectionMode": "filenamePatterns",
+    "inputGlob": "Fattura*.pdf",
+    "inputGlobs": [
+      "Fattura*.pdf",
+      "Booking*.pdf",
+      "Ricevuta*.pdf",
+      "Partner Speciale*.pdf"
+    ],
+    "recipientRules": [
+      {
+        "match": "fixture partner alfa",
+        "email": "invoices-alfa@partner.invalid",
+        "committenteId": "fixture-alfa-001"
+      },
+      {
+        "match": "fixture partner beta",
+        "email": "invoices-beta@partner.invalid",
+        "category": "tour-operator"
+      },
+      {
+        "match": "fixture pubblica amministrazione",
+        "email": "pa-invoices@partner.invalid",
+        "committenteId": "fixture-pa-777",
+        "requiresReference": true
+      }
+    ],
+    "rulesVersion": "hotel-fixture-v9",
+    "settlementMode": "manual-review"
+  },
+  "contracts": {
+    "scannerFilePrefix": "Fixture Sharp MFP",
+    "scannerFilePrefixes": [
+      "Fixture Sharp MFP",
+      "Fixture Canon Reception",
+      "Fixture Epson Back Office"
+    ],
+    "contractMarker": "Oggetto: Contratto fixture a tempo determinato",
+    "contractMarkers": [
+      "Oggetto: Contratto fixture a tempo determinato",
+      "Oggetto: Proroga contratto fixture"
+    ],
+    "year": "2027",
+    "retentionDays": 3650,
+    "department": "fixture-human-resources"
+  },
+  "safety": {
+    "dryRunDefault": true,
+    "archiveSuccessfulOriginals": false,
+    "redactLogs": true,
+    "quarantineBeforeMove": true,
+    "maximumFilesPerRun": 48
+  },
+  "integrations": {
+    "fixturePms": {
+      "enabled": true,
+      "tenant": "tenant-fixture-only"
+    }
+  },
+  "hotelExtensions": {
+    "preserveExactly": true,
+    "nested": {
+      "list": [3, 1, 4],
+      "nullableValue": null
+    }
+  }
+}

@@ -37,6 +37,8 @@ export type SetupDraft = {
   redactLogs: boolean;
 };
 
+export type SetupPatch = Partial<SetupDraft>;
+
 export const folderPreviewItems = [
   "Invoices/Input",
   "Invoices/ReadyToSend",
@@ -120,6 +122,32 @@ export function createSetupDraft(config?: HubConfig | null): SetupDraft {
     archiveOriginals: true,
     redactLogs: config?.safety.redactLogs ?? true,
   };
+}
+
+/**
+ * Builds the explicit setup patch sent to Rust. A missing key means "leave the
+ * installed value alone"; an empty value remains an intentional update.
+ */
+export function diffSetupDraft(base: SetupDraft, next: SetupDraft): SetupPatch {
+  const patch: SetupPatch = {};
+  for (const key of Object.keys(base) as (keyof SetupDraft)[]) {
+    if (!setupDraftValueEquals(base[key], next[key])) {
+      // TypeScript cannot retain the key/value correlation while iterating,
+      // but both values come from the same strongly typed SetupDraft key.
+      (patch as Record<keyof SetupDraft, SetupDraft[keyof SetupDraft]>)[key] = next[key];
+    }
+  }
+  return patch;
+}
+
+function setupDraftValueEquals(
+  left: SetupDraft[keyof SetupDraft],
+  right: SetupDraft[keyof SetupDraft],
+) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+  return left === right;
 }
 
 export function createRuleId() {

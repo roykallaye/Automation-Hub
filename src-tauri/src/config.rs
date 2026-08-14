@@ -1,3 +1,4 @@
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions, Permissions},
@@ -5,12 +6,12 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex,
+        Mutex, MutexGuard,
     },
 };
 use tauri::{AppHandle, Manager};
 
-const CONFIG_VERSION: u32 = 2;
+pub(crate) const CONFIG_VERSION: u32 = 2;
 
 const CONFIG_BACKUP_SUFFIX: &str = ".bak";
 const CONFIG_TEMP_ATTEMPTS: u64 = 64;
@@ -316,18 +317,99 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
         .map_err(|error| format!("Could not create app data directory: {error}"))?;
     let config_path = app_data_dir.join("config.json");
 
-    if let Some((mut config, should_rewrite)) = load_config_with_recovery(&config_path)? {
-        let worker_changed = prefer_packaged_worker(app, &mut config);
-        if should_rewrite || worker_changed {
-            write_config(&config_path, &config)?;
+    with_configuration_lock(&config_path, || {
+        if let Some((mut config, should_rewrite)) =
+            load_config_with_recovery_unlocked(&config_path)?
+        {
+            let worker_changed = prefer_packaged_worker(app, &mut config);
+            if should_rewrite || worker_changed {
+                write_config_with_primary_activation(&config_path, &config, atomic_activate_file)?;
+            }
+            Ok((config, config_path.clone()))
+        } else {
+            let mut config = default_config_for_app_data(&app_data_dir);
+            prefer_packaged_worker(app, &mut config);
+            write_config_with_primary_activation(&config_path, &config, atomic_activate_file)?;
+            Ok((config, config_path.clone()))
         }
-        Ok((config, config_path))
-    } else {
-        let mut config = default_config_for_app_data(&app_data_dir);
-        prefer_packaged_worker(app, &mut config);
-        write_config(&config_path, &config)?;
-        Ok((config, config_path))
-    }
+    })
+}
+
+/// Applies a narrow mutation to the latest installed configuration while
+/// holding the installation lock for the complete read-modify-write cycle.
+/// Unknown JSON fields are retained by the persistence merge performed by
+/// `write_config_with_primary_activation`.
+pub(crate) fn update_config_for_app(
+    app: &AppHandle,
+    update: impl FnOnce(&mut HubConfig) -> Result<(), String>,
+) -> Result<(HubConfig, PathBuf), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not locate app data directory: {error}"))?;
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|error| format!("Could not create app data directory: {error}"))?;
+    let config_path = app_data_dir.join("config.json");
+    let default = default_config_for_app_data(&app_data_dir);
+
+    let config = update_config_at_path(&config_path, default, |config| {
+        prefer_packaged_worker(app, config);
+        update(config)
+    })?;
+    Ok((config, config_path))
+}
+
+pub(crate) fn app_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|directory| directory.join("config.json"))
+        .map_err(|error| format!("Could not locate app data directory: {error}"))
+}
+
+/// Runs a multi-document configuration operation under the installation lock.
+/// Callers must use the unlocked helpers exposed below and must not recursively
+/// call another locking configuration API.
+pub(crate) fn with_app_configuration_lock<T>(
+    app: &AppHandle,
+    operation: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let path = app_config_path(app)?;
+    with_configuration_lock(&path, || operation(&path))
+}
+
+pub(crate) fn load_current_config_unlocked(
+    config_path: &Path,
+) -> Result<Option<HubConfig>, String> {
+    load_config_with_recovery_unlocked(config_path).map(|loaded| loaded.map(|(config, _)| config))
+}
+
+pub(crate) fn default_config_for_config_path(config_path: &Path) -> HubConfig {
+    config_path
+        .parent()
+        .map(default_config_for_app_data)
+        .unwrap_or_else(default_config)
+}
+
+pub(crate) fn write_current_config_unlocked(
+    config_path: &Path,
+    config: &HubConfig,
+) -> Result<(), String> {
+    write_config_with_primary_activation(config_path, config, atomic_activate_file)
+}
+
+fn update_config_at_path(
+    config_path: &Path,
+    default: HubConfig,
+    update: impl FnOnce(&mut HubConfig) -> Result<(), String>,
+) -> Result<HubConfig, String> {
+    with_configuration_lock(config_path, || {
+        let mut config = load_config_with_recovery_unlocked(config_path)?
+            .map(|(config, _)| config)
+            .unwrap_or(default);
+        update(&mut config)?;
+        write_config_with_primary_activation(config_path, &config, atomic_activate_file)?;
+        Ok(config)
+    })
 }
 
 fn prefer_packaged_worker(app: &AppHandle, config: &mut HubConfig) -> bool {
@@ -382,40 +464,42 @@ fn should_replace_python_selection(value: &str) -> bool {
         || normalized.ends_with("\\worker\\innpilot-worker.exe")
 }
 
-pub(crate) fn save_config_for_app(app: &AppHandle, config: &HubConfig) -> Result<PathBuf, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Could not locate app data directory: {error}"))?;
-    fs::create_dir_all(&app_data_dir)
-        .map_err(|error| format!("Could not create app data directory: {error}"))?;
-    let config_path = app_data_dir.join("config.json");
-    write_config(&config_path, config)?;
-    Ok(config_path)
-}
-
 pub(crate) fn save_language_for_app(
     app: &AppHandle,
     language: &str,
 ) -> Result<(HubConfig, PathBuf), String> {
-    let (mut config, _) = ensure_config_with_path(app)?;
-    config.language = sanitize_language(language);
-    let path = save_config_for_app(app, &config)?;
-    Ok((config, path))
+    update_config_for_app(app, |config| {
+        config.language = sanitize_language(language);
+        Ok(())
+    })
 }
 
-fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), String> {
+pub(crate) fn parse_config_with_migration(contents: &str) -> Result<(HubConfig, bool), String> {
+    parse_config_with_migration_and_default(contents, default_config())
+}
+
+pub(crate) fn parse_config_with_migration_at_path(
+    contents: &str,
+    config_path: &Path,
+) -> Result<(HubConfig, bool), String> {
+    parse_config_with_migration_and_default(contents, default_config_for_config_path(config_path))
+}
+
+fn parse_config_with_migration_and_default(
+    contents: &str,
+    default: HubConfig,
+) -> Result<(HubConfig, bool), String> {
     let value: serde_json::Value =
         serde_json::from_str(contents).map_err(|error| format!("Invalid config file: {error}"))?;
 
-    if value.get("paths").is_some() {
+    if value.get("schemaVersion").is_none() && value.get("paths").is_some() {
         let legacy: LegacyHubConfig = serde_json::from_value(value)
             .map_err(|error| format!("Invalid legacy config file: {error}"))?;
-        return Ok((config_from_legacy(legacy), true));
+        return Ok((config_from_legacy(legacy, default), true));
     }
 
     let default_value =
-        serde_json::to_value(default_config()).map_err(|error| format!("Config error: {error}"))?;
+        serde_json::to_value(default).map_err(|error| format!("Config error: {error}"))?;
     let merged = merge_json(default_value, value);
     let mut config: HubConfig = serde_json::from_value(merged.clone())
         .map_err(|error| format!("Invalid config file: {error}"))?;
@@ -447,11 +531,11 @@ fn merge_json(
     }
 }
 
+#[cfg(test)]
 fn write_config(config_path: &Path, config: &HubConfig) -> Result<(), String> {
-    let _io_guard = CONFIG_IO_LOCK
-        .lock()
-        .map_err(|_| "Configuration persistence lock is unavailable.".to_string())?;
-    write_config_with_primary_activation(config_path, config, atomic_activate_file)
+    with_configuration_lock(config_path, || {
+        write_config_with_primary_activation(config_path, config, atomic_activate_file)
+    })
 }
 
 fn write_config_with_primary_activation<F>(
@@ -462,7 +546,14 @@ fn write_config_with_primary_activation<F>(
 where
     F: FnOnce(&Path, &Path) -> Result<(), String>,
 {
-    let contents = serde_json::to_vec_pretty(config)
+    if config.schema_version > CONFIG_VERSION {
+        return Err(format!(
+            "InnPilot cannot overwrite configuration schema version {} because this app supports up to version {CONFIG_VERSION}.",
+            config.schema_version
+        ));
+    }
+
+    let known_value = serde_json::to_value(config)
         .map_err(|error| format!("Could not prepare config: {error}"))?;
 
     let parent = config_path
@@ -471,7 +562,7 @@ where
     fs::create_dir_all(parent)
         .map_err(|error| format!("Could not prepare config folder: {error}"))?;
 
-    if config_path.exists() {
+    let value_to_write = if config_path.exists() {
         let current_contents = fs::read_to_string(config_path)
             .map_err(|error| format!("Could not read the current config before saving: {error}"))?;
         parse_config_with_migration(&current_contents).map_err(|error| {
@@ -479,18 +570,96 @@ where
                 "The current config is invalid, so it was not replaced and its backup was preserved: {error}"
             )
         })?;
+        let current_value: serde_json::Value = serde_json::from_str(&current_contents)
+            .map_err(|error| format!("The current config is invalid: {error}"))?;
+        refuse_future_schema(&current_value)?;
         install_last_known_good_backup(config_path, current_contents.as_bytes())?;
-    }
+
+        // An unversioned legacy document stored its known values under `paths`.
+        // Keep that original object as an inert extension: after this write the
+        // document has `schemaVersion`, so it cannot be interpreted as legacy
+        // again, while hotel-specific values remain recoverable.
+        merge_json(current_value, known_value)
+    } else {
+        known_value
+    };
+    let contents = serde_json::to_vec_pretty(&value_to_write)
+        .map_err(|error| format!("Could not prepare config: {error}"))?;
 
     let permissions = existing_permissions(config_path)?;
     atomic_write_bytes_with(config_path, &contents, permissions, activate_primary)
 }
 
+#[cfg(test)]
 fn load_config_with_recovery(config_path: &Path) -> Result<Option<(HubConfig, bool)>, String> {
-    let _io_guard = CONFIG_IO_LOCK
-        .lock()
-        .map_err(|_| "Configuration persistence lock is unavailable.".to_string())?;
-    load_config_with_recovery_unlocked(config_path)
+    with_configuration_lock(config_path, || {
+        load_config_with_recovery_unlocked(config_path)
+    })
+}
+
+/// Serializes configuration access across threads and processes for the
+/// installation containing `config_path`. Callers must use unlocked persistence
+/// helpers inside `operation` to avoid recursively acquiring the same lock.
+pub(crate) fn with_configuration_lock<T>(
+    config_path: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = ConfigIoGuard::acquire(config_path)?;
+    operation()
+}
+
+struct ConfigIoGuard {
+    _process_guard: MutexGuard<'static, ()>,
+    lock_file: File,
+}
+
+impl ConfigIoGuard {
+    fn acquire(config_path: &Path) -> Result<Self, String> {
+        let process_guard = CONFIG_IO_LOCK
+            .lock()
+            .map_err(|_| "Configuration persistence lock is unavailable.".to_string())?;
+        let parent = config_path
+            .parent()
+            .ok_or_else(|| "The config file has no parent folder.".to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not prepare config folder: {error}"))?;
+        let lock_path = parent.join(".innpilot-configuration.lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)
+            .map_err(|error| format!("Could not open the configuration lock: {error}"))?;
+        match lock_file.try_lock_exclusive() {
+            Ok(()) => Ok(Self {
+                _process_guard: process_guard,
+                lock_file,
+            }),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err("Configuration is being updated by another InnPilot process.".to_string())
+            }
+            Err(error) => Err(format!("Could not acquire the configuration lock: {error}")),
+        }
+    }
+}
+
+impl Drop for ConfigIoGuard {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.lock_file);
+    }
+}
+
+fn refuse_future_schema(value: &serde_json::Value) -> Result<(), String> {
+    let Some(version) = value.get("schemaVersion").and_then(|value| value.as_u64()) else {
+        return Ok(());
+    };
+    if version > u64::from(CONFIG_VERSION) {
+        return Err(format!(
+            "InnPilot cannot overwrite configuration schema version {version} because this app supports up to version {CONFIG_VERSION}."
+        ));
+    }
+    Ok(())
 }
 
 fn load_config_with_recovery_unlocked(
@@ -619,6 +788,21 @@ where
     activate(pending.path(), target)?;
     pending.disarm();
     Ok(())
+}
+
+/// Atomically replaces an arbitrary configuration document while preserving
+/// existing file permissions. The caller is responsible for holding the
+/// installation configuration lock and validating the document first.
+pub(crate) fn atomic_replace_configuration_bytes(
+    target: &Path,
+    contents: &[u8],
+) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not prepare config folder: {error}"))?;
+    }
+    let permissions = existing_permissions(target)?;
+    atomic_write_bytes_with(target, contents, permissions, atomic_activate_file)
 }
 
 fn create_unique_sibling_temp(target: &Path) -> Result<(PathBuf, File), String> {
@@ -755,7 +939,7 @@ fn atomic_activate_file(temp: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
+fn config_from_legacy(legacy: LegacyHubConfig, default: HubConfig) -> HubConfig {
     let paths = legacy.paths;
     let fatture_logs = paths.fatture_logs;
     HubConfig {
@@ -767,7 +951,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
         },
         invoice_delivery_mode: InvoiceDeliveryMode::GmailDrafts,
         invoice_file_selection_mode: InvoiceFileSelectionMode::FilenamePatterns,
-        automation: default_config().automation,
+        automation: default.automation,
         scripts: ScriptPaths {
             invoice_workflow_script: paths.invoice_process_command,
             gmail_draft_script: paths.gmail_draft_command,
@@ -778,7 +962,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
         folders: FolderPaths {
             invoice_input_folder: paths.invoices_input,
             invoice_output_folder: paths.ready_invoices,
-            invoice_archive_folder: default_config().folders.invoice_archive_folder,
+            invoice_archive_folder: default.folders.invoice_archive_folder,
             invoice_log_folder: fatture_logs.clone(),
             scansioni_network_share: paths.network_scans,
             scansioni_local_cache_folder: paths.local_scans_cache,
@@ -789,7 +973,7 @@ fn config_from_legacy(legacy: LegacyHubConfig) -> HubConfig {
         gmail: GmailConfig {
             token_path: paths.gmail_token,
         },
-        safety: default_config().safety,
+        safety: default.safety,
         templates: OutputTemplatesConfig::default(),
     }
 }
@@ -993,6 +1177,132 @@ mod tests {
             read_validated_config(&config_backup_path(&path), "test backup").unwrap();
         assert_eq!(loaded_second, second);
         assert_eq!(backed_up_first, first);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn typed_config_save_preserves_unknown_root_and_nested_fields() {
+        let root = persistence_temp_root("unknown_fields");
+        let path = root.join("config.json");
+        let mut existing = serde_json::to_value(default_config()).unwrap();
+        existing["hotelExtension"] = serde_json::json!({
+            "enabled": true,
+            "settings": { "mode": "custom" }
+        });
+        existing["client"]["propertyCode"] = serde_json::json!("HOTEL-42");
+        existing["automation"]["extension"] = serde_json::json!({
+            "revision": 7,
+            "features": ["one", "two"]
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&existing).unwrap()).unwrap();
+
+        let mut updated = default_config();
+        updated.client.display_name = "Updated Hotel".to_string();
+        write_config(&path, &updated).unwrap();
+
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["client"]["displayName"], "Updated Hotel");
+        assert_eq!(saved["client"]["propertyCode"], "HOTEL-42");
+        assert_eq!(saved["automation"]["extension"]["revision"], 7);
+        assert_eq!(
+            saved["automation"]["extension"]["features"],
+            serde_json::json!(["one", "two"])
+        );
+        assert_eq!(saved["hotelExtension"]["enabled"], true);
+        assert_eq!(saved["hotelExtension"]["settings"]["mode"], "custom");
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_fixture_migration_preserves_original_paths_as_an_inert_extension() {
+        let root = persistence_temp_root("legacy_fixture_preservation");
+        let path = root.join("config.json");
+        let fixture = include_str!("../test-fixtures/config-preservation/app-v1-legacy.json");
+        let original: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        fs::write(&path, fixture.as_bytes()).unwrap();
+
+        let (migrated, should_rewrite) = parse_config_with_migration(fixture).unwrap();
+        assert!(should_rewrite);
+        assert_eq!(migrated.schema_version, CONFIG_VERSION);
+        write_config(&path, &migrated).unwrap();
+
+        let saved_bytes = fs::read(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&saved_bytes).unwrap();
+        assert_eq!(saved["schemaVersion"], serde_json::json!(CONFIG_VERSION));
+        assert_eq!(saved["paths"], original["paths"]);
+        assert_eq!(saved["hotel_custom"], original["hotel_custom"]);
+        assert_eq!(saved["legacy_support"], original["legacy_support"]);
+
+        let saved_text = std::str::from_utf8(&saved_bytes).unwrap();
+        let (reloaded, should_rewrite_again) = parse_config_with_migration(saved_text).unwrap();
+        assert!(!should_rewrite_again);
+        assert_eq!(reloaded, migrated);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn locked_config_mutations_compose_and_preserve_unknown_json() {
+        let root = persistence_temp_root("locked_mutations");
+        let path = root.join("config.json");
+        let mut existing = serde_json::to_value(default_config()).unwrap();
+        existing["hotelExtension"] = serde_json::json!({
+            "preserveExactly": true,
+            "revision": 17
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&existing).unwrap()).unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let language_path = path.clone();
+        let language_barrier = barrier.clone();
+        let language_update = std::thread::spawn(move || {
+            language_barrier.wait();
+            update_config_at_path(&language_path, default_config(), |config| {
+                config.language = "it".to_string();
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                Ok(())
+            })
+            .unwrap();
+        });
+        let branding_path = path.clone();
+        let branding_update = std::thread::spawn(move || {
+            barrier.wait();
+            update_config_at_path(&branding_path, default_config(), |config| {
+                config.client.display_name = "Concurrent Hotel".to_string();
+                Ok(())
+            })
+            .unwrap();
+        });
+
+        language_update.join().unwrap();
+        branding_update.join().unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["language"], "it");
+        assert_eq!(saved["client"]["displayName"], "Concurrent Hotel");
+        assert_eq!(saved["hotelExtension"], existing["hotelExtension"]);
+        assert_no_pending_config_temps(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn typed_config_save_refuses_future_schema_without_mutating_primary() {
+        let root = persistence_temp_root("future_schema");
+        let path = root.join("config.json");
+        let mut future = serde_json::to_value(default_config()).unwrap();
+        future["schemaVersion"] = serde_json::json!(CONFIG_VERSION + 1);
+        future["futureOnly"] = serde_json::json!({ "mustRemain": true });
+        let original = serde_json::to_vec_pretty(&future).unwrap();
+        fs::write(&path, &original).unwrap();
+
+        let mut proposed = default_config();
+        proposed.client.display_name = "Must Not Be Saved".to_string();
+        let error = write_config(&path, &proposed).unwrap_err();
+
+        assert!(error.contains("cannot overwrite configuration schema version"));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(!config_backup_path(&path).exists());
         assert_no_pending_config_temps(&root);
         fs::remove_dir_all(root).unwrap();
     }

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "language": "it",
+  "client": {
+    "displayName": "Hotel Fixture Aurora",
+    "branding": {
+      "palette": "luxuryGold",
+      "logoPath": "D:\\FakeHotel\\Brand\\logo-fixture.png",
+      "primaryColor": "#6d2335",
+      "accentColor": "#202020",
+      "backgroundStyle": "warm",
+      "watermarkEnabled": false,
+      "watermarkOpacity": 12,
+      "customFontFamily": "Fixture Serif"
+    },
+    "hotelCode": "FIXTURE-AURORA-001",
+    "externalRegistry": {
+      "provider": "fixture-pms",
+      "propertyId": "property-fixture-42"
+    }
+  },
+  "invoiceDeliveryMode": "gmailDrafts",
+  "invoiceFileSelectionMode": "filenamePatterns",
+  "automation": {
+    "automationRootFolder": "D:\\FakeHotel\\InnPilot\\automation",
+    "automationConfigPath": "__AUTOMATION_CONFIG_PATH__",
+    "pythonExecutable": "D:\\FakeHotel\\Runtime\\python.exe",
+    "workerChannel": "hotel-approved",
+    "restartPolicy": {
+      "maximumAttempts": 2,
+      "backoffSeconds": 45
+    }
+  },
+  "scripts": {
+    "invoiceWorkflowScript": "D:\\FakeHotel\\Scripts\\invoices\\hotel_invoice_flow.py",
+    "gmailDraftScript": "D:\\FakeHotel\\Scripts\\gmail\\hotel_draft_flow.py",
+    "copyScansioniScript": "D:\\FakeHotel\\Scripts\\scans\\copy_scans_fixture.py",
+    "ocrPreprocessingScript": "D:\\FakeHotel\\Scripts\\ocr\\extract_fixture_text.py",
+    "contractProcessingScript": "D:\\FakeHotel\\Scripts\\contracts\\process_fixture_contracts.py",
+    "nightAuditScript": "D:\\FakeHotel\\Scripts\\night-audit\\export_fixture.py"
+  },
+  "folders": {
+    "invoiceInputFolder": "D:\\FakeHotel\\Fatture\\Da elaborare",
+    "invoiceOutputFolder": "D:\\FakeHotel\\Fatture\\Pronte",
+    "invoiceArchiveFolder": "D:\\FakeHotel\\Fatture\\Archivio",
+    "invoiceLogFolder": "D:\\FakeHotel\\Fatture\\Log",
+    "scansioniNetworkShare": "\\\\FAKE-HOTEL-SERVER\\Shared\\Scansioni",
+    "scansioniLocalCacheFolder": "D:\\FakeHotel\\Scansioni\\Cache",
+    "ocrTextOutputFolder": "D:\\FakeHotel\\Scansioni\\Testo",
+    "contractsOutputFolder": "D:\\FakeHotel\\Contratti\\2027\\Firmati",
+    "contractLogFolder": "D:\\FakeHotel\\Contratti\\Log",
+    "vendorDropFolder": "D:\\FakeHotel\\Fornitori\\Incoming",
+    "auditExportsFolder": "D:\\FakeHotel\\Audit\\Exports"
+  },
+  "gmail": {
+    "tokenPath": "D:\\FakeHotel\\Secrets\\gmail_token.json",
+    "accountHint": "manager@fixture-hotel.invalid",
+    "oauthMode": "desktop-production"
+  },
+  "safety": {
+    "dryRunDefault": true,
+    "requireConfirmationForFileMoves": true,
+    "redactLogs": true,
+    "requireTwoPersonApproval": false,
+    "futureGuard": {
+      "enabled": true,
+      "policy": "fixture-policy-v1"
+    }
+  },
+  "templates": {
+    "gmailDraftSubject": "Fatture {date} - {hotelName}",
+    "gmailDraftBody": "Buongiorno,\\nalleghiamo {invoiceCount} fatture.\\n{signature}",
+    "emailSignature": "Ufficio amministrativo fixture",
+    "smsTemplate": "Messaggio fixture per {hotelName}"
+  },
+  "optionalModules": {
+    "contracts": true,
+    "nightAudit": true,
+    "futurePurchasing": {
+      "enabled": false,
+      "mode": "approval-only"
+    }
+  },
+  "extensions": {
+    "fixtureVendor": {
+      "preserveExactly": true,
+      "orderedCodes": ["A-01", "B-02", "C-03"]
+    }
+  }
+}

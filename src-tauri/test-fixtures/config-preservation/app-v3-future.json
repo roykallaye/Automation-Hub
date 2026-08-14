@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 3,
+  "language": "en",
+  "client": {
+    "displayName": "Future Fixture Hotel",
+    "branding": {
+      "palette": "modernMinimal",
+      "logoPath": "D:\\FutureFixture\\Brand\\logo.png",
+      "primaryColor": "#334455",
+      "accentColor": "#111111",
+      "backgroundStyle": "plain",
+      "watermarkEnabled": true,
+      "watermarkOpacity": 4,
+      "adaptiveContrast": true
+    },
+    "organizationGraphId": "future-fixture-graph"
+  },
+  "invoiceDeliveryMode": "prepareOnly",
+  "invoiceFileSelectionMode": "allPdfs",
+  "automation": {
+    "automationRootFolder": "D:\\FutureFixture\\automation",
+    "automationConfigPath": "__AUTOMATION_CONFIG_PATH__",
+    "pythonExecutable": "D:\\FutureFixture\\Runtime\\innpilot-worker.exe",
+    "executionProfile": "future-signed-profile"
+  },
+  "scripts": {
+    "invoiceWorkflowScript": "D:\\FutureFixture\\Scripts\\invoice.py",
+    "gmailDraftScript": "D:\\FutureFixture\\Scripts\\gmail.py",
+    "copyScansioniScript": "D:\\FutureFixture\\Scripts\\copy.py",
+    "ocrPreprocessingScript": "D:\\FutureFixture\\Scripts\\ocr.py",
+    "contractProcessingScript": "D:\\FutureFixture\\Scripts\\contracts.py",
+    "knowledgeIngestionScript": "D:\\FutureFixture\\Scripts\\knowledge.py"
+  },
+  "folders": {
+    "invoiceInputFolder": "D:\\FutureFixture\\Invoices\\Input",
+    "invoiceOutputFolder": "D:\\FutureFixture\\Invoices\\Output",
+    "invoiceArchiveFolder": "D:\\FutureFixture\\Invoices\\Archive",
+    "invoiceLogFolder": "D:\\FutureFixture\\Invoices\\Logs",
+    "scansioniNetworkShare": "\\\\FUTURE-FIXTURE\\Shared\\Scansioni",
+    "scansioniLocalCacheFolder": "D:\\FutureFixture\\Scansioni\\Cache",
+    "ocrTextOutputFolder": "D:\\FutureFixture\\Scansioni\\Text",
+    "contractsOutputFolder": "D:\\FutureFixture\\Contracts\\Signed",
+    "contractLogFolder": "D:\\FutureFixture\\Contracts\\Logs",
+    "knowledgeStagingFolder": "D:\\FutureFixture\\Knowledge\\Staging"
+  },
+  "gmail": {
+    "tokenPath": "D:\\FutureFixture\\Secrets\\gmail_token.json",
+    "credentialReference": "windows-credential-manager://future-fixture-gmail"
+  },
+  "safety": {
+    "dryRunDefault": true,
+    "requireConfirmationForFileMoves": true,
+    "redactLogs": true,
+    "proposalApprovalPolicy": "manager-explicit",
+    "configurationRevisionRequired": true
+  },
+  "templates": {
+    "gmailDraftSubject": "Future fixture {hotelName}",
+    "gmailDraftBody": "Future fixture body.\\n{signature}",
+    "emailSignature": "Future Fixture Team",
+    "localizedVariants": {
+      "de": "Future fixture German variant",
+      "fr": "Future fixture French variant"
+    }
+  },
+  "agents": {
+    "setupMode": "proposal-only",
+    "capabilitySchema": "innpilot.setup.v2",
+    "requireHumanApproval": true
+  },
+  "knowledgeLayer": {
+    "enabled": false,
+    "provenanceRequired": true,
+    "indexVersion": 1
+  },
+  "futureExtension": {
+    "mustNotBeDowngraded": true,
+    "orderedValues": ["future-a", "future-b"]
+  }
+}

@@ -1,19 +1,25 @@
 use crate::{
     config::{
         self, AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig,
-        InvoiceDeliveryMode, InvoiceFileSelectionMode, SafetyConfig, ScriptPaths,
+        InvoiceDeliveryMode, InvoiceFileSelectionMode, SafetyConfig,
     },
-    preflight,
+    preflight, recovery, runner_ledger,
 };
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::Write,
     path::{Component, Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
 
-#[derive(Debug, Clone, Deserialize)]
+static SETUP_BACKUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupDraft {
     #[serde(default = "default_setup_mode")]
@@ -71,19 +77,61 @@ pub(crate) struct SetupDraft {
     redact_logs: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum SetupMode {
     NewWorkspace,
     ExistingFolders,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct RecipientRuleDraft {
     id: Option<String>,
     match_text: String,
     email: String,
+}
+
+/// Explicit setup changes. A missing field always means "preserve the current
+/// installed value"; an empty value is still an intentional update.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetupPatch {
+    setup_mode: Option<SetupMode>,
+    hotel_display_name: Option<String>,
+    email_signature_name: Option<String>,
+    workspace_base: Option<String>,
+    python_executable: Option<String>,
+    invoice_delivery_mode: Option<InvoiceDeliveryMode>,
+    invoice_file_selection_mode: Option<InvoiceFileSelectionMode>,
+    gmail_subject: Option<String>,
+    cc_email: Option<String>,
+    gmail_credentials_file: Option<String>,
+    gmail_token_file: Option<String>,
+    invoice_input_folder: Option<String>,
+    invoice_output_folder: Option<String>,
+    invoice_archive_folder: Option<String>,
+    invoice_log_folder: Option<String>,
+    invoice_input_patterns: Option<Vec<String>>,
+    recipient_rules: Option<Vec<RecipientRuleDraft>>,
+    contract_year: Option<String>,
+    scanner_filename_prefixes: Option<Vec<String>>,
+    contract_marker_texts: Option<Vec<String>>,
+    shared_scan_folder: Option<String>,
+    scans_local_cache_folder: Option<String>,
+    ocr_text_output_folder: Option<String>,
+    signed_contracts_output_folder: Option<String>,
+    contract_log_folder: Option<String>,
+    safe_mode: Option<bool>,
+    archive_originals: Option<bool>,
+    redact_logs: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SetupSnapshot {
+    draft: SetupDraft,
+    revision: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,9 +202,102 @@ pub(crate) struct SaveSetupResult {
     automation_config_path: String,
     backups: Vec<String>,
     validation: preflight::PreflightReport,
+    revision: String,
 }
 
-pub(crate) fn preview_setup(draft: SetupDraft) -> Result<SetupPreview, String> {
+#[derive(Debug)]
+struct ConfigurationPair {
+    app_config_path: PathBuf,
+    app_bytes: Vec<u8>,
+    app_value: serde_json::Value,
+    app_config: HubConfig,
+    automation_config_path: PathBuf,
+    automation_bytes: Option<Vec<u8>>,
+    automation_value: Option<serde_json::Value>,
+    revision: String,
+}
+
+const SETUP_TRANSACTION_SCHEMA: u32 = 1;
+const SETUP_TRANSACTION_FILE: &str = ".innpilot-setup-transaction.json";
+const MAX_SETUP_TRANSACTION_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupTransactionJournal {
+    schema_version: u32,
+    recovery_point_id: String,
+    app_config_path: String,
+    old_app_sha256: String,
+    new_app_sha256: String,
+    old_automation_path: String,
+    new_automation_path: String,
+    old_automation_existed: bool,
+    old_automation_sha256: Option<String>,
+    new_automation_sha256: String,
+}
+
+pub(crate) fn get_setup_snapshot(app: &AppHandle) -> Result<SetupSnapshot, String> {
+    // Ensure one current config exists before taking a stable pair snapshot.
+    let (_, config_path) = config::ensure_config_with_path(app)?;
+    config::with_configuration_lock(&config_path, || {
+        let pair = load_configuration_pair(&config_path)?;
+        Ok(SetupSnapshot {
+            draft: draft_from_installed(&pair.app_config, pair.automation_value.as_ref()),
+            revision: pair.revision,
+        })
+    })
+}
+
+pub(crate) fn preview_setup(
+    app: &AppHandle,
+    patch: SetupPatch,
+    expected_revision: &str,
+) -> Result<SetupPreview, String> {
+    let config_path = app_config_path(app)?;
+    config::with_configuration_lock(&config_path, || {
+        let pair = load_configuration_pair(&config_path)?;
+        preview_setup_patch(&pair, &patch, expected_revision)
+    })
+}
+
+fn preview_setup_patch(
+    pair: &ConfigurationPair,
+    patch: &SetupPatch,
+    expected_revision: &str,
+) -> Result<SetupPreview, String> {
+    if pair.revision != expected_revision {
+        return Err(format!(
+            "The setup changed after this screen was opened. Refresh before previewing. Expected revision {expected_revision}, current revision {}.",
+            pair.revision
+        ));
+    }
+    let prepared = prepare_setup_patch(pair, patch)?;
+    let mut app_config_preview = pair.app_config.clone();
+    apply_app_config_patch(
+        &mut app_config_preview,
+        patch,
+        &prepared.generated.app_config,
+    );
+    let automation_config_preview = if pair.automation_value.is_some() {
+        prepared.next_automation_value
+    } else {
+        prepared.generated.automation_config.clone()
+    };
+    Ok(SetupPreview {
+        workspace_base: prepared
+            .generated
+            .workspace_base
+            .to_string_lossy()
+            .to_string(),
+        folder_plan: folder_plan(&prepared.generated.folder_specs),
+        app_config_preview,
+        automation_config_preview,
+        warnings: prepared.generated.warnings,
+    })
+}
+
+#[cfg(test)]
+fn preview_setup_draft(draft: SetupDraft) -> Result<SetupPreview, String> {
     let generated = GeneratedSetup::from_draft(&draft)?;
     Ok(SetupPreview {
         workspace_base: generated.workspace_base.to_string_lossy().to_string(),
@@ -284,7 +425,8 @@ pub(crate) fn remove_setup_created_empty_folders(
 
 pub(crate) fn save_setup_config(
     app: &AppHandle,
-    draft: SetupDraft,
+    patch: SetupPatch,
+    expected_revision: String,
     confirmed: bool,
 ) -> Result<SaveSetupResult, String> {
     if !confirmed {
@@ -294,48 +436,247 @@ pub(crate) fn save_setup_config(
         );
     }
 
-    let mut generated = GeneratedSetup::from_draft(&draft)?;
-    // Saving setup must not reset the hotel's visual branding or templates.
-    if let Ok(existing) = config::ensure_config(app) {
-        generated.app_config.language = existing.language;
-        generated.app_config.client.branding = existing.client.branding;
-        generated.app_config.templates = existing.templates;
-    }
     let app_config_path = app_config_path(app)?;
-    let automation_config_path =
-        PathBuf::from(&generated.app_config.automation.automation_config_path);
+    let _workflow_lock =
+        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
+            "Wait for the current automation to finish before saving setup.".to_string()
+        })?;
+    config::with_configuration_lock(&app_config_path, || {
+        apply_setup_patch_with_app_locked(app, &app_config_path, patch, &expected_revision)
+    })
+}
 
-    let automation_parent = automation_config_path
+pub(crate) fn assert_setup_revision(
+    app: &AppHandle,
+    expected_revision: &str,
+) -> Result<(), String> {
+    let app_config_path = app_config_path(app)?;
+    config::with_configuration_lock(&app_config_path, || {
+        let pair = load_configuration_pair(&app_config_path)?;
+        if pair.revision != expected_revision {
+            return Err(
+                "The setup changed after this screen was opened. Refresh before continuing."
+                    .to_string(),
+            );
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+fn apply_setup_patch_locked(
+    app_config_path: &Path,
+    patch: SetupPatch,
+    expected_revision: &str,
+) -> Result<SaveSetupResult, String> {
+    apply_setup_patch_core(app_config_path, patch, expected_revision, |_, _, _| {
+        Ok(None)
+    })
+}
+
+fn apply_setup_patch_with_app_locked(
+    app: &AppHandle,
+    app_config_path: &Path,
+    patch: SetupPatch,
+    expected_revision: &str,
+) -> Result<SaveSetupResult, String> {
+    apply_setup_patch_core(
+        app_config_path,
+        patch,
+        expected_revision,
+        |pair, next_app_bytes, next_automation_bytes| {
+            let point = recovery::create_configuration_point_from_bytes_locked(
+                app,
+                &pair.app_bytes,
+                pair.automation_bytes.as_deref(),
+            )?;
+            let journal = SetupTransactionJournal {
+                schema_version: SETUP_TRANSACTION_SCHEMA,
+                recovery_point_id: point.id.clone(),
+                app_config_path: pair.app_config_path.to_string_lossy().to_string(),
+                old_app_sha256: sha256_bytes(&pair.app_bytes),
+                new_app_sha256: sha256_bytes(next_app_bytes),
+                old_automation_path: pair.automation_config_path.to_string_lossy().to_string(),
+                new_automation_path: String::new(),
+                old_automation_existed: pair.automation_bytes.is_some(),
+                old_automation_sha256: pair
+                    .automation_bytes
+                    .as_ref()
+                    .map(|bytes| sha256_bytes(bytes)),
+                new_automation_sha256: sha256_bytes(next_automation_bytes),
+            };
+            Ok(Some((journal, point.id)))
+        },
+    )
+}
+
+fn apply_setup_patch_core<F>(
+    app_config_path: &Path,
+    patch: SetupPatch,
+    expected_revision: &str,
+    create_transaction: F,
+) -> Result<SaveSetupResult, String>
+where
+    F: FnOnce(
+        &ConfigurationPair,
+        &[u8],
+        &[u8],
+    ) -> Result<Option<(SetupTransactionJournal, String)>, String>,
+{
+    let pair = load_configuration_pair(app_config_path)?;
+    if pair.revision != expected_revision {
+        return Err(format!(
+            "The setup changed after this screen was opened. Refresh before saving. Expected revision {expected_revision}, current revision {}.",
+            pair.revision
+        ));
+    }
+
+    if patch.is_empty() && pair.automation_bytes.is_some() {
+        return Ok(SaveSetupResult {
+            app_config_path: pair.app_config_path.to_string_lossy().to_string(),
+            automation_config_path: pair.automation_config_path.to_string_lossy().to_string(),
+            backups: Vec::new(),
+            validation: preflight::build_preflight_report(&pair.app_config),
+            revision: pair.revision,
+        });
+    }
+
+    let prepared = prepare_setup_patch(&pair, &patch)?;
+    let PreparedSetupPatch {
+        generated,
+        next_automation_value,
+    } = prepared;
+    let legacy_app =
+        pair.app_value.get("schemaVersion").is_none() && pair.app_value.get("paths").is_some();
+    let mut next_app_value = if legacy_app {
+        // Normalize known legacy fields into the current schema before applying
+        // a patch. Retain the complete original document as extensions so no
+        // hotel-specific legacy or unknown value disappears.
+        merge_json_preserving_extensions(
+            pair.app_value.clone(),
+            serde_json::to_value(&pair.app_config)
+                .map_err(|error| format!("Could not migrate InnPilot setup: {error}"))?,
+        )
+    } else {
+        pair.app_value.clone()
+    };
+    apply_app_patch(&mut next_app_value, &patch, &generated.app_config)?;
+
+    let app_changed = patch_changes_app(&patch) && next_app_value != pair.app_value;
+    let automation_changed = pair.automation_value.as_ref() != Some(&next_automation_value);
+
+    let next_app_bytes = if app_changed {
+        serde_json::to_vec_pretty(&next_app_value)
+            .map_err(|error| format!("Could not prepare InnPilot setup: {error}"))?
+    } else {
+        pair.app_bytes.clone()
+    };
+    let next_automation_bytes = if automation_changed {
+        serde_json::to_vec_pretty(&next_automation_value)
+            .map_err(|error| format!("Could not prepare automation setup: {error}"))?
+    } else {
+        pair.automation_bytes
+            .clone()
+            .ok_or_else(|| "The current automation setup is missing.".to_string())?
+    };
+
+    let next_app_text = std::str::from_utf8(&next_app_bytes)
+        .map_err(|_| "Prepared InnPilot settings are not valid UTF-8.".to_string())?;
+    let (next_app_config, _) =
+        config::parse_config_with_migration_at_path(next_app_text, &pair.app_config_path)?;
+    let automation_path = PathBuf::from(&next_app_config.automation.automation_config_path);
+    let automation_parent = automation_path
         .parent()
         .ok_or_else(|| "Automation setup file path is missing a parent folder.".to_string())?;
-    if !automation_parent.exists() {
-        return Err(
-            "Automation setup folder is missing. Create the workspace folders before saving setup."
-                .to_string(),
-        );
-    }
     if !automation_parent.is_dir() {
-        return Err("Automation setup folder path is not a folder.".to_string());
+        if pair.automation_bytes.is_none() && automation_path == pair.automation_config_path {
+            fs::create_dir_all(automation_parent).map_err(|error| {
+                format!("Could not prepare the configured automation setup folder: {error}")
+            })?;
+        } else {
+            return Err(
+                "Automation setup folder is missing. Create the workspace folders before saving setup."
+                    .to_string(),
+            );
+        }
+    }
+    if automation_path != pair.automation_config_path && automation_path.exists() {
+        return Err("The proposed automation setup path already contains another file. InnPilot left both files unchanged.".to_string());
     }
 
-    if let Some(app_parent) = app_config_path.parent() {
-        fs::create_dir_all(app_parent)
-            .map_err(|error| format!("Could not prepare InnPilot setup folder: {error}"))?;
+    let pair_change = app_changed && automation_changed;
+    let transaction = if pair_change {
+        create_transaction(&pair, &next_app_bytes, &next_automation_bytes)?
+    } else {
+        None
+    };
+    let mut backups = transaction
+        .as_ref()
+        .map(|(_, point_id)| vec![point_id.clone()])
+        .unwrap_or_default();
+    if let Some((journal, _)) = &transaction {
+        let mut journal = journal.clone();
+        journal.new_automation_path = automation_path.to_string_lossy().to_string();
+        write_setup_transaction_journal(&pair.app_config_path, &journal)?;
+    }
+    if transaction.is_none() {
+        if app_changed {
+            let path = create_exact_backup(&pair.app_config_path, &pair.app_bytes)?;
+            backups.push(path.to_string_lossy().to_string());
+        }
+        if automation_changed {
+            if let Some(bytes) = &pair.automation_bytes {
+                let path = create_exact_backup(&pair.automation_config_path, bytes)?;
+                backups.push(path.to_string_lossy().to_string());
+            }
+        }
     }
 
-    let mut backups = Vec::new();
-    atomic_write_json_with_backup(&app_config_path, &generated.app_config, &mut backups)?;
-    atomic_write_json_with_backup(
-        &automation_config_path,
-        &generated.automation_config,
-        &mut backups,
-    )?;
+    if automation_changed {
+        if let Err(error) =
+            config::atomic_replace_configuration_bytes(&automation_path, &next_automation_bytes)
+        {
+            return Err(error);
+        }
+    }
+    if app_changed {
+        if let Err(error) =
+            config::atomic_replace_configuration_bytes(&pair.app_config_path, &next_app_bytes)
+        {
+            let rollback = match (
+                &pair.automation_bytes,
+                automation_changed,
+                automation_path == pair.automation_config_path,
+            ) {
+                (_, false, _) => Ok(()),
+                (Some(bytes), true, true) => {
+                    config::atomic_replace_configuration_bytes(&automation_path, bytes)
+                }
+                _ => fs::remove_file(&automation_path)
+                    .or_else(|remove_error| {
+                        (remove_error.kind() == std::io::ErrorKind::NotFound)
+                            .then_some(())
+                            .ok_or(remove_error)
+                    })
+                    .map_err(|remove_error| remove_error.to_string()),
+            };
+            return Err(match rollback {
+                Ok(()) => format!("Setup save was rolled back because InnPilot could not replace its main settings: {error}"),
+                Err(rollback_error) => format!("Setup save failed and automatic rollback also failed: {error}; {rollback_error}"),
+            });
+        }
+    }
+    if transaction.is_some() {
+        clear_setup_transaction_journal(&pair.app_config_path)?;
+    }
 
+    let revision = configuration_revision(&next_app_bytes, Some(&next_automation_bytes));
     Ok(SaveSetupResult {
-        app_config_path: app_config_path.to_string_lossy().to_string(),
-        automation_config_path: automation_config_path.to_string_lossy().to_string(),
-        validation: preflight::build_preflight_report(&generated.app_config),
+        app_config_path: pair.app_config_path.to_string_lossy().to_string(),
+        automation_config_path: automation_path.to_string_lossy().to_string(),
         backups,
+        validation: preflight::build_preflight_report(&next_app_config),
+        revision,
     })
 }
 
@@ -353,6 +694,11 @@ struct GeneratedSetup {
     warnings: Vec<String>,
 }
 
+struct PreparedSetupPatch {
+    generated: GeneratedSetup,
+    next_automation_value: serde_json::Value,
+}
+
 #[derive(Debug)]
 struct FolderSpec {
     label: &'static str,
@@ -361,6 +707,10 @@ struct FolderSpec {
 
 impl GeneratedSetup {
     fn from_draft(draft: &SetupDraft) -> Result<Self, String> {
+        Self::from_draft_with_current(draft, &config::default_config())
+    }
+
+    fn from_draft_with_current(draft: &SetupDraft, current: &HubConfig) -> Result<Self, String> {
         let workspace_base = clean_path(&draft.workspace_base)?;
         validate_workspace_base(&workspace_base)?;
 
@@ -381,7 +731,6 @@ impl GeneratedSetup {
         let contracts_output_default = workspace_base.join("Contracts").join(&year).join("Signed");
         let contracts_logs_default = workspace_base.join("Contracts").join("Logs");
         let support_diagnostics = workspace_base.join("Support").join("Diagnostics");
-        let automation_config_folder = workspace_base.join("automation");
 
         let invoice_input = setup_path_for_mode(
             &draft.setup_mode,
@@ -478,42 +827,29 @@ impl GeneratedSetup {
             label: "Support/Diagnostics",
             path: support_diagnostics,
         });
-        folder_specs.push(FolderSpec {
-            label: "automation",
-            path: automation_config_folder.clone(),
-        });
-
         for spec in &folder_specs {
             validate_setup_folder_path(&workspace_base, &spec.path)?;
         }
 
-        let current = config::default_config();
-        let python_executable = setup_python_executable(&draft.python_executable, &current);
-        let automation_config_path = automation_config_folder.join("config.local.json");
-        let automation_root = PathBuf::from(&current.automation.automation_root_folder);
-        let canonical_scripts = config::canonical_script_paths(&automation_root);
+        let python_executable = setup_python_executable(&draft.python_executable, current);
 
         let app_config = HubConfig {
             schema_version: current.schema_version,
-            language: current.language,
+            language: current.language.clone(),
             client: ClientConfig {
                 display_name: non_empty_or(&draft.hotel_display_name, "Your Hotel"),
-                branding: crate::config::BrandingConfig::default(),
+                branding: current.client.branding.clone(),
             },
             invoice_delivery_mode: draft.invoice_delivery_mode.clone(),
             invoice_file_selection_mode: draft.invoice_file_selection_mode.clone(),
             automation: AutomationConfig {
-                automation_root_folder: current.automation.automation_root_folder,
-                automation_config_path: automation_config_path.to_string_lossy().to_string(),
+                // The workspace is a data location. Changing it must never
+                // silently relocate the installed/custom automation runtime.
+                automation_root_folder: current.automation.automation_root_folder.clone(),
+                automation_config_path: current.automation.automation_config_path.clone(),
                 python_executable,
             },
-            scripts: ScriptPaths {
-                invoice_workflow_script: canonical_scripts.invoice_workflow_script,
-                gmail_draft_script: canonical_scripts.gmail_draft_script,
-                copy_scansioni_script: current.scripts.copy_scansioni_script,
-                ocr_preprocessing_script: current.scripts.ocr_preprocessing_script,
-                contract_processing_script: canonical_scripts.contract_processing_script,
-            },
+            scripts: current.scripts.clone(),
             folders: FolderPaths {
                 invoice_input_folder: path_text(&invoice_input),
                 invoice_output_folder: path_text(&invoice_output),
@@ -533,7 +869,7 @@ impl GeneratedSetup {
                 require_confirmation_for_file_moves: true,
                 redact_logs: draft.redact_logs,
             },
-            templates: Default::default(),
+            templates: current.templates.clone(),
         };
 
         let recipient_rules = draft
@@ -640,6 +976,803 @@ impl GeneratedSetup {
     }
 }
 
+impl SetupPatch {
+    fn is_empty(&self) -> bool {
+        self.setup_mode.is_none()
+            && self.hotel_display_name.is_none()
+            && self.email_signature_name.is_none()
+            && self.workspace_base.is_none()
+            && self.python_executable.is_none()
+            && self.invoice_delivery_mode.is_none()
+            && self.invoice_file_selection_mode.is_none()
+            && self.gmail_subject.is_none()
+            && self.cc_email.is_none()
+            && self.gmail_credentials_file.is_none()
+            && self.gmail_token_file.is_none()
+            && self.invoice_input_folder.is_none()
+            && self.invoice_output_folder.is_none()
+            && self.invoice_archive_folder.is_none()
+            && self.invoice_log_folder.is_none()
+            && self.invoice_input_patterns.is_none()
+            && self.recipient_rules.is_none()
+            && self.contract_year.is_none()
+            && self.scanner_filename_prefixes.is_none()
+            && self.contract_marker_texts.is_none()
+            && self.shared_scan_folder.is_none()
+            && self.scans_local_cache_folder.is_none()
+            && self.ocr_text_output_folder.is_none()
+            && self.signed_contracts_output_folder.is_none()
+            && self.contract_log_folder.is_none()
+            && self.safe_mode.is_none()
+            && self.archive_originals.is_none()
+            && self.redact_logs.is_none()
+    }
+
+    fn apply_to(&self, mut draft: SetupDraft) -> SetupDraft {
+        macro_rules! apply {
+            ($($field:ident),+ $(,)?) => {$(
+                if let Some(value) = &self.$field {
+                    draft.$field = value.clone();
+                }
+            )+};
+        }
+        apply!(
+            setup_mode,
+            hotel_display_name,
+            email_signature_name,
+            workspace_base,
+            python_executable,
+            invoice_delivery_mode,
+            invoice_file_selection_mode,
+            gmail_subject,
+            cc_email,
+            gmail_credentials_file,
+            gmail_token_file,
+            invoice_input_folder,
+            invoice_output_folder,
+            invoice_archive_folder,
+            invoice_log_folder,
+            invoice_input_patterns,
+            recipient_rules,
+            contract_year,
+            scanner_filename_prefixes,
+            contract_marker_texts,
+            shared_scan_folder,
+            scans_local_cache_folder,
+            ocr_text_output_folder,
+            signed_contracts_output_folder,
+            contract_log_folder,
+            safe_mode,
+            archive_originals,
+            redact_logs,
+        );
+        draft
+    }
+}
+
+fn load_configuration_pair(app_config_path: &Path) -> Result<ConfigurationPair, String> {
+    let app_bytes = fs::read(app_config_path)
+        .map_err(|error| format!("Could not read the current InnPilot settings: {error}"))?;
+    let app_text = std::str::from_utf8(&app_bytes)
+        .map_err(|_| "The current InnPilot settings are not valid UTF-8.".to_string())?;
+    let app_value: serde_json::Value = serde_json::from_slice(&app_bytes)
+        .map_err(|error| format!("The current InnPilot settings are invalid: {error}"))?;
+    let schema_version = app_value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if schema_version > u64::from(config::CONFIG_VERSION) {
+        return Err(format!(
+            "InnPilot cannot edit configuration schema version {schema_version}; this app supports up to version {}.",
+            config::CONFIG_VERSION
+        ));
+    }
+    let (app_config, _) = config::parse_config_with_migration_at_path(app_text, app_config_path)?;
+    let automation_config_path = PathBuf::from(&app_config.automation.automation_config_path);
+    let (automation_bytes, automation_value) = if automation_config_path.exists() {
+        let bytes = fs::read(&automation_config_path)
+            .map_err(|error| format!("Could not read the current automation setup: {error}"))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("The current automation setup is invalid: {error}"))?;
+        if !value.is_object() {
+            return Err("The current automation setup must be a JSON object.".to_string());
+        }
+        (Some(bytes), Some(value))
+    } else {
+        (None, None)
+    };
+    let revision = configuration_revision(&app_bytes, automation_bytes.as_deref());
+    Ok(ConfigurationPair {
+        app_config_path: app_config_path.to_path_buf(),
+        app_bytes,
+        app_value,
+        app_config,
+        automation_config_path,
+        automation_bytes,
+        automation_value,
+        revision,
+    })
+}
+
+fn configuration_revision(app_bytes: &[u8], automation_bytes: Option<&[u8]>) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"innpilot-configuration-pair-v1\0");
+    digest.update((app_bytes.len() as u64).to_be_bytes());
+    digest.update(app_bytes);
+    match automation_bytes {
+        Some(bytes) => {
+            digest.update([1]);
+            digest.update((bytes.len() as u64).to_be_bytes());
+            digest.update(bytes);
+        }
+        None => digest.update([0]),
+    }
+    format!("sha256:{:x}", digest.finalize())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn setup_transaction_path(app_config_path: &Path) -> Result<PathBuf, String> {
+    app_config_path
+        .parent()
+        .map(|parent| parent.join(SETUP_TRANSACTION_FILE))
+        .ok_or_else(|| "The InnPilot settings path has no parent folder.".to_string())
+}
+
+fn read_setup_transaction_journal(
+    app_config_path: &Path,
+) -> Result<Option<SetupTransactionJournal>, String> {
+    let path = setup_transaction_path(app_config_path)?;
+    let metadata = match fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect the setup transaction journal: {error}"
+            ));
+        }
+    };
+    if metadata.len() > MAX_SETUP_TRANSACTION_BYTES {
+        return Err(
+            "The setup transaction journal is too large and cannot be trusted.".to_string(),
+        );
+    }
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not read the setup transaction journal: {error}"
+            ));
+        }
+    };
+    let journal: SetupTransactionJournal = serde_json::from_slice(&bytes)
+        .map_err(|_| "The setup transaction journal is damaged.".to_string())?;
+    if journal.schema_version != SETUP_TRANSACTION_SCHEMA
+        || PathBuf::from(&journal.app_config_path) != app_config_path
+    {
+        return Err(
+            "The setup transaction journal is not valid for this InnPilot installation."
+                .to_string(),
+        );
+    }
+    Ok(Some(journal))
+}
+
+fn write_setup_transaction_journal(
+    app_config_path: &Path,
+    journal: &SetupTransactionJournal,
+) -> Result<(), String> {
+    let path = setup_transaction_path(app_config_path)?;
+    let bytes = serde_json::to_vec_pretty(journal)
+        .map_err(|error| format!("Could not prepare the setup transaction journal: {error}"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The setup transaction journal has no parent folder.".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not prepare the setup transaction folder: {error}"))?;
+    let temp = path.with_file_name(format!(
+        ".{}.{}.{}.tmp",
+        SETUP_TRANSACTION_FILE,
+        std::process::id(),
+        SETUP_BACKUP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)
+            .map_err(|error| format!("Could not create the setup transaction journal: {error}"))?;
+        file.write_all(&bytes)
+            .map_err(|error| format!("Could not write the setup transaction journal: {error}"))?;
+        file.sync_all().map_err(|error| {
+            format!("Could not safely flush the setup transaction journal: {error}")
+        })?;
+        drop(file);
+        config::atomic_replace_configuration_bytes(&path, &bytes)
+    })();
+    let _ = fs::remove_file(&temp);
+    result
+}
+
+fn clear_setup_transaction_journal(app_config_path: &Path) -> Result<(), String> {
+    let path = setup_transaction_path(app_config_path)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Could not clear the completed setup transaction: {error}"
+        )),
+    }
+}
+
+fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Could not inspect setup transaction state: {error}"
+        )),
+    }
+}
+
+fn restore_recovery_bytes(
+    bytes: &[u8],
+    target: &Path,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    if sha256_bytes(&bytes) != expected_sha256 {
+        return Err("The setup recovery point failed its integrity check.".to_string());
+    }
+    config::atomic_replace_configuration_bytes(target, bytes)
+}
+
+fn classify_setup_transaction_state(
+    app_config_path: &Path,
+    journal: &SetupTransactionJournal,
+) -> Result<SetupTransactionState, String> {
+    let old_automation_path = PathBuf::from(&journal.old_automation_path);
+    let new_automation_path = PathBuf::from(&journal.new_automation_path);
+    let app_state = read_optional_file(app_config_path)?
+        .map(|bytes| sha256_bytes(&bytes))
+        .ok_or_else(|| "InnPilot settings are missing during setup recovery.".to_string())?;
+    let new_automation_state =
+        read_optional_file(&new_automation_path)?.map(|bytes| sha256_bytes(&bytes));
+    if app_state == journal.new_app_sha256
+        && new_automation_state.as_deref() == Some(&journal.new_automation_sha256)
+    {
+        return Ok(SetupTransactionState::Committed);
+    }
+    let app_is_old = app_state == journal.old_app_sha256;
+    let automation_is_old = if old_automation_path == new_automation_path {
+        new_automation_state.as_deref() == journal.old_automation_sha256.as_deref()
+    } else {
+        let old_state = read_optional_file(&old_automation_path)?.map(|bytes| sha256_bytes(&bytes));
+        old_state.as_deref() == journal.old_automation_sha256.as_deref()
+            && new_automation_state.is_none()
+    };
+    if app_is_old && automation_is_old {
+        Ok(SetupTransactionState::Unchanged)
+    } else {
+        Ok(SetupTransactionState::NeedsRollback)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupTransactionState {
+    Committed,
+    Unchanged,
+    NeedsRollback,
+}
+
+/// Reconciles a setup transaction interrupted between its two atomic file
+/// replacements. This must run before config migration and before the runner.
+pub(crate) fn reconcile_incomplete_setup(app: &AppHandle) -> Result<(), String> {
+    let app_config_path = app_config_path(app)?;
+    let journal_path = setup_transaction_path(&app_config_path)?;
+    if !journal_path.exists() {
+        return Ok(());
+    }
+    let _workflow_lock =
+        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
+            "InnPilot cannot recover an incomplete setup while an automation is running."
+                .to_string()
+        })?;
+    config::with_configuration_lock(&app_config_path, || {
+        let journal = read_setup_transaction_journal(&app_config_path)?.ok_or_else(|| {
+            "The setup transaction journal disappeared during recovery.".to_string()
+        })?;
+
+        let old_automation_path = PathBuf::from(&journal.old_automation_path);
+        let new_automation_path = PathBuf::from(&journal.new_automation_path);
+        let (recovery_app, recovery_automation) =
+            recovery::read_configuration_point_bytes(app, &journal.recovery_point_id)?;
+        let recovery_app_text = std::str::from_utf8(&recovery_app)
+            .map_err(|_| "The setup recovery settings are not valid UTF-8.".to_string())?;
+        let (recovery_config, _) =
+            config::parse_config_with_migration_at_path(recovery_app_text, &app_config_path)?;
+        let expected_automation_path =
+            PathBuf::from(recovery_config.automation.automation_config_path);
+        if old_automation_path != expected_automation_path
+            || new_automation_path != expected_automation_path
+            || journal.old_automation_existed != recovery_automation.is_some()
+        {
+            return Err(
+                "The setup transaction journal does not match its verified recovery point."
+                    .to_string(),
+            );
+        }
+        match classify_setup_transaction_state(&app_config_path, &journal)? {
+            SetupTransactionState::Committed | SetupTransactionState::Unchanged => {
+                return clear_setup_transaction_journal(&app_config_path);
+            }
+            SetupTransactionState::NeedsRollback => {}
+        }
+
+        restore_recovery_bytes(&recovery_app, &app_config_path, &journal.old_app_sha256)?;
+        if journal.old_automation_existed {
+            let expected = journal.old_automation_sha256.as_deref().ok_or_else(|| {
+                "The setup transaction is missing its automation recovery digest.".to_string()
+            })?;
+            let recovery_automation = recovery_automation.as_deref().ok_or_else(|| {
+                "The setup recovery point does not contain automation settings.".to_string()
+            })?;
+            restore_recovery_bytes(recovery_automation, &old_automation_path, expected)?;
+        }
+        if new_automation_path != old_automation_path {
+            match fs::remove_file(&new_automation_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not remove an incomplete setup file: {error}"
+                    ));
+                }
+            }
+        } else if !journal.old_automation_existed {
+            let _ = fs::remove_file(&new_automation_path);
+        }
+        clear_setup_transaction_journal(&app_config_path)
+    })
+}
+
+fn draft_from_installed(app: &HubConfig, automation: Option<&serde_json::Value>) -> SetupDraft {
+    let get_string = |pointer: &str| {
+        automation
+            .and_then(|value| value.pointer(pointer))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let get_string_list = |plural: &str, singular: &str, fallback: &str| {
+        let values = automation
+            .and_then(|value| value.pointer(plural))
+            .and_then(serde_json::Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|values| !values.is_empty());
+        values.unwrap_or_else(|| {
+            let singular = get_string(singular);
+            vec![if singular.is_empty() {
+                fallback.to_string()
+            } else {
+                singular
+            }]
+        })
+    };
+    let recipient_rules = automation
+        .and_then(|value| value.pointer("/invoice/recipientRules"))
+        .and_then(serde_json::Value::as_array)
+        .map(|rules| {
+            rules
+                .iter()
+                .enumerate()
+                .filter_map(|(index, rule)| {
+                    let object = rule.as_object()?;
+                    Some(RecipientRuleDraft {
+                        id: Some(format!("installed-rule-{index}")),
+                        match_text: object
+                            .get("match")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        email: object
+                            .get("email")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|rules| !rules.is_empty())
+        .unwrap_or_else(|| {
+            vec![RecipientRuleDraft {
+                id: Some("installed-rule-0".to_string()),
+                match_text: String::new(),
+                email: String::new(),
+            }]
+        });
+    let bool_at = |pointer: &str, fallback: bool| {
+        automation
+            .and_then(|value| value.pointer(pointer))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(fallback)
+    };
+    let workspace_base = workspace_base_from_config(app)
+        .to_string_lossy()
+        .to_string();
+    SetupDraft {
+        setup_mode: if automation.is_some() {
+            SetupMode::ExistingFolders
+        } else {
+            SetupMode::NewWorkspace
+        },
+        hotel_display_name: app.client.display_name.clone(),
+        email_signature_name: get_string("/client/emailSignatureName"),
+        workspace_base,
+        python_executable: app.automation.python_executable.clone(),
+        invoice_delivery_mode: app.invoice_delivery_mode.clone(),
+        invoice_file_selection_mode: app.invoice_file_selection_mode.clone(),
+        gmail_subject: get_string("/gmail/subject"),
+        cc_email: get_string("/gmail/ccEmail"),
+        gmail_credentials_file: get_string("/paths/gmailCredentialsFile"),
+        gmail_token_file: app.gmail.token_path.clone(),
+        invoice_input_folder: app.folders.invoice_input_folder.clone(),
+        invoice_output_folder: app.folders.invoice_output_folder.clone(),
+        invoice_archive_folder: app.folders.invoice_archive_folder.clone(),
+        invoice_log_folder: app.folders.invoice_log_folder.clone(),
+        invoice_input_patterns: get_string_list(
+            "/invoice/inputGlobs",
+            "/invoice/inputGlob",
+            "*.pdf",
+        ),
+        recipient_rules,
+        contract_year: get_string("/contracts/year"),
+        scanner_filename_prefixes: get_string_list(
+            "/contracts/scannerFilePrefixes",
+            "/contracts/scannerFilePrefix",
+            "Sharp MFP",
+        ),
+        contract_marker_texts: get_string_list(
+            "/contracts/contractMarkers",
+            "/contracts/contractMarker",
+            "Oggetto: Contratto di lavoro subordinato a tempo determinato",
+        ),
+        shared_scan_folder: app.folders.scansioni_network_share.clone(),
+        scans_local_cache_folder: app.folders.scansioni_local_cache_folder.clone(),
+        ocr_text_output_folder: app.folders.ocr_text_output_folder.clone(),
+        signed_contracts_output_folder: app.folders.contracts_output_folder.clone(),
+        contract_log_folder: app.folders.contract_log_folder.clone(),
+        safe_mode: app.safety.dry_run_default,
+        archive_originals: bool_at("/safety/archiveSuccessfulOriginals", true),
+        redact_logs: app.safety.redact_logs,
+    }
+}
+
+fn workspace_base_from_config(config: &HubConfig) -> PathBuf {
+    let invoice_input = PathBuf::from(&config.folders.invoice_input_folder);
+    invoice_input
+        .ancestors()
+        .nth(2)
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            let config_path = PathBuf::from(&config.automation.automation_config_path);
+            config_path
+                .parent()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+        })
+        .unwrap_or_else(|| PathBuf::from(r"C:\InnPilot\workspace"))
+}
+
+fn apply_app_patch(
+    target: &mut serde_json::Value,
+    patch: &SetupPatch,
+    generated: &HubConfig,
+) -> Result<(), String> {
+    let generated = serde_json::to_value(generated)
+        .map_err(|error| format!("Could not prepare InnPilot setup: {error}"))?;
+    let mut pointers = Vec::new();
+    macro_rules! map_if {
+        ($field:ident, $($pointer:literal),+ $(,)?) => {
+            if patch.$field.is_some() { $(pointers.push($pointer);)+ }
+        };
+    }
+    map_if!(hotel_display_name, "/client/displayName");
+    map_if!(python_executable, "/automation/pythonExecutable");
+    map_if!(invoice_delivery_mode, "/invoiceDeliveryMode");
+    map_if!(invoice_file_selection_mode, "/invoiceFileSelectionMode");
+    map_if!(gmail_token_file, "/gmail/tokenPath");
+    map_if!(invoice_input_folder, "/folders/invoiceInputFolder");
+    map_if!(invoice_output_folder, "/folders/invoiceOutputFolder");
+    map_if!(invoice_archive_folder, "/folders/invoiceArchiveFolder");
+    map_if!(invoice_log_folder, "/folders/invoiceLogFolder");
+    map_if!(shared_scan_folder, "/folders/scansioniNetworkShare");
+    map_if!(
+        scans_local_cache_folder,
+        "/folders/scansioniLocalCacheFolder"
+    );
+    map_if!(ocr_text_output_folder, "/folders/ocrTextOutputFolder");
+    map_if!(
+        signed_contracts_output_folder,
+        "/folders/contractsOutputFolder"
+    );
+    map_if!(contract_log_folder, "/folders/contractLogFolder");
+    map_if!(safe_mode, "/safety/dryRunDefault");
+    map_if!(redact_logs, "/safety/redactLogs");
+    for pointer in pointers {
+        let value = generated
+            .pointer(pointer)
+            .cloned()
+            .ok_or_else(|| format!("Generated setup is missing {pointer}."))?;
+        set_json_pointer(target, pointer, value)?;
+    }
+    Ok(())
+}
+
+fn patch_changes_app(patch: &SetupPatch) -> bool {
+    patch.hotel_display_name.is_some()
+        || patch.python_executable.is_some()
+        || patch.invoice_delivery_mode.is_some()
+        || patch.invoice_file_selection_mode.is_some()
+        || patch.gmail_token_file.is_some()
+        || patch.invoice_input_folder.is_some()
+        || patch.invoice_output_folder.is_some()
+        || patch.invoice_archive_folder.is_some()
+        || patch.invoice_log_folder.is_some()
+        || patch.shared_scan_folder.is_some()
+        || patch.scans_local_cache_folder.is_some()
+        || patch.ocr_text_output_folder.is_some()
+        || patch.signed_contracts_output_folder.is_some()
+        || patch.contract_log_folder.is_some()
+        || patch.safe_mode.is_some()
+        || patch.redact_logs.is_some()
+}
+
+fn merge_json_preserving_extensions(
+    installed: serde_json::Value,
+    known: serde_json::Value,
+) -> serde_json::Value {
+    match (installed, known) {
+        (serde_json::Value::Object(mut installed), serde_json::Value::Object(known)) => {
+            for (key, known_value) in known {
+                let value = installed
+                    .remove(&key)
+                    .map(|installed_value| {
+                        merge_json_preserving_extensions(installed_value, known_value.clone())
+                    })
+                    .unwrap_or(known_value);
+                installed.insert(key, value);
+            }
+            serde_json::Value::Object(installed)
+        }
+        (_, known) => known,
+    }
+}
+
+fn apply_app_config_patch(target: &mut HubConfig, patch: &SetupPatch, generated: &HubConfig) {
+    macro_rules! apply_if {
+        ($patch_field:ident, $($target:ident).+ $(,)?) => {
+            if patch.$patch_field.is_some() {
+                target.$($target).+ = generated.$($target).+.clone();
+            }
+        };
+    }
+    apply_if!(hotel_display_name, client.display_name);
+    apply_if!(python_executable, automation.python_executable);
+    apply_if!(invoice_delivery_mode, invoice_delivery_mode);
+    apply_if!(invoice_file_selection_mode, invoice_file_selection_mode);
+    apply_if!(gmail_token_file, gmail.token_path);
+    apply_if!(invoice_input_folder, folders.invoice_input_folder);
+    apply_if!(invoice_output_folder, folders.invoice_output_folder);
+    apply_if!(invoice_archive_folder, folders.invoice_archive_folder);
+    apply_if!(invoice_log_folder, folders.invoice_log_folder);
+    apply_if!(shared_scan_folder, folders.scansioni_network_share);
+    apply_if!(
+        scans_local_cache_folder,
+        folders.scansioni_local_cache_folder
+    );
+    apply_if!(ocr_text_output_folder, folders.ocr_text_output_folder);
+    apply_if!(
+        signed_contracts_output_folder,
+        folders.contracts_output_folder
+    );
+    apply_if!(contract_log_folder, folders.contract_log_folder);
+    apply_if!(safe_mode, safety.dry_run_default);
+    apply_if!(redact_logs, safety.redact_logs);
+}
+
+fn prepare_setup_patch(
+    pair: &ConfigurationPair,
+    patch: &SetupPatch,
+) -> Result<PreparedSetupPatch, String> {
+    let draft = patch.apply_to(draft_from_installed(
+        &pair.app_config,
+        pair.automation_value.as_ref(),
+    ));
+    let generated = GeneratedSetup::from_draft_with_current(&draft, &pair.app_config)?;
+    let mut next_automation_value = pair
+        .automation_value
+        .clone()
+        .unwrap_or_else(|| generated.automation_config.clone());
+    if pair.automation_value.is_some() {
+        apply_automation_patch(&mut next_automation_value, patch, &generated)?;
+    }
+    Ok(PreparedSetupPatch {
+        generated,
+        next_automation_value,
+    })
+}
+
+fn apply_automation_patch(
+    target: &mut serde_json::Value,
+    patch: &SetupPatch,
+    generated: &GeneratedSetup,
+) -> Result<(), String> {
+    if !target.is_object() {
+        return Err("The current automation setup must be a JSON object.".to_string());
+    }
+    let generated_value = &generated.automation_config;
+    let mut mappings: Vec<(&str, &str)> = Vec::new();
+    macro_rules! map_if {
+        ($field:ident, $($pointer:literal),+ $(,)?) => {
+            if patch.$field.is_some() { $(mappings.push(($pointer, $pointer));)+ }
+        };
+    }
+    map_if!(hotel_display_name, "/client/displayName");
+    map_if!(email_signature_name, "/client/emailSignatureName");
+    map_if!(gmail_subject, "/gmail/subject");
+    map_if!(cc_email, "/gmail/ccEmail");
+    map_if!(gmail_credentials_file, "/paths/gmailCredentialsFile");
+    map_if!(gmail_token_file, "/paths/gmailTokenFile");
+    map_if!(invoice_input_folder, "/paths/invoiceInputDir");
+    map_if!(invoice_output_folder, "/paths/invoiceOutputDir");
+    map_if!(invoice_archive_folder, "/paths/invoiceArchiveDir");
+    map_if!(invoice_log_folder, "/paths/invoiceLogDir");
+    map_if!(shared_scan_folder, "/paths/scanSourceDir");
+    map_if!(scans_local_cache_folder, "/paths/scanCacheDir");
+    map_if!(ocr_text_output_folder, "/paths/contractOcrTextDir");
+    map_if!(
+        signed_contracts_output_folder,
+        "/paths/contractDestinationDir"
+    );
+    map_if!(contract_log_folder, "/paths/contractLogDir");
+    map_if!(invoice_delivery_mode, "/invoice/deliveryMode");
+    map_if!(invoice_file_selection_mode, "/invoice/fileSelectionMode");
+    map_if!(
+        invoice_input_patterns,
+        "/invoice/inputGlob",
+        "/invoice/inputGlobs"
+    );
+    map_if!(
+        scanner_filename_prefixes,
+        "/contracts/scannerFilePrefix",
+        "/contracts/scannerFilePrefixes"
+    );
+    map_if!(
+        contract_marker_texts,
+        "/contracts/contractMarker",
+        "/contracts/contractMarkers"
+    );
+    map_if!(contract_year, "/contracts/year");
+    map_if!(safe_mode, "/safety/dryRunDefault");
+    map_if!(archive_originals, "/safety/archiveSuccessfulOriginals");
+    map_if!(redact_logs, "/safety/redactLogs");
+    if let Some(rules) = &patch.recipient_rules {
+        let merged = merge_recipient_rules(target, rules);
+        set_json_pointer(target, "/invoice/recipientRules", merged)?;
+    }
+    if patch.workspace_base.is_some() {
+        mappings.extend([
+            ("/paths/invoiceInputDir", "/paths/invoiceInputDir"),
+            ("/paths/invoiceOutputDir", "/paths/invoiceOutputDir"),
+            ("/paths/invoiceArchiveDir", "/paths/invoiceArchiveDir"),
+            ("/paths/invoiceLogDir", "/paths/invoiceLogDir"),
+        ]);
+    }
+    for (target_pointer, source_pointer) in mappings {
+        let value = generated_value
+            .pointer(source_pointer)
+            .cloned()
+            .ok_or_else(|| format!("Generated setup is missing {source_pointer}."))?;
+        set_json_pointer(target, target_pointer, value)?;
+    }
+    Ok(())
+}
+
+fn merge_recipient_rules(
+    target: &serde_json::Value,
+    requested: &[RecipientRuleDraft],
+) -> serde_json::Value {
+    let existing = target
+        .pointer("/invoice/recipientRules")
+        .and_then(serde_json::Value::as_array);
+    let mut merged = Vec::new();
+
+    for rule in requested {
+        let installed_index = rule
+            .id
+            .as_deref()
+            .and_then(|id| id.strip_prefix("installed-rule-"))
+            .and_then(|index| index.parse::<usize>().ok());
+        let existing_object = installed_index
+            .and_then(|index| existing.and_then(|rules| rules.get(index)))
+            .and_then(serde_json::Value::as_object);
+
+        // Empty newly-added rows are UI placeholders. An installed row is
+        // retained even when its editable values are empty so its custom
+        // metadata is not silently discarded; explicit removal omits its id.
+        if existing_object.is_none()
+            && rule.match_text.trim().is_empty()
+            && rule.email.trim().is_empty()
+        {
+            continue;
+        }
+
+        let mut object = existing_object.cloned().unwrap_or_default();
+        object.insert(
+            "match".to_string(),
+            serde_json::Value::String(rule.match_text.trim().to_string()),
+        );
+        object.insert(
+            "email".to_string(),
+            serde_json::Value::String(rule.email.trim().to_string()),
+        );
+        merged.push(serde_json::Value::Object(object));
+    }
+
+    serde_json::Value::Array(merged)
+}
+
+fn set_json_pointer(
+    root: &mut serde_json::Value,
+    pointer: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let mut segments = pointer.trim_start_matches('/').split('/').peekable();
+    let mut current = root;
+    while let Some(segment) = segments.next() {
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| format!("Cannot update non-object configuration path {pointer}."))?;
+        if segments.peek().is_none() {
+            object.insert(segment.to_string(), value);
+            return Ok(());
+        }
+        current = object
+            .entry(segment)
+            .or_insert_with(|| serde_json::json!({}));
+    }
+    Err("Configuration pointer cannot be empty.".to_string())
+}
+
+fn create_exact_backup(path: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = SETUP_BACKUP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.json");
+    let backup = path.with_file_name(format!(
+        "{name}.{stamp}.{}.{}.bak",
+        std::process::id(),
+        sequence
+    ));
+    fs::write(&backup, bytes).map_err(|error| format!("Could not create setup backup: {error}"))?;
+    Ok(backup)
+}
+
 fn folder_plan(specs: &[FolderSpec]) -> Vec<FolderPlanItem> {
     specs
         .iter()
@@ -693,6 +1826,7 @@ fn app_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join("config.json"))
 }
 
+#[cfg(test)]
 fn atomic_write_json_with_backup<T: Serialize>(
     path: &Path,
     value: &T,
@@ -743,6 +1877,7 @@ fn atomic_write_json_with_backup<T: Serialize>(
     })
 }
 
+#[cfg(test)]
 fn backup_path(path: &Path) -> PathBuf {
     let stamp = Local::now().format("%Y%m%d%H%M%S");
     let file_name = path
@@ -997,7 +2132,7 @@ mod tests {
         let root = temp_root("preview");
         let draft = draft_for_root(&root);
 
-        let preview = preview_setup(draft).unwrap();
+        let preview = preview_setup_draft(draft).unwrap();
 
         assert!(!root.exists());
         assert!(preview
@@ -1014,7 +2149,7 @@ mod tests {
         let result = initialize_workspace(draft, true).unwrap();
 
         assert!(root.join("Invoices").join("Input").is_dir());
-        assert!(root.join("automation").is_dir());
+        assert!(!root.join("automation").exists());
         assert!(result
             .folders
             .iter()
@@ -1170,7 +2305,7 @@ mod tests {
         let mut draft = draft_for_root(&temp_root("danger"));
         draft.workspace_base = r"C:\".to_string();
 
-        let error = preview_setup(draft).unwrap_err();
+        let error = preview_setup_draft(draft).unwrap_err();
 
         assert!(error.contains("drive root"));
     }
@@ -1341,22 +2476,20 @@ mod tests {
             "Contracts/<year>/Signed",
             "Contracts/Logs",
             "Support/Diagnostics",
-            "automation",
         ] {
             assert!(labels.contains(&expected));
         }
 
+        let defaults = config::default_config();
         assert_eq!(
             generated.app_config.automation.automation_config_path,
-            root.join("automation")
-                .join("config.local.json")
-                .to_string_lossy()
+            defaults.automation.automation_config_path
         );
-        assert!(generated
-            .app_config
-            .automation
-            .automation_root_folder
-            .contains("automation"));
+        assert_eq!(
+            generated.app_config.automation.automation_root_folder,
+            defaults.automation.automation_root_folder
+        );
+        assert_eq!(generated.app_config.scripts, defaults.scripts);
         assert_eq!(
             generated.automation_config["paths"]["invoiceInputDir"]
                 .as_str()
@@ -1458,7 +2591,7 @@ mod tests {
             .folder_specs
             .iter()
             .any(|spec| spec.label == "Invoices/Input"));
-        assert!(generated
+        assert!(!generated
             .folder_specs
             .iter()
             .any(|spec| spec.label == "automation"));
@@ -1478,6 +2611,591 @@ mod tests {
         assert_eq!(backups.len(), 1);
         assert!(Path::new(&backups[0]).is_file());
         assert!(fs::read_to_string(path).unwrap().contains("\"new\""));
+    }
+
+    #[test]
+    fn missing_automation_reconstructs_new_workspace_from_data_paths() {
+        let root = temp_root("missing_automation_snapshot");
+        let data_workspace = root.join("hotel-data");
+        let runtime_root = root.join("managed-runtime");
+        let mut current = config::default_config();
+        current.folders.invoice_input_folder = data_workspace
+            .join("Invoices")
+            .join("Input")
+            .to_string_lossy()
+            .to_string();
+        current.automation.automation_root_folder = runtime_root.to_string_lossy().to_string();
+        current.automation.automation_config_path = runtime_root
+            .join("config.local.json")
+            .to_string_lossy()
+            .to_string();
+
+        let draft = draft_from_installed(&current, None);
+
+        assert_eq!(draft.setup_mode, SetupMode::NewWorkspace);
+        assert_eq!(
+            normalize_path(Path::new(&draft.workspace_base)),
+            normalize_path(&data_workspace)
+        );
+    }
+
+    #[test]
+    fn empty_first_save_bootstraps_the_configured_automation_path() {
+        let root = temp_root("bootstrap_automation_config");
+        let data_workspace = root.join("hotel-data");
+        let runtime_root = root.join("managed-runtime");
+        let automation_path = runtime_root.join("config.local.json");
+        let app_path = root.join("config.json");
+        fs::create_dir_all(&root).unwrap();
+
+        let mut current = config::default_config();
+        current.folders.invoice_input_folder = data_workspace
+            .join("Invoices")
+            .join("Input")
+            .to_string_lossy()
+            .to_string();
+        current.automation.automation_root_folder = runtime_root.to_string_lossy().to_string();
+        current.automation.automation_config_path = automation_path.to_string_lossy().to_string();
+        fs::write(&app_path, serde_json::to_vec_pretty(&current).unwrap()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        assert!(pair.automation_bytes.is_none());
+
+        let result =
+            apply_setup_patch_locked(&app_path, SetupPatch::default(), &pair.revision).unwrap();
+
+        assert_eq!(
+            normalize_path(Path::new(&result.automation_config_path)),
+            normalize_path(&automation_path)
+        );
+        assert!(automation_path.is_file());
+        assert!(!data_workspace.join("automation").exists());
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        assert_eq!(
+            saved.pointer("/paths/invoiceInputDir").unwrap(),
+            &current.folders.invoice_input_folder
+        );
+    }
+
+    #[test]
+    fn changing_data_workspace_preserves_runtime_root_config_path_and_scripts() {
+        let root = temp_root("workspace_preserves_runtime");
+        let runtime_root = root.join("custom-runtime");
+        let automation_path = runtime_root.join("hotel-config.local.json");
+        let mut current = config::default_config();
+        current.automation.automation_root_folder = runtime_root.to_string_lossy().to_string();
+        current.automation.automation_config_path = automation_path.to_string_lossy().to_string();
+        current.scripts.invoice_workflow_script = root
+            .join("custom-scripts")
+            .join("invoice.py")
+            .to_string_lossy()
+            .to_string();
+        current.scripts.gmail_draft_script = root
+            .join("custom-scripts")
+            .join("gmail.py")
+            .to_string_lossy()
+            .to_string();
+        current.scripts.copy_scansioni_script = root
+            .join("custom-scripts")
+            .join("scans.py")
+            .to_string_lossy()
+            .to_string();
+        current.scripts.ocr_preprocessing_script = root
+            .join("custom-scripts")
+            .join("ocr.py")
+            .to_string_lossy()
+            .to_string();
+        current.scripts.contract_processing_script = root
+            .join("custom-scripts")
+            .join("contracts.py")
+            .to_string_lossy()
+            .to_string();
+        let mut draft = draft_from_installed(&current, Some(&serde_json::json!({})));
+        draft.workspace_base = root
+            .join("new-data-workspace")
+            .to_string_lossy()
+            .to_string();
+
+        let generated = GeneratedSetup::from_draft_with_current(&draft, &current).unwrap();
+
+        assert_eq!(generated.app_config.automation, current.automation);
+        assert_eq!(generated.app_config.scripts, current.scripts);
+
+        let expected_automation = serde_json::to_value(&current.automation).unwrap();
+        let expected_scripts = serde_json::to_value(&current.scripts).unwrap();
+        let mut raw = serde_json::to_value(&current).unwrap();
+        apply_app_patch(
+            &mut raw,
+            &SetupPatch {
+                workspace_base: Some(draft.workspace_base),
+                ..SetupPatch::default()
+            },
+            &generated.app_config,
+        )
+        .unwrap();
+        assert_eq!(raw.pointer("/automation").unwrap(), &expected_automation);
+        assert_eq!(raw.pointer("/scripts").unwrap(), &expected_scripts);
+    }
+
+    #[test]
+    fn setup_patch_changes_only_the_requested_mapping_and_preserves_custom_json() {
+        let root = temp_root("preserve_pair");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let before_app: serde_json::Value = serde_json::from_str(&app_fixture).unwrap();
+        let before_automation: serde_json::Value =
+            serde_json::from_str(automation_fixture).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let requested = root.join("Only This Folder").to_string_lossy().to_string();
+
+        let result = apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                invoice_input_folder: Some(requested.clone()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        let mut after_app: serde_json::Value =
+            serde_json::from_slice(&fs::read(&app_path).unwrap()).unwrap();
+        let mut after_automation: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        assert_eq!(
+            after_app.pointer("/folders/invoiceInputFolder").unwrap(),
+            &requested
+        );
+        assert_eq!(
+            after_automation.pointer("/paths/invoiceInputDir").unwrap(),
+            &requested
+        );
+        remove_pointer(&mut after_app, "/folders/invoiceInputFolder");
+        let mut before_app_without_field = before_app;
+        remove_pointer(&mut before_app_without_field, "/folders/invoiceInputFolder");
+        remove_pointer(&mut after_automation, "/paths/invoiceInputDir");
+        let mut before_automation_without_field = before_automation;
+        remove_pointer(
+            &mut before_automation_without_field,
+            "/paths/invoiceInputDir",
+        );
+        assert_eq!(after_app, before_app_without_field);
+        assert_eq!(after_automation, before_automation_without_field);
+        assert_eq!(result.backups.len(), 2);
+    }
+
+    #[test]
+    fn snapshot_preview_and_save_share_one_preservation_aware_candidate() {
+        let root = temp_root("snapshot_preview_save");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let requested = root.join("Previewed Input").to_string_lossy().to_string();
+        let patch = SetupPatch {
+            invoice_input_folder: Some(requested.clone()),
+            ..SetupPatch::default()
+        };
+
+        let preview = preview_setup_patch(&pair, &patch, &pair.revision).unwrap();
+        assert_eq!(
+            preview.app_config_preview.folders.invoice_input_folder,
+            requested
+        );
+        assert_eq!(
+            preview
+                .automation_config_preview
+                .pointer("/paths/invoiceInputDir")
+                .unwrap(),
+            &requested
+        );
+        assert_eq!(
+            preview
+                .automation_config_preview
+                .pointer("/paths/contractInputDir")
+                .unwrap(),
+            "D:\\FakeHotel\\Scansioni\\Cache\\Contratti"
+        );
+
+        apply_setup_patch_locked(&app_path, patch, &pair.revision).unwrap();
+        let saved_app: serde_json::Value =
+            serde_json::from_slice(&fs::read(&app_path).unwrap()).unwrap();
+        let saved_automation: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        assert_eq!(saved_app["folders"]["invoiceInputFolder"], requested);
+        assert_eq!(saved_automation, preview.automation_config_preview);
+    }
+
+    #[test]
+    fn changing_scan_cache_preserves_distinct_contract_input_path() {
+        let root = temp_root("preserve_contract_input");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let requested = root.join("New Scan Cache").to_string_lossy().to_string();
+
+        apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                scans_local_cache_folder: Some(requested.clone()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        assert_eq!(saved["paths"]["scanCacheDir"], requested);
+        assert_eq!(
+            saved["paths"]["contractInputDir"],
+            "D:\\FakeHotel\\Scansioni\\Cache\\Contratti"
+        );
+    }
+
+    #[test]
+    fn legacy_setup_save_migrates_known_fields_and_preserves_legacy_extensions() {
+        let root = temp_root("legacy_setup_save");
+        let app_path = root.join("config.json");
+        fs::create_dir_all(&root).unwrap();
+        let fixture = include_str!("../test-fixtures/config-preservation/app-v1-legacy.json");
+        let original: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        fs::write(&app_path, fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let automation_path = pair.automation_config_path.clone();
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let requested = root.join("Legacy New Input").to_string_lossy().to_string();
+
+        apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                invoice_input_folder: Some(requested.clone()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        let saved_bytes = fs::read(&app_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&saved_bytes).unwrap();
+        assert_eq!(saved["schemaVersion"], config::CONFIG_VERSION);
+        assert_eq!(saved["folders"]["invoiceInputFolder"], requested);
+        assert_eq!(saved["paths"], original["paths"]);
+        assert_eq!(saved["hotel_custom"], original["hotel_custom"]);
+        assert_eq!(saved["legacy_support"], original["legacy_support"]);
+        let (reloaded, should_rewrite) =
+            config::parse_config_with_migration(std::str::from_utf8(&saved_bytes).unwrap())
+                .unwrap();
+        assert!(!should_rewrite);
+        assert_eq!(reloaded.folders.invoice_input_folder, requested);
+    }
+
+    #[test]
+    fn incomplete_setup_save_fills_missing_known_fields_without_losing_extensions() {
+        let root = temp_root("incomplete_setup_save");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let fixture = include_str!("../test-fixtures/config-preservation/app-v2-incomplete.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let original: serde_json::Value = serde_json::from_str(&fixture).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let requested = root.join("Incomplete Input").to_string_lossy().to_string();
+
+        apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                invoice_input_folder: Some(requested.clone()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&app_path).unwrap()).unwrap();
+        assert_eq!(saved["folders"]["invoiceInputFolder"], requested);
+        assert_eq!(
+            saved["client"]["legacyDeskCode"],
+            original["client"]["legacyDeskCode"]
+        );
+        assert_eq!(
+            saved["automation"]["localExtension"],
+            original["automation"]["localExtension"]
+        );
+        assert_eq!(
+            saved["scripts"]["hotelSpecificScript"],
+            original["scripts"]["hotelSpecificScript"]
+        );
+        assert_eq!(
+            saved["folders"]["futureFolder"],
+            original["folders"]["futureFolder"]
+        );
+        assert_eq!(
+            saved["gmail"]["accountHint"],
+            original["gmail"]["accountHint"]
+        );
+        assert_eq!(
+            saved["safety"]["experimentalGuard"],
+            original["safety"]["experimentalGuard"]
+        );
+        assert_eq!(
+            saved["incompleteExtension"],
+            original["incompleteExtension"]
+        );
+    }
+
+    #[test]
+    fn recipient_rule_edit_preserves_metadata_and_kept_rule_order() {
+        let root = temp_root("preserve_recipient_rule_metadata");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+        let installed =
+            draft_from_installed(&pair.app_config, pair.automation_value.as_ref()).recipient_rules;
+        assert_eq!(installed.len(), 3);
+
+        let mut edited_first = installed[0].clone();
+        edited_first.match_text = "fixture partner alfa updated".to_string();
+        let kept_third = installed[2].clone();
+        let added = RecipientRuleDraft {
+            id: Some("rule-new-fixture".to_string()),
+            match_text: "fixture partner gamma".to_string(),
+            email: "gamma@partner.invalid".to_string(),
+        };
+        apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                recipient_rules: Some(vec![edited_first, kept_third, added]),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        let rules = saved
+            .pointer("/invoice/recipientRules")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+        assert_eq!(rules.len(), 3);
+        assert_eq!(rules[0]["match"], "fixture partner alfa updated");
+        assert_eq!(rules[0]["committenteId"], "fixture-alfa-001");
+        assert_eq!(rules[1]["match"], "fixture pubblica amministrazione");
+        assert_eq!(rules[1]["committenteId"], "fixture-pa-777");
+        assert_eq!(rules[1]["requiresReference"], true);
+        assert_eq!(rules[2]["match"], "fixture partner gamma");
+        assert_eq!(rules[2]["email"], "gamma@partner.invalid");
+        assert!(rules[2].get("committenteId").is_none());
+        assert!(!rules.iter().any(|rule| {
+            rule.get("match").and_then(serde_json::Value::as_str) == Some("fixture partner beta")
+        }));
+    }
+
+    #[test]
+    fn unrelated_automation_patch_does_not_reformat_or_change_app_config() {
+        let root = temp_root("automation_only_patch");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+
+        apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                cc_email: Some("changed-copy@fixture-hotel.invalid".to_string()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&app_path).unwrap(), pair.app_bytes);
+        let automation: serde_json::Value =
+            serde_json::from_slice(&fs::read(&automation_path).unwrap()).unwrap();
+        assert_eq!(
+            automation.pointer("/gmail/ccEmail").unwrap(),
+            "changed-copy@fixture-hotel.invalid"
+        );
+        assert_eq!(
+            automation.pointer("/invoice/recipientRules").unwrap(),
+            &serde_json::from_str::<serde_json::Value>(automation_fixture).unwrap()["invoice"]
+                ["recipientRules"]
+        );
+    }
+
+    #[test]
+    fn setup_noop_is_byte_for_byte_and_stale_revision_is_rejected() {
+        let root = temp_root("noop_stale");
+        let automation_path = root.join("automation").join("config.local.json");
+        fs::create_dir_all(automation_path.parent().unwrap()).unwrap();
+        let app_path = root.join("config.json");
+        let app_fixture = include_str!("../test-fixtures/config-preservation/app-v2-custom.json")
+            .replace(
+                "__AUTOMATION_CONFIG_PATH__",
+                &automation_path.to_string_lossy().replace('\\', "\\\\"),
+            );
+        let automation_fixture =
+            include_str!("../test-fixtures/config-preservation/automation-custom.json");
+        fs::write(&app_path, app_fixture.as_bytes()).unwrap();
+        fs::write(&automation_path, automation_fixture.as_bytes()).unwrap();
+        let pair = load_configuration_pair(&app_path).unwrap();
+
+        let result =
+            apply_setup_patch_locked(&app_path, SetupPatch::default(), &pair.revision).unwrap();
+        assert!(result.backups.is_empty());
+        assert_eq!(fs::read(&app_path).unwrap(), pair.app_bytes);
+        assert_eq!(
+            fs::read(&automation_path).unwrap(),
+            pair.automation_bytes.unwrap()
+        );
+
+        fs::write(&automation_path, b"{\"externalEdit\":true}").unwrap();
+        let error = apply_setup_patch_locked(
+            &app_path,
+            SetupPatch {
+                hotel_display_name: Some("Must Not Apply".to_string()),
+                ..SetupPatch::default()
+            },
+            &pair.revision,
+        )
+        .unwrap_err();
+        assert!(error.contains("changed after this screen was opened"));
+        let current_app: serde_json::Value =
+            serde_json::from_slice(&fs::read(&app_path).unwrap()).unwrap();
+        assert_eq!(
+            current_app.pointer("/client/displayName").unwrap(),
+            "Hotel Fixture Aurora"
+        );
+        assert_eq!(
+            fs::read(&automation_path).unwrap(),
+            b"{\"externalEdit\":true}"
+        );
+    }
+
+    #[test]
+    fn future_schema_setup_patch_is_refused_without_mutation() {
+        let root = temp_root("future_schema");
+        let app_path = root.join("config.json");
+        fs::create_dir_all(&root).unwrap();
+        let bytes = include_bytes!("../test-fixtures/config-preservation/app-v3-future.json");
+        fs::write(&app_path, bytes).unwrap();
+
+        let error = load_configuration_pair(&app_path).unwrap_err();
+
+        assert!(error.contains("schema version 3"));
+        assert_eq!(fs::read(&app_path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn transaction_state_distinguishes_old_split_and_committed_pairs() {
+        let root = temp_root("transaction_states");
+        fs::create_dir_all(&root).unwrap();
+        let app_path = root.join("config.json");
+        let automation_path = root.join("automation.json");
+        let old_app = br#"{"version":"old"}"#;
+        let new_app = br#"{"version":"new"}"#;
+        let old_automation = br#"{"version":"old"}"#;
+        let new_automation = br#"{"version":"new"}"#;
+        fs::write(&app_path, old_app).unwrap();
+        fs::write(&automation_path, old_automation).unwrap();
+        let journal = SetupTransactionJournal {
+            schema_version: SETUP_TRANSACTION_SCHEMA,
+            recovery_point_id: "20260814T000000000Z-1234".to_string(),
+            app_config_path: app_path.to_string_lossy().to_string(),
+            old_app_sha256: sha256_bytes(old_app),
+            new_app_sha256: sha256_bytes(new_app),
+            old_automation_path: automation_path.to_string_lossy().to_string(),
+            new_automation_path: automation_path.to_string_lossy().to_string(),
+            old_automation_existed: true,
+            old_automation_sha256: Some(sha256_bytes(old_automation)),
+            new_automation_sha256: sha256_bytes(new_automation),
+        };
+
+        assert_eq!(
+            classify_setup_transaction_state(&app_path, &journal).unwrap(),
+            SetupTransactionState::Unchanged
+        );
+        fs::write(&automation_path, new_automation).unwrap();
+        assert_eq!(
+            classify_setup_transaction_state(&app_path, &journal).unwrap(),
+            SetupTransactionState::NeedsRollback
+        );
+        fs::write(&app_path, new_app).unwrap();
+        assert_eq!(
+            classify_setup_transaction_state(&app_path, &journal).unwrap(),
+            SetupTransactionState::Committed
+        );
+    }
+
+    fn remove_pointer(value: &mut serde_json::Value, pointer: &str) {
+        let mut parts = pointer
+            .trim_start_matches('/')
+            .split('/')
+            .collect::<Vec<_>>();
+        let key = parts.pop().unwrap();
+        let parent_pointer = format!("/{}", parts.join("/"));
+        value
+            .pointer_mut(&parent_pointer)
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap()
+            .remove(key);
     }
 
     fn draft_for_root(root: &Path) -> SetupDraft {

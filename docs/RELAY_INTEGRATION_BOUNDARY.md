@@ -1,10 +1,16 @@
 # Future Relay and company-knowledge boundary
 
-Relay is a later milestone. The present LifeDesk?InnPilot product does not let
-agents read company files, answer other agents, change automations, or publish
-knowledge autonomously.
+The local Relay/company-knowledge layer is a later milestone. LifeDesk already
+has a remote OAuth MCP surface for bounded shared/cloud hotel operations,
+including pre-existing write tools. It cannot inspect local hotel files or
+control InnPilot on a hotel PC.
 
-This boundary preserves a safe integration seam without expanding today?s
+During the current foundation phase, that remote surface is a compatibility
+boundary: its write/destructive scope is frozen pending a dedicated security
+review. No new remote-to-local execution bridge is introduced. See
+[ADR 0001](adr/0001-agent-assisted-operations-boundaries.md).
+
+This boundary preserves a safe integration seam without expanding today's
 attack surface.
 
 ## Intended outcome
@@ -36,9 +42,10 @@ Relay is a communication and approval layer, not a back door into hotel PCs.
 
 ## Safe product seam
 
-LifeDesk may later host tenant-scoped Relay conversations, assignments,
-approvals, and safe status events. InnPilot may expose only typed capabilities
-and bounded operational metadata through its existing signed device channel.
+LifeDesk already hosts bounded tenant-scoped cloud operations and may later host
+Relay conversations, assignments, approvals, and safe status events. InnPilot
+may expose only typed capabilities and bounded operational metadata through its
+existing signed device channel.
 
 The default InnPilot event may contain:
 
@@ -70,7 +77,7 @@ result. Keeping source content local remains the preferred design.
    inference.
 7. Deletion or revocation propagates to indexes, caches, and derived material.
 
-No ?upload everything and let the model decide? path is acceptable.
+No "upload everything and let the model decide" path is acceptable.
 
 ## Workflow-change loop
 
@@ -94,5 +101,7 @@ No ?upload everything and let the model decide? path is acceptable.
   backups;
 - prove the controls with adversarial multi-tenant tests.
 
-Relay remains disabled until this design is reviewed as its own security
-milestone.
+New Relay, local-agent, knowledge-ingestion, and remote-to-local capabilities
+remain disabled until reviewed as their own security milestones. The existing
+LifeDesk remote MCP is not expanded during this phase; its current behavior is
+preserved and documented rather than silently removed.

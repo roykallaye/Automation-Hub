@@ -6,6 +6,7 @@ use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tauri::{AppHandle, Manager};
 
@@ -17,6 +18,7 @@ const LEDGER_FILE: &str = "runner.db";
 const MAX_RECOVERY_POINTS: usize = 10;
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_LEDGER_BYTES: u64 = 256 * 1024 * 1024;
+static RECOVERY_POINT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +70,16 @@ struct RecoveryFile {
 pub(crate) fn status(app: &AppHandle) -> Result<RecoveryStatus, String> {
     let root = recovery_root(app)?;
     Ok(status_in_root(&root))
+}
+
+/// Reads the exact configuration bytes from a verified, status-recognized
+/// recovery point. No files are restored or otherwise mutated.
+pub(crate) fn read_configuration_point_bytes(
+    app: &AppHandle,
+    point_id: &str,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+    let root = recovery_root(app)?;
+    read_configuration_point_bytes_in_root(&root, point_id)
 }
 
 pub(crate) fn create(app: &AppHandle) -> Result<RecoveryActionResult, String> {
@@ -155,14 +167,72 @@ pub(crate) fn restore_configuration(
 }
 
 fn create_locked(app: &AppHandle) -> Result<RecoveryPoint, String> {
+    let (hub_config, config_path) = config::ensure_config_with_path(app)?;
+    let app_config_bytes = read_limited(&config_path, MAX_CONFIG_BYTES)?;
+    let automation_config_bytes = aligned_automation_config_path(&hub_config)
+        .ok()
+        .map(|path| read_limited(&path, MAX_CONFIG_BYTES))
+        .transpose()?;
+    create_configuration_point_from_bytes_locked(
+        app,
+        &app_config_bytes,
+        automation_config_bytes.as_deref(),
+    )
+}
+
+/// Creates a normal, status-visible recovery point from an exact configuration
+/// snapshot that the caller has already loaded while holding the workflow and
+/// installation configuration locks.
+///
+/// This helper deliberately acquires neither of those locks and does not infer
+/// or constrain the automation configuration path. That makes it suitable for
+/// an existing-folders installation whose automation file is not directly
+/// below the configured automation root. The supplied bytes remain subject to
+/// the same JSON, size, integrity, and retention rules as user-created points.
+pub(crate) fn create_configuration_point_from_bytes_locked(
+    app: &AppHandle,
+    app_config_bytes: &[u8],
+    automation_config_bytes: Option<&[u8]>,
+) -> Result<RecoveryPoint, String> {
     let root = recovery_root(app)?;
-    fs::create_dir_all(&root)
+    create_configuration_point_from_bytes_in_root(
+        &root,
+        &app.package_info().version.to_string(),
+        app_config_bytes,
+        automation_config_bytes,
+        |destination| runner_ledger::backup_database(app, destination),
+    )
+}
+
+fn create_configuration_point_from_bytes_in_root<F>(
+    root: &Path,
+    app_version: &str,
+    app_config_bytes: &[u8],
+    automation_config_bytes: Option<&[u8]>,
+    backup_ledger: F,
+) -> Result<RecoveryPoint, String>
+where
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    validate_recovery_config_bytes(app_config_bytes, "InnPilot settings")?;
+    let app_config_text = std::str::from_utf8(app_config_bytes).map_err(|_| {
+        "InnPilot settings are not valid and cannot be backed up safely.".to_string()
+    })?;
+    config::parse_config_with_migration(app_config_text).map_err(|_| {
+        "InnPilot settings are not valid and cannot be backed up safely.".to_string()
+    })?;
+    if let Some(bytes) = automation_config_bytes {
+        validate_recovery_config_bytes(bytes, "automation configuration")?;
+    }
+
+    fs::create_dir_all(root)
         .map_err(|error| format!("Could not prepare the private recovery folder: {error}"))?;
 
-    let created_at = Utc::now().to_rfc3339();
+    let created_at = Utc::now();
+    let sequence = RECOVERY_POINT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let id = format!(
-        "{}-{}",
-        Utc::now().format("%Y%m%dT%H%M%S%3fZ"),
+        "{}-{}-{sequence:016}",
+        created_at.format("%Y%m%dT%H%M%S%3fZ"),
         std::process::id()
     );
     validate_point_id(&id)?;
@@ -175,52 +245,44 @@ fn create_locked(app: &AppHandle) -> Result<RecoveryPoint, String> {
         .map_err(|error| format!("Could not start the recovery point: {error}"))?;
 
     let result = (|| {
-        let (hub_config, config_path) = config::ensure_config_with_path(app)?;
-        let app_config_bytes = read_limited(&config_path, MAX_CONFIG_BYTES)?;
-        serde_json::from_slice::<config::HubConfig>(&app_config_bytes).map_err(|_| {
-            "InnPilot settings are not valid JSON and cannot be backed up safely.".to_string()
-        })?;
-
         let mut files = Vec::new();
         write_recovery_file(
             &partial,
             APP_CONFIG_FILE,
             "app_config",
-            &app_config_bytes,
+            app_config_bytes,
             &mut files,
         )?;
-
-        if let Ok(automation_path) = aligned_automation_config_path(&hub_config) {
-            let bytes = read_limited(&automation_path, MAX_CONFIG_BYTES)?;
-            validate_json_object(&bytes, "automation configuration")?;
+        if let Some(bytes) = automation_config_bytes {
             write_recovery_file(
                 &partial,
                 AUTOMATION_CONFIG_FILE,
                 "automation_config",
-                &bytes,
+                bytes,
                 &mut files,
             )?;
         }
 
         let ledger_path = partial.join(LEDGER_FILE);
-        runner_ledger::backup_database(app, &ledger_path)?;
+        backup_ledger(&ledger_path)?;
         files.push(digest_file("runner_ledger", LEDGER_FILE, &ledger_path)?);
 
         let manifest = RecoveryManifest {
             schema_version: MANIFEST_SCHEMA,
             id: id.clone(),
-            created_at: created_at.clone(),
-            app_version: app.package_info().version.to_string(),
+            created_at: created_at.to_rfc3339(),
+            app_version: app_version.to_string(),
             files,
         };
         let manifest_bytes = serde_json::to_vec_pretty(&manifest)
             .map_err(|error| format!("Could not prepare the recovery manifest: {error}"))?;
         write_synced(&partial.join(MANIFEST_FILE), &manifest_bytes)?;
+        verify_manifest(&partial, &manifest)?;
         fs::rename(&partial, &final_dir)
             .map_err(|error| format!("Could not finalize the recovery point: {error}"))?;
 
         let point = point_from_manifest(&manifest, "ready");
-        prune_old_points(&root)?;
+        prune_old_points(root)?;
         Ok(point)
     })();
 
@@ -279,6 +341,34 @@ fn status_in_root(root: &Path) -> RecoveryStatus {
             "device_private_key".to_string(),
         ],
     }
+}
+
+fn read_configuration_point_bytes_in_root(
+    root: &Path,
+    point_id: &str,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+    let point_dir = safe_point_dir(root, point_id)?;
+    let manifest = read_manifest(&point_dir)?;
+    verify_manifest(&point_dir, &manifest)?;
+
+    let app_config_bytes = read_limited(&point_dir.join(APP_CONFIG_FILE), MAX_CONFIG_BYTES)?;
+    validate_recovery_config_bytes(&app_config_bytes, "InnPilot settings")?;
+    let app_config_text = std::str::from_utf8(&app_config_bytes)
+        .map_err(|_| "The recovery point contains invalid InnPilot settings.".to_string())?;
+    config::parse_config_with_migration(app_config_text)
+        .map_err(|_| "The recovery point contains invalid InnPilot settings.".to_string())?;
+
+    let automation_config_bytes = manifest
+        .files
+        .iter()
+        .any(|file| file.role == "automation_config")
+        .then(|| read_limited(&point_dir.join(AUTOMATION_CONFIG_FILE), MAX_CONFIG_BYTES))
+        .transpose()?;
+    if let Some(bytes) = &automation_config_bytes {
+        validate_recovery_config_bytes(bytes, "automation configuration")?;
+    }
+
+    Ok((app_config_bytes, automation_config_bytes))
 }
 
 fn read_manifest(point_dir: &Path) -> Result<RecoveryManifest, String> {
@@ -476,6 +566,13 @@ fn validate_json_object(bytes: &[u8], label: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_recovery_config_bytes(bytes: &[u8], label: &str) -> Result<(), String> {
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(format!("The {label} exceeds the safe recovery size limit."));
+    }
+    validate_json_object(bytes, label)
+}
+
 fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut file =
         File::create(path).map_err(|error| format!("Could not create a recovery file: {error}"))?;
@@ -538,6 +635,13 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    const APP_CONFIG_FIXTURE: &[u8] =
+        include_bytes!("../test-fixtures/config-preservation/app-v2-custom.json");
+    const LEGACY_APP_CONFIG_FIXTURE: &[u8] =
+        include_bytes!("../test-fixtures/config-preservation/app-v1-legacy.json");
+    const AUTOMATION_CONFIG_FIXTURE: &[u8] =
+        include_bytes!("../test-fixtures/config-preservation/automation-custom.json");
+
     fn temp_root(label: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
             "innpilot_recovery_{label}_{}",
@@ -599,6 +703,143 @@ mod tests {
         let status = status_in_root(&root);
         assert!(status.points.is_empty());
         assert_eq!(status.retention_limit, MAX_RECOVERY_POINTS);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_byte_configuration_point_is_recognized_and_exact() {
+        let root = temp_root("raw_bytes");
+        let point = create_configuration_point_from_bytes_in_root(
+            &root,
+            "0.1.0-test",
+            APP_CONFIG_FIXTURE,
+            Some(AUTOMATION_CONFIG_FIXTURE),
+            |destination| fs::write(destination, b"fake-ledger").map_err(|error| error.to_string()),
+        )
+        .unwrap();
+
+        let status = status_in_root(&root);
+        assert_eq!(status.points.len(), 1);
+        assert_eq!(status.points[0], point);
+        assert_eq!(point.integrity, "ready");
+        assert!(point.includes_app_config);
+        assert!(point.includes_automation_config);
+        assert!(point.includes_runner_ledger);
+
+        let point_dir = root.join(&point.id);
+        assert_eq!(
+            fs::read(point_dir.join(APP_CONFIG_FILE)).unwrap(),
+            APP_CONFIG_FIXTURE
+        );
+        assert_eq!(
+            fs::read(point_dir.join(AUTOMATION_CONFIG_FILE)).unwrap(),
+            AUTOMATION_CONFIG_FIXTURE
+        );
+        let manifest = read_manifest(&point_dir).unwrap();
+        verify_manifest(&point_dir, &manifest).unwrap();
+        let (app_bytes, automation_bytes) =
+            read_configuration_point_bytes_in_root(&root, &point.id).unwrap();
+        assert_eq!(app_bytes, APP_CONFIG_FIXTURE);
+        assert_eq!(automation_bytes.as_deref(), Some(AUTOMATION_CONFIG_FIXTURE));
+        assert!(!root.join(format!(".partial-{}", point.id)).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_byte_configuration_point_accepts_and_returns_exact_legacy_settings() {
+        let root = temp_root("raw_legacy_bytes");
+        let point = create_configuration_point_from_bytes_in_root(
+            &root,
+            "0.1.0-test",
+            LEGACY_APP_CONFIG_FIXTURE,
+            None,
+            |destination| fs::write(destination, b"fake-ledger").map_err(|error| error.to_string()),
+        )
+        .unwrap();
+
+        let (app_bytes, automation_bytes) =
+            read_configuration_point_bytes_in_root(&root, &point.id).unwrap();
+        assert_eq!(app_bytes, LEGACY_APP_CONFIG_FIXTURE);
+        assert!(automation_bytes.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn verified_configuration_point_read_rejects_traversal_and_tampering() {
+        let root = temp_root("verified_read");
+        let point = create_configuration_point_from_bytes_in_root(
+            &root,
+            "0.1.0-test",
+            APP_CONFIG_FIXTURE,
+            Some(AUTOMATION_CONFIG_FIXTURE),
+            |destination| fs::write(destination, b"fake-ledger").map_err(|error| error.to_string()),
+        )
+        .unwrap();
+
+        assert!(read_configuration_point_bytes_in_root(&root, "../../outside").is_err());
+        fs::write(
+            root.join(&point.id).join(AUTOMATION_CONFIG_FILE),
+            b"{\"tampered\":true}",
+        )
+        .unwrap();
+        let error = read_configuration_point_bytes_in_root(&root, &point.id).unwrap_err();
+        assert!(error.contains("integrity check"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_byte_configuration_point_rejects_invalid_or_oversized_input_before_writing() {
+        let parent = temp_root("raw_bytes_invalid");
+        let invalid_root = parent.join("invalid");
+        let error = create_configuration_point_from_bytes_in_root(
+            &invalid_root,
+            "0.1.0-test",
+            APP_CONFIG_FIXTURE,
+            Some(b"[]"),
+            |_| panic!("ledger backup must not run for invalid input"),
+        )
+        .unwrap_err();
+        assert!(error.contains("must contain a JSON object"));
+        assert!(!invalid_root.exists());
+
+        let oversized_root = parent.join("oversized");
+        let oversized = vec![b' '; MAX_CONFIG_BYTES as usize + 1];
+        let error = create_configuration_point_from_bytes_in_root(
+            &oversized_root,
+            "0.1.0-test",
+            &oversized,
+            None,
+            |_| panic!("ledger backup must not run for oversized input"),
+        )
+        .unwrap_err();
+        assert!(error.contains("safe recovery size limit"));
+        assert!(!oversized_root.exists());
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn raw_byte_configuration_points_obey_retention() {
+        let root = temp_root("raw_bytes_retention");
+        for _ in 0..(MAX_RECOVERY_POINTS + 2) {
+            create_configuration_point_from_bytes_in_root(
+                &root,
+                "0.1.0-test",
+                APP_CONFIG_FIXTURE,
+                None,
+                |destination| {
+                    fs::write(destination, b"fake-ledger").map_err(|error| error.to_string())
+                },
+            )
+            .unwrap();
+        }
+
+        let status = status_in_root(&root);
+        assert_eq!(status.points.len(), MAX_RECOVERY_POINTS);
+        assert!(status.points.iter().all(|point| point.integrity == "ready"));
+        assert!(status
+            .points
+            .iter()
+            .all(|point| point.includes_app_config && point.includes_runner_ledger));
         fs::remove_dir_all(root).unwrap();
     }
 }

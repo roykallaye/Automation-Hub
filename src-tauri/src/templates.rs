@@ -1,6 +1,6 @@
-use crate::{config, preflight};
+use crate::{config, preflight, runner_ledger};
 use serde::Deserialize;
-use std::{fs, path::Path};
+use std::{fs, path::PathBuf};
 use tauri::AppHandle;
 
 /// Template fields the frontend can update from the Settings page.
@@ -20,24 +20,54 @@ pub(crate) fn save_output_templates(
     app: &AppHandle,
     draft: OutputTemplatesDraft,
 ) -> Result<preflight::AppConfigStatus, String> {
-    let (mut hub_config, _) = config::ensure_config_with_path(app)?;
-
-    hub_config.templates = config::OutputTemplatesConfig {
+    let next_templates = config::OutputTemplatesConfig {
         gmail_draft_subject: draft.gmail_draft_subject,
         gmail_draft_body: draft.gmail_draft_body,
         email_signature: draft.email_signature,
     }
     .sanitized();
+    let _workflow_lock =
+        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
+            "Wait for the current automation to finish before saving templates.".to_string()
+        })?;
+    let (hub_config, config_path) = config::with_app_configuration_lock(app, |config_path| {
+        let mut hub_config = config::load_current_config_unlocked(config_path)?
+            .unwrap_or_else(|| config::default_config_for_config_path(config_path));
+        hub_config.templates = next_templates;
 
-    let config_path = config::save_config_for_app(app, &hub_config)?;
+        let automation_path = PathBuf::from(&hub_config.automation.automation_config_path);
+        let automation_before = if automation_path.is_file() {
+            Some(
+                fs::read(&automation_path)
+                    .map_err(|error| format!("Could not read automation setup file: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let automation_after = automation_before
+            .as_ref()
+            .map(|contents| prepare_templates_automation_bytes(contents, &hub_config))
+            .transpose()?;
 
-    // Keep the existing automation config aligned so the invoice/draft scripts
-    // pick up the new wording. This is a non-destructive key merge: any file
-    // that does not exist yet is left for guided setup to create.
-    sync_templates_into_automation_config(
-        Path::new(&hub_config.automation.automation_config_path),
-        &hub_config,
-    )?;
+        if let (Some(before), Some(after)) = (&automation_before, &automation_after) {
+            if before != after {
+                config::atomic_replace_configuration_bytes(&automation_path, after)?;
+            }
+        }
+        if let Err(error) = config::write_current_config_unlocked(config_path, &hub_config) {
+            if let Some(before) = automation_before {
+                if let Err(rollback_error) =
+                    config::atomic_replace_configuration_bytes(&automation_path, &before)
+                {
+                    return Err(format!(
+                        "Template save failed and automatic rollback also failed: {error}; {rollback_error}"
+                    ));
+                }
+            }
+            return Err(error);
+        }
+        Ok((hub_config, config_path.to_path_buf()))
+    })?;
 
     Ok(preflight::AppConfigStatus::new_fast(
         config_path.to_string_lossy().to_string(),
@@ -65,30 +95,18 @@ pub(crate) fn resolved_signature(
     }
 }
 
-fn sync_templates_into_automation_config(
-    automation_config_path: &Path,
+fn prepare_templates_automation_bytes(
+    contents: &[u8],
     hub_config: &config::HubConfig,
-) -> Result<(), String> {
-    if !automation_config_path.is_file() {
-        // Setup has not generated the automation config yet; templates are
-        // stored in the app config and applied on the next setup save.
-        return Ok(());
-    }
-
-    let contents = fs::read_to_string(automation_config_path)
-        .map_err(|error| format!("Could not read automation setup file: {error}"))?;
-    let mut value: serde_json::Value = serde_json::from_str(&contents)
+) -> Result<Vec<u8>, String> {
+    let mut value: serde_json::Value = serde_json::from_slice(contents)
         .map_err(|error| format!("Automation setup file is not valid: {error}"))?;
-
-    let updated = apply_templates_to_automation_json(&mut value, hub_config);
-    if !updated {
-        return Ok(());
+    if !value.is_object() {
+        return Err("Automation setup file must contain a JSON object.".to_string());
     }
-
-    let serialized = serde_json::to_string_pretty(&value)
-        .map_err(|error| format!("Could not prepare automation setup file: {error}"))?;
-    fs::write(automation_config_path, serialized)
-        .map_err(|error| format!("Could not write automation setup file: {error}"))
+    apply_templates_to_automation_json(&mut value, hub_config);
+    serde_json::to_vec_pretty(&value)
+        .map_err(|error| format!("Could not prepare automation setup file: {error}"))
 }
 
 /// Merges template-driven keys into the automation config JSON, preserving all
@@ -240,5 +258,31 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("{signature}"));
+    }
+
+    #[test]
+    fn template_bytes_preserve_unrelated_automation_configuration() {
+        let original = br#"{
+          "paths": { "invoiceInputDir": "D:\\Fixture\\Incoming" },
+          "gmail": { "ccEmail": "copy@fixture.invalid", "customFlag": true },
+          "hotelExtension": { "keep": [1, 2, 3] }
+        }"#;
+        let hub_config = hub_config_with_templates(OutputTemplatesConfig {
+            gmail_draft_subject: "Invoices - {hotelName}".to_string(),
+            gmail_draft_body: "Body {signature}".to_string(),
+            email_signature: "Front Office".to_string(),
+        });
+
+        let updated = prepare_templates_automation_bytes(original, &hub_config).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&updated).unwrap();
+
+        assert_eq!(value["paths"]["invoiceInputDir"], r"D:\Fixture\Incoming");
+        assert_eq!(value["gmail"]["ccEmail"], "copy@fixture.invalid");
+        assert_eq!(value["gmail"]["customFlag"], true);
+        assert_eq!(
+            value["hotelExtension"]["keep"],
+            serde_json::json!([1, 2, 3])
+        );
+        assert_eq!(value["client"]["emailSignatureName"], "Front Office");
     }
 }
