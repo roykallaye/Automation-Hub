@@ -12,6 +12,12 @@ import { createTranslator, I18nProvider } from "./i18n";
 import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { deriveNextAction } from "./nextAction";
+import {
+  getInitialOnboardingState,
+  initialPageForOnboarding,
+  normalizeOnboardingError,
+  type OnboardingSnapshot,
+} from "./onboarding";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AssistantPage } from "./routes/AssistantPage";
 import { OperatorAutomationsPage } from "./routes/OperatorAutomationsPage";
@@ -41,9 +47,11 @@ function App() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [notice, setNotice] = useState<string>("");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
-  const [currentPage, setCurrentPage] = useState<AppPage>("home");
+  const [currentPage, setCurrentPage] = useState<AppPage | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingSnapshot | null>(null);
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const configRefreshId = useRef(0);
+  const initialRouteResolved = useRef(false);
   const browserPreview =
     typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
 
@@ -72,6 +80,22 @@ function App() {
   }, [branding]);
 
   useEffect(() => {
+    if (browserPreview) {
+      resolveInitialRoute("home");
+    } else {
+      void getInitialOnboardingState()
+        .then((snapshot) => {
+          setOnboarding(snapshot);
+          resolveInitialRoute(initialPageForOnboarding(snapshot));
+        })
+        .catch((error) => {
+          setNotice(normalizeOnboardingError(error).message);
+          // Onboarding is the local authority. A corrupt/future record, or an
+          // unavailable authority, fails closed into Support rather than Home.
+          resolveInitialRoute("support");
+        });
+    }
+
     void refreshConfigStatus();
     void refreshLatestLogs();
     void refreshActivityHistory();
@@ -96,6 +120,12 @@ function App() {
       void unlistenFinished.then((unlisten) => unlisten());
     };
   }, []);
+
+  function resolveInitialRoute(page: AppPage) {
+    if (initialRouteResolved.current) return;
+    initialRouteResolved.current = true;
+    setCurrentPage(page);
+  }
 
   const actions = useMemo(() => automationActions, []);
   const t = useMemo(() => createTranslator(configStatus?.config.language), [configStatus?.config.language]);
@@ -154,6 +184,7 @@ function App() {
     } catch {
       if (requestId !== configRefreshId.current) return;
       setNotice(t("app.readinessCheckFailed"));
+      setCheckingReadiness(false);
     }
   }
 
@@ -273,6 +304,8 @@ function App() {
     return null;
   }
 
+  if (currentPage === null) return null;
+
   return (
     <I18nProvider language={configStatus?.config.language}>
       <OperatorShell
@@ -318,6 +351,8 @@ function App() {
           configStatus={configStatus}
           modules={modules}
           loading={loadingConfig}
+          onboarding={onboarding}
+          onOnboardingChanged={setOnboarding}
           onRefresh={refreshAll}
           onGoToAutomations={() => setCurrentPage("automations")}
           onGoToSupport={() => setCurrentPage("support")}

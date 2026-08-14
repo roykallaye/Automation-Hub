@@ -8,6 +8,7 @@ import { ModuleReadinessGrid } from "../components/ModuleReadinessCards";
 import { SetupWizard } from "../components/SetupWizard/SetupWizard";
 import { useI18n } from "../i18n";
 import { staffMessage } from "../messages";
+import { isOnboardingReady, type OnboardingSnapshot } from "../onboarding";
 import type {
   AppConfigStatus,
   ModuleReadiness,
@@ -19,6 +20,8 @@ export function SetupPage({
   configStatus,
   modules,
   loading,
+  onboarding,
+  onOnboardingChanged,
   onRefresh,
   onGoToAutomations,
   onGoToSupport,
@@ -26,12 +29,16 @@ export function SetupPage({
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
   loading: boolean;
+  onboarding: OnboardingSnapshot | null;
+  onOnboardingChanged: (snapshot: OnboardingSnapshot) => void;
   onRefresh: () => void;
   onGoToAutomations: () => void;
   onGoToSupport: () => void;
 }) {
   const { t } = useI18n();
-  const [showWizard, setShowWizard] = useState(false);
+  const [showWizard, setShowWizard] = useState(
+    () => onboarding !== null && !isOnboardingReady(onboarding),
+  );
   const guidance = setupGuidance(configStatus, loading, t);
   const setupIncomplete =
     !loading &&
@@ -59,8 +66,8 @@ export function SetupPage({
 
   // Focus mode: the wizard replaces the whole page so the user sees one
   // task at a time, with a permanent way back. No Escape shortcut here —
-  // progress is saved locally as the user moves through the guided flow.
-  if (showWizard) {
+  // Durable progress comes from the local backend rather than WebView storage.
+  if (showWizard && onboarding) {
     return (
       <FocusFlow
         eyebrow={t("setup.guidedEyebrow")}
@@ -70,6 +77,8 @@ export function SetupPage({
       >
         <SetupWizard
           config={configStatus?.config}
+          onboarding={onboarding}
+          onOnboardingChanged={onOnboardingChanged}
           onClose={() => setShowWizard(false)}
           onSetupSaved={onRefresh}
         />
@@ -120,6 +129,7 @@ export function SetupPage({
             )}
             <button
               className="rounded-md bg-cta px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft"
+              disabled={!onboarding}
               onClick={() => setShowWizard(true)}
             >
               {setupReady ? t("setup.reviewSetup") : t("setup.continueSetup")}

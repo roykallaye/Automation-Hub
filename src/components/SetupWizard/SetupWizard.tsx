@@ -13,6 +13,21 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n, type TranslationKey } from "../../i18n";
+import {
+  beginOrResumeOnboarding,
+  completeOnboarding,
+  createOnboardingRequestId,
+  getOnboardingState,
+  isOnboardingReady,
+  markOnboardingFailed,
+  normalizeOnboardingError,
+  prepareOnboardingApply,
+  recordOnboardingProgress,
+  recordOnboardingSetupSaved,
+  type ManualSetupCheckpoint,
+  type OnboardingFailureCode,
+  type OnboardingSnapshot,
+} from "../../onboarding";
 import type {
   HubConfig,
   ExistingFolderRole,
@@ -89,40 +104,55 @@ type SetupCleanupResult = {
   failed: string[];
 };
 
+type CleanupCreatedFoldersCommandResult = {
+  cleanup: SetupCleanupResult;
+  onboarding: OnboardingSnapshot;
+};
+
+type InitializeWorkspaceCommandResult = {
+  workspace: WorkspaceInitResult;
+  onboarding: OnboardingSnapshot | null;
+};
+
+type WizardBootstrapResult = {
+  setupSnapshot: SetupSnapshot;
+  onboardingSnapshot: OnboardingSnapshot;
+};
+
 export function SetupWizard({
   config,
+  onboarding,
+  onOnboardingChanged,
   onClose,
   onSetupSaved,
 }: {
   config?: HubConfig | null;
+  onboarding: OnboardingSnapshot;
+  onOnboardingChanged: (snapshot: OnboardingSnapshot) => void;
   onClose: () => void;
   onSetupSaved: () => void | Promise<void>;
 }) {
   const { t } = useI18n();
-  const [initialSession] = useState(() => loadSetupSession(config));
-  const [currentStepKey, setCurrentStepKey] = useState(
-    initialSession?.stepKey ?? "welcome",
-  );
-  const [draft, setDraft] = useState<SetupDraft>(
-    () => initialSession?.draft ?? createSetupDraft(config),
-  );
-  const [baseRevision, setBaseRevision] = useState<string | null>(
-    initialSession?.baseRevision ?? null,
-  );
+  const [currentStepKey, setCurrentStepKey] = useState("welcome");
+  const [draft, setDraft] = useState<SetupDraft>(() => createSetupDraft(config));
+  const [baseRevision, setBaseRevision] = useState<string | null>(null);
   const baseDraftRef = useRef<SetupDraft | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(true);
-  const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(
-    initialSession?.showAdvancedWorkflows ?? false,
-  );
+  const [backendSessionReady, setBackendSessionReady] = useState(false);
+  const [showAdvancedWorkflows, setShowAdvancedWorkflows] = useState(false);
   const [setupResult, setSetupResult] = useState<SetupActionResult | null>(null);
   const [setupAction, setSetupAction] = useState<string | null>(null);
   const [inspections, setInspections] = useState<Record<string, FolderInspectionState>>({});
-  const [completedActions, setCompletedActions] = useState<SetupAction[]>(
-    initialSession?.completedActions ?? [],
-  );
-  const [createdFolderPaths, setCreatedFolderPaths] = useState<string[]>(
-    initialSession?.createdFolderPaths ?? [],
-  );
+  const [completedActions, setCompletedActions] = useState<SetupAction[]>([]);
+  const [createdFolderCount, setCreatedFolderCount] = useState(0);
+  const onboardingRef = useRef(onboarding);
+  const bootstrapPromiseRef = useRef<Promise<WizardBootstrapResult> | null>(null);
+  const progressTimerRef = useRef<number | null>(null);
+  const progressQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingCheckpointRef = useRef<ManualSetupCheckpoint | null>(null);
+  const lastScheduledCheckpointRef = useRef<string | null>(null);
+  const backendSessionReadyRef = useRef(false);
+  const progressPausedRef = useRef(false);
   const steps = useMemo<WizardStepMeta[]>(
     () =>
       stepDefinitions
@@ -138,28 +168,51 @@ export function SetupWizard({
   const isLast = stepIndex === steps.length - 1;
 
   useEffect(() => {
+    if (onboarding.revision >= onboardingRef.current.revision) {
+      onboardingRef.current = onboarding;
+    }
+  }, [onboarding]);
+
+  useEffect(() => {
     let cancelled = false;
-    void invoke<SetupSnapshot>("get_setup_snapshot")
-      .then((snapshot) => {
+    bootstrapPromiseRef.current ??= bootstrapWizard();
+    void bootstrapPromiseRef.current
+      .then(({ setupSnapshot, onboardingSnapshot }) => {
         if (cancelled) return;
-        baseDraftRef.current = snapshot.draft;
-        setBaseRevision(snapshot.revision);
-        // A persisted draft is useful only when it was based on this exact
-        // configuration pair. Older/unbound sessions are deliberately ignored.
-        if (initialSession?.baseRevision === snapshot.revision) {
-          setDraft(initialSession.draft);
+        baseDraftRef.current = setupSnapshot.draft;
+        setBaseRevision(setupSnapshot.revision);
+
+        const session = onboardingSnapshot.activeSession;
+        const sessionMatchesConfig =
+          session?.baseConfigRevision === setupSnapshot.revision;
+        const checkpoint = sessionMatchesConfig ? session?.manualProgress : null;
+        if (checkpoint) {
+          setDraft(checkpoint.draft);
+          setCurrentStepKey(checkpoint.stepKey || "welcome");
+          setShowAdvancedWorkflows(checkpoint.showAdvancedWorkflows);
         } else {
-          setDraft(snapshot.draft);
-          setCompletedActions([]);
-          setCreatedFolderPaths([]);
+          setDraft(setupSnapshot.draft);
+          setCurrentStepKey("welcome");
+          setShowAdvancedWorkflows(false);
         }
+
+        // Completion display is derived from durable readiness, never a
+        // browser claim. Folder cleanup uses only server-recorded evidence.
+        setCompletedActions([]);
+        setCreatedFolderCount(
+          sessionMatchesConfig
+            ? session?.createdFolders.length ?? 0
+            : 0,
+        );
+        backendSessionReadyRef.current = true;
+        setBackendSessionReady(true);
       })
       .catch((error) => {
         if (cancelled) return;
         setSetupResult({
           kind: "error",
           title: t("wizard.actionCouldNotFinish"),
-          message: error instanceof Error ? error.message : String(error),
+          message: normalizeOnboardingError(error).message,
         });
       })
       .finally(() => {
@@ -177,21 +230,181 @@ export function SetupWizard({
   }, [currentStepKey, steps]);
 
   useEffect(() => {
-    if (snapshotLoading) return;
-    saveSetupSession({
-      version: 1,
+    if (!backendSessionReady) return;
+    scheduleOnboardingProgress({
       draft,
-      baseRevision,
-      showAdvancedWorkflows,
       stepKey: currentStepKey,
-      completedActions,
-      createdFolderPaths,
+      showAdvancedWorkflows,
+      completedActions: [],
     });
-  }, [baseRevision, completedActions, createdFolderPaths, currentStepKey, draft, showAdvancedWorkflows, snapshotLoading]);
+  }, [backendSessionReady, currentStepKey, draft, showAdvancedWorkflows]);
 
-  function moveStep(offset: number) {
+  useEffect(
+    () => () => {
+      if (progressTimerRef.current !== null) {
+        window.clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+      if (backendSessionReadyRef.current) {
+        void flushOnboardingProgress().catch(() => undefined);
+      }
+    },
+    [],
+  );
+
+  async function moveStep(offset: number) {
     const nextIndex = Math.min(steps.length - 1, Math.max(0, stepIndex + offset));
-    setCurrentStepKey(steps[nextIndex]?.key ?? "welcome");
+    const nextStepKey = steps[nextIndex]?.key ?? "welcome";
+    setCurrentStepKey(nextStepKey);
+    if (!backendSessionReadyRef.current) return;
+    scheduleOnboardingProgress(
+      {
+        draft,
+        stepKey: nextStepKey,
+        showAdvancedWorkflows,
+        completedActions: [],
+      },
+      0,
+    );
+    try {
+      await flushOnboardingProgress();
+    } catch (error) {
+      setSetupResult({
+        kind: "error",
+        title: t("wizard.actionCouldNotFinish"),
+        message: normalizeOnboardingError(error).message,
+      });
+    }
+  }
+
+  async function bootstrapWizard(): Promise<WizardBootstrapResult> {
+    let setupSnapshot = await invoke<SetupSnapshot>("get_setup_snapshot");
+    const onboardingSnapshot = await beginOrAdoptOnboardingSession();
+    if (onboardingSnapshot.activeSession?.baseConfigRevision !== setupSnapshot.revision) {
+      setupSnapshot = await invoke<SetupSnapshot>("get_setup_snapshot");
+      if (onboardingSnapshot.activeSession?.baseConfigRevision !== setupSnapshot.revision) {
+        throw normalizeOnboardingError({
+          code: "config_changed",
+          message: "InnPilot configuration changed while setup was opening. Close and reopen setup.",
+          recoverable: true,
+          currentRevision: onboardingSnapshot.revision,
+        });
+      }
+    }
+    return { setupSnapshot, onboardingSnapshot };
+  }
+
+  function acceptOnboardingSnapshot(snapshot: OnboardingSnapshot) {
+    onboardingRef.current = snapshot;
+    onOnboardingChanged(snapshot);
+  }
+
+  async function beginOrAdoptOnboardingSession() {
+    try {
+      const next = await beginOrResumeOnboarding(
+        "manual",
+        onboardingRef.current.revision,
+      );
+      acceptOnboardingSnapshot(next);
+      return next;
+    } catch (error) {
+      const normalized = normalizeOnboardingError(error);
+      if (normalized.code !== "stale_revision") throw normalized;
+      const latest = await getOnboardingState();
+      acceptOnboardingSnapshot(latest);
+      if (latest.activeSession) return latest;
+      const next = await beginOrResumeOnboarding("manual", latest.revision);
+      acceptOnboardingSnapshot(next);
+      return next;
+    }
+  }
+
+  async function runOnboardingMutation(
+    operation: (snapshot: OnboardingSnapshot) => Promise<OnboardingSnapshot>,
+  ) {
+    try {
+      const next = await operation(onboardingRef.current);
+      acceptOnboardingSnapshot(next);
+      return next;
+    } catch (error) {
+      const normalized = normalizeOnboardingError(error);
+      if (normalized.code !== "stale_revision") throw normalized;
+      // Refresh only. Never replay a stale semantic payload against the newer
+      // revision: an older renderer/window must not overwrite durable state.
+      acceptOnboardingSnapshot(await getOnboardingState());
+      pendingCheckpointRef.current = null;
+      lastScheduledCheckpointRef.current = null;
+      progressPausedRef.current = true;
+      backendSessionReadyRef.current = false;
+      setBackendSessionReady(false);
+      throw normalized;
+    }
+  }
+
+  function scheduleOnboardingProgress(
+    checkpoint: ManualSetupCheckpoint,
+    delay = 500,
+  ) {
+    const fingerprint = JSON.stringify(checkpoint);
+    if (lastScheduledCheckpointRef.current === fingerprint) return;
+    lastScheduledCheckpointRef.current = fingerprint;
+    pendingCheckpointRef.current = checkpoint;
+    if (progressPausedRef.current) return;
+    if (progressTimerRef.current !== null) {
+      window.clearTimeout(progressTimerRef.current);
+    }
+    progressTimerRef.current = window.setTimeout(() => {
+      progressTimerRef.current = null;
+      void flushOnboardingProgress().catch((error) => {
+        setSetupResult({
+          kind: "error",
+          title: t("wizard.actionCouldNotFinish"),
+          message: normalizeOnboardingError(error).message,
+        });
+      });
+    }, delay);
+  }
+
+  async function flushOnboardingProgress(): Promise<void> {
+    if (progressTimerRef.current !== null) {
+      window.clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    if (progressPausedRef.current) {
+      await progressQueueRef.current;
+      return;
+    }
+
+    const checkpoint = pendingCheckpointRef.current;
+    if (checkpoint) {
+      pendingCheckpointRef.current = null;
+      const fingerprint = JSON.stringify(checkpoint);
+      const write = progressQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await runOnboardingMutation(
+              (snapshot) =>
+                recordOnboardingProgress(
+                  checkpoint,
+                  snapshot.revision,
+                  createOnboardingRequestId("progress"),
+                ),
+            );
+          } catch (error) {
+            if (lastScheduledCheckpointRef.current === fingerprint) {
+              lastScheduledCheckpointRef.current = null;
+            }
+            throw error;
+          }
+        });
+      progressQueueRef.current = write;
+    }
+
+    await progressQueueRef.current;
+    if (pendingCheckpointRef.current && !progressPausedRef.current) {
+      await flushOnboardingProgress();
+    }
   }
 
   function update<K extends keyof SetupDraft>(key: K, value: SetupDraft[K]) {
@@ -451,7 +664,22 @@ export function SetupWizard({
 
     setSetupAction("finish");
     setSetupResult(null);
+    let applyPrepared = false;
+    let onboardingCompleted = false;
+    let failureCode: OnboardingFailureCode = "manual_apply_failed";
     try {
+      scheduleOnboardingProgress(
+        {
+          draft,
+          stepKey: currentStepKey,
+          showAdvancedWorkflows,
+          completedActions: [],
+        },
+        0,
+      );
+      await flushOnboardingProgress();
+      progressPausedRef.current = true;
+
       // Refuse a known-stale wizard before creating even empty workspace
       // folders. The save command repeats this check under its own lock/CAS.
       await invoke("assert_setup_revision", { expectedRevision: baseRevision });
@@ -461,10 +689,27 @@ export function SetupWizard({
         expectedRevision: baseRevision,
       });
 
-      const workspaceResult = await invoke<WorkspaceInitResult>("initialize_workspace", {
+      const prepared = await runOnboardingMutation(
+        (snapshot) =>
+          prepareOnboardingApply(
+            snapshot.revision,
+            baseRevision,
+            createOnboardingRequestId("prepare"),
+          ),
+      );
+      applyPrepared = true;
+      failureCode = "folder_initialization_failed";
+
+      const initialized = await invoke<InitializeWorkspaceCommandResult>("initialize_workspace", {
         draft,
         confirmed: true,
+        expectedOnboardingRevision: prepared.revision,
+        requestId: createOnboardingRequestId("workspace"),
       });
+      if (initialized.onboarding) {
+        acceptOnboardingSnapshot(initialized.onboarding);
+      }
+      const workspaceResult = initialized.workspace;
       const created = workspaceResult.folders.filter(
         (folder) => folder.action === "created",
       ).length;
@@ -474,12 +719,12 @@ export function SetupWizard({
       const failed = workspaceResult.folders.filter(
         (folder) => folder.action === "failed",
       ).length;
-      const createdPaths = workspaceResult.folders
-        .filter((folder) => folder.action === "created")
-        .map((folder) => folder.path);
-      setCreatedFolderPaths(createdPaths);
+      setCreatedFolderCount(
+        onboardingRef.current.activeSession?.createdFolders.length ?? created,
+      );
 
       if (failed) {
+        await safelyMarkOnboardingFailed("folder_initialization_failed");
         const invalidPathFailure = workspaceResult.folders.some(
           (folder) =>
             folder.message.includes("os error 123") ||
@@ -504,11 +749,35 @@ export function SetupWizard({
         return;
       }
 
+      failureCode = "persistence_failed";
       const result = await invoke<SaveSetupResult>("save_setup_config", {
         patch,
         expectedRevision: baseRevision,
         confirmed: true,
       });
+
+      failureCode = "validation_failed";
+      await runOnboardingMutation(
+        (snapshot) =>
+          recordOnboardingSetupSaved(
+            snapshot.revision,
+            result.revision,
+            createOnboardingRequestId("saved"),
+          ),
+      );
+      await runOnboardingMutation(
+        (snapshot) =>
+          completeOnboarding(
+            snapshot.revision,
+            result.revision,
+            [],
+            createOnboardingRequestId("complete"),
+          ),
+      );
+      onboardingCompleted = true;
+      backendSessionReadyRef.current = false;
+      setBackendSessionReady(false);
+      pendingCheckpointRef.current = null;
       baseDraftRef.current = draft;
       setBaseRevision(result.revision);
       const blocking = result.validation.workflows.filter(
@@ -540,9 +809,11 @@ export function SetupWizard({
             }),
       });
       await onSetupSaved();
-      clearSetupSession();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      if (applyPrepared && !onboardingCompleted) {
+        await safelyMarkOnboardingFailed(failureCode);
+      }
+      const message = normalizeOnboardingError(error).message;
       const invalidPathMessage =
         message.includes("os error 123") || message.toLowerCase().includes("invalid path")
           ? t("wizard.invalidFolderMessage")
@@ -553,11 +824,41 @@ export function SetupWizard({
         message: invalidPathMessage,
       });
     } finally {
+      progressPausedRef.current = false;
       setSetupAction(null);
     }
   }
+
+  async function safelyMarkOnboardingFailed(failureCode: OnboardingFailureCode) {
+    try {
+      const latest = await getOnboardingState();
+      acceptOnboardingSnapshot(latest);
+      if (latest.state === "verifying" || isOnboardingReady(latest)) {
+        return;
+      }
+      await runOnboardingMutation(
+        (snapshot) =>
+          snapshot.state === "verifying" || isOnboardingReady(snapshot)
+            ? Promise.resolve(snapshot)
+            : markOnboardingFailed(
+                snapshot.revision,
+                failureCode,
+                createOnboardingRequestId("failed"),
+              ),
+      );
+    } catch {
+      // Preserve the original apply failure. Startup reconciliation and
+      // Support can still recover the durable applying/verifying state.
+      try {
+        acceptOnboardingSnapshot(await getOnboardingState());
+      } catch {
+        // The original error remains the actionable message.
+      }
+    }
+  }
+
   async function cleanupCreatedFolders() {
-    if (!createdFolderPaths.length) return;
+    if (!createdFolderCount) return;
     if (
       !window.confirm(
         t("wizard.confirmCleanup"),
@@ -569,11 +870,15 @@ export function SetupWizard({
     setSetupAction("cleanup");
     setSetupResult(null);
     try {
-      const result = await invoke<SetupCleanupResult>("remove_setup_created_empty_folders", {
-        workspaceBase: draft.workspaceBase,
-        paths: createdFolderPaths,
+      const commandResult = await invoke<CleanupCreatedFoldersCommandResult>(
+        "remove_setup_created_empty_folders",
+        {
+        expectedOnboardingRevision: onboardingRef.current.revision,
         confirmed: true,
-      });
+        },
+      );
+      acceptOnboardingSnapshot(commandResult.onboarding);
+      const result = commandResult.cleanup;
       setSetupResult({
         kind: result.failed.length ? "warning" : "success",
         title: result.failed.length ? t("wizard.foldersLeftUnchanged") : t("wizard.emptyFoldersRemoved"),
@@ -584,7 +889,7 @@ export function SetupWizard({
         }),
         details: result,
       });
-      setCreatedFolderPaths([]);
+      setCreatedFolderCount(0);
       setCompletedActions((current) => current.filter((action) => action !== "initialize"));
       await onSetupSaved();
     } catch (error) {
@@ -676,20 +981,20 @@ export function SetupWizard({
         {currentStep.key === "finish" && (
           <FinishStep
             busy={setupAction === "finish"}
-            saved={completedActions.includes("save")}
+            saved={isOnboardingReady(onboardingRef.current)}
             setupResult={setupResult}
             onFinish={finishSetup}
-            disabled={snapshotLoading || !baseRevision}
+            disabled={snapshotLoading || !backendSessionReady || !baseRevision}
             onDone={onClose}
             onCleanupCreatedFolders={cleanupCreatedFolders}
-            createdFolderCount={createdFolderPaths.length}
+            createdFolderCount={createdFolderCount}
           />
         )}
 
         <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white/95 p-3 shadow-lift backdrop-blur-xl">
           <button
             className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={isFirst}
+            disabled={isFirst || snapshotLoading || !backendSessionReady}
             onClick={() => moveStep(-1)}
             type="button"
           >
@@ -701,6 +1006,7 @@ export function SetupWizard({
           {!isLast && (
             <button
               className="min-w-32 rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-cta-soft"
+              disabled={snapshotLoading || !backendSessionReady}
               onClick={() => moveStep(1)}
               type="button"
             >
@@ -841,92 +1147,6 @@ type SetupActionResult = {
   message: string;
   details?: unknown;
 };
-
-const SETUP_SESSION_STORAGE_KEY = "innpilot.setup-session.v1";
-
-type SetupWizardSession = {
-  version: 1;
-  draft: SetupDraft;
-  baseRevision: string | null;
-  showAdvancedWorkflows: boolean;
-  stepKey: string;
-  completedActions: SetupAction[];
-  createdFolderPaths: string[];
-};
-
-function loadSetupSession(config?: HubConfig | null): SetupWizardSession | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SETUP_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as Partial<SetupWizardSession>;
-    if (value.version !== 1 || !value.draft || typeof value.draft !== "object") {
-      return null;
-    }
-
-    const defaults = createSetupDraft(config);
-    const candidate = value.draft as Partial<SetupDraft>;
-    const recipientRules = Array.isArray(candidate.recipientRules)
-      ? candidate.recipientRules.filter(
-          (rule): rule is RecipientRuleDraft =>
-            Boolean(rule) &&
-            typeof rule.id === "string" &&
-            typeof rule.matchText === "string" &&
-            typeof rule.email === "string",
-        )
-      : defaults.recipientRules;
-    const completedActions = Array.isArray(value.completedActions)
-      ? value.completedActions.filter((action): action is SetupAction =>
-          ["preview", "initialize", "save", "validate"].includes(action),
-        )
-      : [];
-
-    return {
-      version: 1,
-      draft: {
-        ...defaults,
-        ...candidate,
-        invoiceInputPatterns: Array.isArray(candidate.invoiceInputPatterns)
-          ? candidate.invoiceInputPatterns
-          : defaults.invoiceInputPatterns,
-        recipientRules: recipientRules.length ? recipientRules : defaults.recipientRules,
-        scannerFilenamePrefixes: Array.isArray(candidate.scannerFilenamePrefixes)
-          ? candidate.scannerFilenamePrefixes
-          : defaults.scannerFilenamePrefixes,
-        contractMarkerTexts: Array.isArray(candidate.contractMarkerTexts)
-          ? candidate.contractMarkerTexts
-          : defaults.contractMarkerTexts,
-      },
-      baseRevision: typeof value.baseRevision === "string" ? value.baseRevision : null,
-      showAdvancedWorkflows: Boolean(value.showAdvancedWorkflows),
-      stepKey: typeof value.stepKey === "string" ? value.stepKey : "welcome",
-      completedActions,
-      createdFolderPaths: Array.isArray(value.createdFolderPaths)
-        ? value.createdFolderPaths.filter((path): path is string => typeof path === "string")
-        : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function saveSetupSession(session: SetupWizardSession) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SETUP_SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // Setup continues even if private browser storage is unavailable.
-  }
-}
-
-function clearSetupSession() {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(SETUP_SESSION_STORAGE_KEY);
-  } catch {
-    // A successful backend save remains valid even if browser storage is unavailable.
-  }
-}
 function WelcomeStep({
   showAdvancedWorkflows,
   onShowAdvancedWorkflows,
