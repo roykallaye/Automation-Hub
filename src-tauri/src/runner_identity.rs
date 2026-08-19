@@ -115,7 +115,7 @@ fn write_new_identity(path: &Path, protected: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn protect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn protect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
     use std::{ptr, slice};
     use windows_sys::Win32::{
         Foundation::LocalFree,
@@ -157,7 +157,7 @@ fn protect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(windows)]
-fn unprotect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn unprotect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
     use std::{ptr, slice};
     use windows_sys::Win32::{
         Foundation::LocalFree,
@@ -199,12 +199,12 @@ fn unprotect_for_current_user(value: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(not(windows))]
-fn protect_for_current_user(_value: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn protect_for_current_user(_value: &[u8]) -> Result<Vec<u8>, String> {
     Err("InnPilot device identity protection is available only on Windows.".to_string())
 }
 
 #[cfg(not(windows))]
-fn unprotect_for_current_user(_value: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn unprotect_for_current_user(_value: &[u8]) -> Result<Vec<u8>, String> {
     Err("InnPilot device identity protection is available only on Windows.".to_string())
 }
 

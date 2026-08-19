@@ -68,6 +68,98 @@ impl PreflightReport {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SafePreflightSummary {
+    pub(crate) checked_at: String,
+    pub(crate) workflows: Vec<SafeWorkflowPreflight>,
+    pub(crate) dependencies: Vec<SafeDependencyPreflight>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SafeWorkflowPreflight {
+    pub(crate) key: String,
+    pub(crate) status: ReadinessStatus,
+    pub(crate) can_run: bool,
+    pub(crate) configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SafeDependencyPreflight {
+    pub(crate) key: String,
+    pub(crate) status: ReadinessStatus,
+}
+
+/// Structural, metadata-only readiness for the local MCP adapter. This is a
+/// deliberately smaller check than interactive/full preflight: it uses only
+/// configured/exists/is-file/is-directory metadata for already-known paths.
+pub(crate) fn build_redacted_read_only_summary(config: &HubConfig) -> SafePreflightSummary {
+    let workflows = [
+        ("invoiceWorkflow", &config.scripts.invoice_workflow_script),
+        ("gmailDraftsWorkflow", &config.scripts.gmail_draft_script),
+        ("scansioniNetwork", &config.scripts.copy_scansioni_script),
+        ("ocrWorkflow", &config.scripts.ocr_preprocessing_script),
+        (
+            "contractsWorkflow",
+            &config.scripts.contract_processing_script,
+        ),
+    ]
+    .into_iter()
+    .map(|(key, path)| {
+        let configured = !path.trim().is_empty();
+        let present = configured && Path::new(path).is_file();
+        SafeWorkflowPreflight {
+            key: key.to_string(),
+            status: if !configured {
+                ReadinessStatus::MissingConfiguration
+            } else if present {
+                ReadinessStatus::Ready
+            } else {
+                ReadinessStatus::MissingScript
+            },
+            can_run: present,
+            configured,
+        }
+    })
+    .collect();
+    let dependencies = [
+        (
+            "automationConfig",
+            config.automation.automation_config_path.trim(),
+            true,
+        ),
+        ("gmailToken", config.gmail.token_path.trim(), true),
+        (
+            "automationRoot",
+            config.automation.automation_root_folder.trim(),
+            false,
+        ),
+    ]
+    .into_iter()
+    .map(|(key, path, is_file)| SafeDependencyPreflight {
+        key: key.to_string(),
+        status: if path.is_empty() {
+            ReadinessStatus::MissingConfiguration
+        } else if if is_file {
+            Path::new(path).is_file()
+        } else {
+            Path::new(path).is_dir()
+        } {
+            ReadinessStatus::Ready
+        } else {
+            ReadinessStatus::NotChecked
+        },
+    })
+    .collect();
+    SafePreflightSummary {
+        checked_at: Local::now().to_rfc3339(),
+        workflows,
+        dependencies,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ReadinessStatus {

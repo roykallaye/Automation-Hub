@@ -106,6 +106,24 @@ impl HealthService {
             )
         })
     }
+
+    /// Metadata-only health projection for a local assistant. It does not run
+    /// processes, enumerate folders, write permission probes, or read token,
+    /// credential, document, or automation-config contents.
+    pub(crate) fn check_redacted_read_only(
+        &self,
+    ) -> WorkspaceResult<preflight::SafePreflightSummary> {
+        let (config, _) = self.configuration.read_existing().map_err(|diagnostic| {
+            workspace_error(
+                WorkspaceErrorCode::ConfigurationUnavailable,
+                WorkspaceErrorCategory::Configuration,
+                "InnPilot configuration is unavailable for the safety check.",
+                RetryDirective::Retry,
+                diagnostic,
+            )
+        })?;
+        Ok(preflight::build_redacted_read_only_summary(&config))
+    }
 }
 
 /// Typed recovery facade. The filesystem/recovery implementation remains

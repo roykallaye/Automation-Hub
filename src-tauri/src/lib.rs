@@ -11,6 +11,7 @@ mod desktop_service;
 mod discovery;
 mod domain;
 mod folder_discovery;
+pub mod local_mcp;
 mod logs;
 mod onboarding;
 mod paths;
@@ -160,10 +161,34 @@ pub fn run() {
             sync_with_lifedesk,
             get_recovery_status,
             create_recovery_point,
-            restore_recovery_configuration
+            restore_recovery_configuration,
+            get_local_agent_connection,
+            create_local_agent_connection,
+            revoke_local_agent_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
+}
+
+#[tauri::command]
+fn get_local_agent_connection(
+    app: AppHandle,
+) -> Result<local_mcp::LocalAgentConnectionStatus, domain::WorkspaceError> {
+    local_mcp::connection_status(&app)
+}
+
+#[tauri::command]
+fn create_local_agent_connection(
+    app: AppHandle,
+) -> Result<local_mcp::LocalAgentConnectionStatus, domain::WorkspaceError> {
+    local_mcp::create_connection(&app)
+}
+
+#[tauri::command]
+fn revoke_local_agent_connection(
+    app: AppHandle,
+) -> Result<local_mcp::LocalAgentConnectionStatus, domain::WorkspaceError> {
+    local_mcp::revoke_connection(&app)
 }
 
 #[tauri::command]

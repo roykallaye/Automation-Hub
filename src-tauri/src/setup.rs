@@ -137,6 +137,32 @@ pub(crate) struct SetupPatch {
     redact_logs: Option<bool>,
 }
 
+impl SetupPatch {
+    pub(crate) fn set_hotel_display_name(&mut self, value: String) {
+        self.hotel_display_name = Some(value);
+    }
+
+    pub(crate) fn set_invoice_delivery_mode(&mut self, value: InvoiceDeliveryMode) {
+        self.invoice_delivery_mode = Some(value);
+    }
+
+    pub(crate) fn set_invoice_file_selection_mode(&mut self, value: InvoiceFileSelectionMode) {
+        self.invoice_file_selection_mode = Some(value);
+    }
+
+    pub(crate) fn set_safe_mode(&mut self, value: bool) {
+        self.safe_mode = Some(value);
+    }
+
+    pub(crate) fn set_archive_originals(&mut self, value: bool) {
+        self.archive_originals = Some(value);
+    }
+
+    pub(crate) fn set_redact_logs(&mut self, value: bool) {
+        self.redact_logs = Some(value);
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupSnapshot {
@@ -329,6 +355,16 @@ impl ConfigurationService {
 
     pub(crate) fn ensure(&self) -> Result<HubConfig, String> {
         self.repository.ensure()
+    }
+
+    /// Loads the already-installed configuration pair without bootstrapping,
+    /// migrating, recovering, or rewriting either file. Read-only adapters use
+    /// this boundary so an observation can never become a configuration write.
+    pub(crate) fn read_existing(&self) -> Result<(HubConfig, String), String> {
+        self.repository.with_lock(|config_path| {
+            let pair = load_configuration_pair(config_path)?;
+            Ok((pair.app_config, pair.revision))
+        })
     }
 
     pub(crate) fn snapshot(&self) -> Result<SetupSnapshot, String> {

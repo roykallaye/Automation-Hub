@@ -229,6 +229,25 @@ impl OnboardingSnapshot {
                 | OnboardingState::ReadyLegacy
         )
     }
+
+    pub(crate) fn installation_id(&self) -> &str {
+        &self.installation.id
+    }
+
+    pub(crate) fn readiness(&self) -> InstallationReadiness {
+        self.installation.readiness.clone()
+    }
+
+    pub(crate) fn deferred_items(&self) -> Vec<String> {
+        self.active_session
+            .as_ref()
+            .map(|session| session.deferred_items.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn user_action_required(&self) -> bool {
+        !self.is_ready()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
