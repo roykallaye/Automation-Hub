@@ -1,5 +1,8 @@
 import {
   ClipboardList,
+  Check,
+  Cable,
+  Copy,
   FileSignature,
   FileText,
   Lightbulb,
@@ -7,18 +10,37 @@ import {
   Mail,
   MessageCircleQuestion,
   Repeat,
+  RefreshCw,
   ScanText,
   Send,
   Sparkles,
   Wand2,
+  Unplug,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
 import { TINT_TILE, type CardTint } from "../components/tints";
 import { useI18n, type TranslationKey } from "../i18n";
+import { commandErrorMessage } from "../onboarding";
 import type { DiscoveryRequest } from "../types";
+
+type LocalAgentConnectionStatus = {
+  state: "notConnected" | "connected" | "expired";
+  profileId: string | null;
+  scopes: string[];
+  createdAt: string | null;
+  expiresAt: string | null;
+  lastActivityAt: string | null;
+  lastTool: string | null;
+  lastClientName: string | null;
+  lastProtocolVersion: string | null;
+  helperAvailable: boolean;
+  codexAddCommand: string | null;
+  codexConfigToml: string | null;
+  connectionIsReadOnly: boolean;
+};
 
 type FrequentRequest = {
   icon: typeof Mail;
@@ -124,6 +146,191 @@ const GENERIC_PLAN_STEP_KEYS: TranslationKey[] = [
   "assistant.genericStep4",
 ];
 
+function LocalAgentConnectionPanel() {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<LocalAgentConnectionStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await invoke<LocalAgentConnectionStatus>("get_local_agent_connection"));
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function createConnection() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await invoke<LocalAgentConnectionStatus>("create_local_agent_connection"));
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeConnection() {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await invoke<LocalAgentConnectionStatus>("revoke_local_agent_connection"));
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyCommand() {
+    if (!status?.codexAddCommand) return;
+    try {
+      await navigator.clipboard.writeText(status.codexAddCommand);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setError(t("assistant.copyFailed"));
+    }
+  }
+
+  const connected = status?.state === "connected";
+  const date = (value: string | null | undefined) =>
+    value
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+          new Date(value),
+        )
+      : t("assistant.neverUsed");
+
+  return (
+    <section className="rounded-xl border border-white/70 bg-white/70 p-5 shadow-glass backdrop-blur-xl">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-white">
+            <Cable className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-950">
+                {t("assistant.localConnectionTitle")}
+              </h2>
+              <span
+                className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                  connected
+                    ? "bg-emerald-100 text-emerald-900"
+                    : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {connected
+                  ? t("assistant.connected")
+                  : status?.state === "expired"
+                    ? t("assistant.expired")
+                    : t("assistant.notConnected")}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+              {t("assistant.localConnectionText")}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void refresh()}
+          >
+            <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
+            {t("assistant.checkConnection")}
+          </button>
+          {connected ? (
+            <button
+              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-50 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void revokeConnection()}
+            >
+              <Unplug className="h-4 w-4" aria-hidden="true" />
+              {t("assistant.revokeConnection")}
+            </button>
+          ) : (
+            <button
+              className="inline-flex min-h-10 items-center gap-2 rounded-md bg-cta px-4 text-sm font-semibold text-white transition hover:bg-cta-soft disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void createConnection()}
+            >
+              <Cable className="h-4 w-4" aria-hidden="true" />
+              {t("assistant.createConnection")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {connected && status && (
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="grid gap-4 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {t("assistant.access")}
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {t("assistant.readOnlyAccess")}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {t("assistant.expires")}
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">{date(status.expiresAt)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {t("assistant.lastActivity")}
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">{date(status.lastActivityAt)}</p>
+              {status.lastClientName && (
+                <p className="mt-0.5 text-xs font-medium text-slate-500">
+                  {status.lastClientName}
+                  {status.lastProtocolVersion ? ` · MCP ${status.lastProtocolVersion}` : ""}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+              disabled={!status.helperAvailable || !status.codexAddCommand}
+              onClick={() => void copyCommand()}
+            >
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? t("assistant.copied") : t("assistant.copyCodexSetup")}
+            </button>
+            <p className="text-xs font-medium leading-5 text-slate-500">
+              {status.helperAvailable
+                ? t("assistant.codexSetupHint")
+                : t("assistant.helperUnavailable")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function AssistantPage() {
   const { t } = useI18n();
   const [request, setRequest] = useState("");
@@ -174,6 +381,8 @@ export function AssistantPage() {
   return (
     <div className="space-y-5">
       <PageHeader title={t("assistant.title")} eyebrow={t("assistant.eyebrow")} />
+
+      <LocalAgentConnectionPanel />
 
       <section className="overflow-hidden rounded-xl border border-brand-100 bg-white/55 shadow-glass backdrop-blur-xl">
         <div className="bg-[linear-gradient(120deg,rgb(var(--brand-50))_0%,transparent_60%)] p-6 sm:p-7">
