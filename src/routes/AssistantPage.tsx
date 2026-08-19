@@ -11,6 +11,9 @@ import {
   MessageCircleQuestion,
   Repeat,
   RefreshCw,
+  FolderSearch,
+  ShieldCheck,
+  Eye,
   ScanText,
   Send,
   Sparkles,
@@ -18,6 +21,7 @@ import {
   Unplug,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
@@ -40,6 +44,41 @@ type LocalAgentConnectionStatus = {
   codexAddCommand: string | null;
   codexConfigToml: string | null;
   connectionIsReadOnly: boolean;
+};
+
+type DiscoveryManagerView = {
+  discovery: {
+    scope: null | {
+      scopeId: string;
+      revision: number;
+      state: "active" | "revoked" | "expired";
+      createdAt: string;
+      expiresAt: string;
+      roots: Array<{ rootId: string; displayLabel: string; localPath: string }>;
+    };
+    lastSnapshot: null | {
+      snapshotId: string;
+      createdAt: string;
+      expiresAt: string;
+      digest: string;
+      truncated: boolean;
+    };
+    privacySummary: string;
+  };
+  proposal: null | {
+    proposalId: string;
+    status: string;
+    changedFields: string[];
+    warnings: string[];
+    unresolvedQuestions: string[];
+    agentConfidence: number | null;
+    proposalDigest: string;
+    createdAt: string;
+    invalidationReason: string | null;
+    localPaths: Array<{ field: string; localPath: string; evidenceRef: string }>;
+    reviewOnly: boolean;
+    mutationPerformed: boolean;
+  };
 };
 
 type FrequentRequest = {
@@ -331,6 +370,210 @@ function LocalAgentConnectionPanel() {
   );
 }
 
+function EnvironmentDiscoveryPanel() {
+  const { t } = useI18n();
+  const [view, setView] = useState<DiscoveryManagerView | null>(null);
+  const [selectedRoots, setSelectedRoots] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showProposal, setShowProposal] = useState(false);
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      setView(await invoke<DiscoveryManagerView>("get_environment_discovery_status"));
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function chooseRoots() {
+    const selected = await open({ directory: true, multiple: true, title: t("assistant.chooseFolders") });
+    if (!selected) return;
+    const roots = (Array.isArray(selected) ? selected : [selected]).filter(
+      (value): value is string => typeof value === "string" && Boolean(value.trim()),
+    );
+    setSelectedRoots(Array.from(new Set(roots)).slice(0, 3));
+  }
+
+  async function approve() {
+    if (!selectedRoots.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setView(
+        await invoke<DiscoveryManagerView>("approve_environment_discovery", {
+          request: { roots: selectedRoots, confirmed: true },
+        }),
+      );
+      setSelectedRoots([]);
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    setBusy(true);
+    setError(null);
+    try {
+      setView(await invoke<DiscoveryManagerView>("revoke_environment_discovery"));
+    } catch (problem) {
+      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const scope = view?.discovery.scope;
+  const active = scope?.state === "active";
+  const formatDate = (value?: string | null) =>
+    value
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+          new Date(value),
+        )
+      : t("assistant.neverUsed");
+
+  return (
+    <section className="rounded-xl border border-white/70 bg-white/70 p-5 shadow-glass backdrop-blur-xl">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-white">
+            <FolderSearch className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-950">
+                {t("assistant.discoveryAccessTitle")}
+              </h2>
+              <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                active ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-700"
+              }`}>
+                {active ? t("assistant.discoveryActive") : t("assistant.discoveryInactive")}
+              </span>
+            </div>
+            <p className="mt-1 max-w-3xl text-sm font-medium leading-6 text-slate-600">
+              {t("assistant.discoveryPrivacy")}
+            </p>
+          </div>
+        </div>
+        <button
+          aria-label={t("assistant.checkConnection")}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          disabled={busy}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {active && scope ? (
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {scope.roots.map((root) => (
+              <div key={root.rootId} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2.5">
+                <p className="truncate text-sm font-semibold text-slate-900">{root.displayLabel}</p>
+                <p className="mt-0.5 truncate text-xs font-medium text-slate-500">{root.localPath}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-medium text-slate-500">
+            <span>{t("assistant.lastDiscovery")}: {formatDate(view?.discovery.lastSnapshot?.createdAt)}</span>
+            <button
+              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 font-semibold text-rose-800 transition hover:bg-rose-50 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void revoke()}
+            >
+              <Unplug className="h-4 w-4" />
+              {t("assistant.revokeDiscovery")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+              disabled={busy}
+              onClick={() => void chooseRoots()}
+            >
+              <FolderSearch className="h-4 w-4" />
+              {t("assistant.chooseFolders")}
+            </button>
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+              disabled={busy || !selectedRoots.length}
+              onClick={() => void approve()}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {t("assistant.allowInspection")}
+            </button>
+            <p className="text-xs font-medium text-slate-500">
+              {selectedRoots.length
+                ? t("assistant.foldersSelected", { count: selectedRoots.length })
+                : t("assistant.selectUpToThree")}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {view?.proposal && (
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">{t("assistant.proposalReady")}</p>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">
+                {t("assistant.reviewOnly")} · {formatDate(view.proposal.createdAt)}
+              </p>
+            </div>
+            <button
+              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              onClick={() => setShowProposal((current) => !current)}
+            >
+              <Eye className="h-4 w-4" />
+              {showProposal ? t("assistant.closeProposal") : t("assistant.openProposal")}
+            </button>
+          </div>
+          {showProposal && (
+            <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm">
+              <p className="font-semibold text-slate-900">{view.proposal.status}</p>
+              {view.proposal.localPaths.map((path) => (
+                <div key={path.field} className="mt-3 border-t border-slate-200 pt-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{path.field}</p>
+                  <p className="mt-1 break-all font-medium text-slate-800">{path.localPath}</p>
+                </div>
+              ))}
+              {view.proposal.unresolvedQuestions.length > 0 && (
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {t("assistant.needsClarification")}
+                  </p>
+                  <ul className="mt-1 space-y-1 text-slate-700">
+                    {view.proposal.unresolvedQuestions.map((question) => <li key={question}>• {question}</li>)}
+                  </ul>
+                </div>
+              )}
+              <p className="mt-3 break-all text-[11px] font-medium text-slate-400">
+                {view.proposal.proposalDigest}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">{error}</p>}
+    </section>
+  );
+}
+
 export function AssistantPage() {
   const { t } = useI18n();
   const [request, setRequest] = useState("");
@@ -383,6 +626,7 @@ export function AssistantPage() {
       <PageHeader title={t("assistant.title")} eyebrow={t("assistant.eyebrow")} />
 
       <LocalAgentConnectionPanel />
+      <EnvironmentDiscoveryPanel />
 
       <section className="overflow-hidden rounded-xl border border-brand-100 bg-white/55 shadow-glass backdrop-blur-xl">
         <div className="bg-[linear-gradient(120deg,rgb(var(--brand-50))_0%,transparent_60%)] p-6 sm:p-7">
@@ -492,27 +736,6 @@ export function AssistantPage() {
           )}
         </section>
       )}
-
-      <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
-            <ScanText className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-lg font-semibold text-slate-950">
-                {t("assistant.folderDiscoveryTitle")}
-              </h3>
-              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-brand-900">
-                {t("common.comingSoon")}
-              </span>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-              {t("assistant.folderDiscoveryText")}
-            </p>
-          </div>
-        </div>
-      </section>
 
       <section>
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">
