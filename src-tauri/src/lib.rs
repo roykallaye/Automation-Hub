@@ -10,6 +10,7 @@ mod config;
 mod desktop_service;
 mod discovery;
 mod domain;
+mod environment_discovery;
 mod folder_discovery;
 pub mod local_mcp;
 mod logs;
@@ -164,7 +165,10 @@ pub fn run() {
             restore_recovery_configuration,
             get_local_agent_connection,
             create_local_agent_connection,
-            revoke_local_agent_connection
+            revoke_local_agent_connection,
+            get_environment_discovery_status,
+            approve_environment_discovery,
+            revoke_environment_discovery
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
@@ -175,6 +179,28 @@ fn get_local_agent_connection(
     app: AppHandle,
 ) -> Result<local_mcp::LocalAgentConnectionStatus, domain::WorkspaceError> {
     local_mcp::connection_status(&app)
+}
+
+#[tauri::command]
+fn get_environment_discovery_status(
+    app: AppHandle,
+) -> Result<local_mcp::LocalDiscoveryManagerView, domain::WorkspaceError> {
+    local_mcp::manager_discovery_status(&app)
+}
+
+#[tauri::command]
+fn approve_environment_discovery(
+    app: AppHandle,
+    request: environment_discovery::ApproveDiscoveryScopeRequest,
+) -> Result<local_mcp::LocalDiscoveryManagerView, domain::WorkspaceError> {
+    local_mcp::approve_discovery_scope(&app, request)
+}
+
+#[tauri::command]
+fn revoke_environment_discovery(
+    app: AppHandle,
+) -> Result<local_mcp::LocalDiscoveryManagerView, domain::WorkspaceError> {
+    local_mcp::revoke_discovery_scope(&app)
 }
 
 #[tauri::command]

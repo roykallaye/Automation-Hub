@@ -61,6 +61,37 @@ async fn main() -> ExitCode {
             synthetic_command(args, innpilot_lib::local_mcp::revoke_synthetic)
         }
         #[cfg(debug_assertions)]
+        Some("--dev-approve-discovery-synthetic") => {
+            let Some(root) = args.next() else {
+                eprintln!("Synthetic discovery approval requires a marked test root.");
+                return ExitCode::from(2);
+            };
+            let Some(folder) = args.next() else {
+                eprintln!("Synthetic discovery approval requires one folder.");
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                return ExitCode::from(2);
+            }
+            match innpilot_lib::local_mcp::approve_discovery_synthetic(
+                PathBuf::from(root),
+                PathBuf::from(folder),
+            ) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
+        Some("--dev-revoke-discovery-synthetic") => {
+            synthetic_json_command(args, innpilot_lib::local_mcp::revoke_discovery_synthetic)
+        }
+        #[cfg(debug_assertions)]
         Some("--dev-validate-synthetic") => {
             let Some(root) = args.next() else {
                 eprintln!("Synthetic validation requires a marked test root.");
@@ -115,6 +146,31 @@ fn synthetic_command(
             }
             Err(_) => ExitCode::from(1),
         },
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn synthetic_json_command(
+    mut args: impl Iterator<Item = String>,
+    operation: fn(PathBuf) -> Result<String, String>,
+) -> ExitCode {
+    let Some(root) = args.next() else {
+        eprintln!("Synthetic operation requires a marked test root.");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("Synthetic operation accepts exactly one test root.");
+        return ExitCode::from(2);
+    }
+    match operation(PathBuf::from(root)) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             eprintln!("{error}");
             ExitCode::from(1)
