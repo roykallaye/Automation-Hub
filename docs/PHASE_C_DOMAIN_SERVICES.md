@@ -241,14 +241,12 @@ durable target intent and deterministic reconciliation address it.
 
 ## Phase D boundary
 
-The smallest safe next step is a local, read-only/proposal-oriented adapter over
-these services. It should authenticate a local caller, expose redacted health,
-onboarding, configuration revision/summary, recovery status, and synthetic
-proposal validation, and return the same typed errors. It must not expose raw
-filesystem operations, current `HubConfig`, configuration commit, automation
-execution, credentials, or completion evidence. A proposal should bind to the
-exact configuration revision and still require manager approval through
-InnPilot before `SetupApplicationService` can apply it.
-
-No MCP, OAuth, remote relay, discovery engine, proposal engine, model prompt, or
-agent permission system is implemented in Phase C.
+Phase D implements the local read-only/proposal-oriented adapter over these
+services without changing the Phase C boundary. It authenticates a bounded
+local grant, exposes redacted health, onboarding, configuration and recovery
+state, and validates revision-bound setup proposals without mutation. It does
+not expose raw filesystem operations, current `HubConfig`, configuration
+commit, automation execution, credentials, completion evidence, OAuth, remote
+relay or environment discovery. See
+[PHASE_D_LOCAL_MCP.md](PHASE_D_LOCAL_MCP.md) for the exact surface and test
+evidence.

@@ -150,6 +150,9 @@ Release evidence and the commercial go/no-go decision are recorded in
 [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md). The security boundary
 for the later Relay and company-knowledge milestone is documented in
 [docs/RELAY_INTEGRATION_BOUNDARY.md](docs/RELAY_INTEGRATION_BOUNDARY.md).
+The local read-only/proposal-validation MCP boundary, grant model, exact tool
+surface, real Codex evidence, and limitations are documented in
+[docs/PHASE_D_LOCAL_MCP.md](docs/PHASE_D_LOCAL_MCP.md).
 
 
 
