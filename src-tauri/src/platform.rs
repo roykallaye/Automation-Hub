@@ -18,6 +18,8 @@ pub(crate) struct InstallationPaths {
     pub(crate) runner_root: PathBuf,
     pub(crate) runner_db: PathBuf,
     pub(crate) packaged_worker: Option<PathBuf>,
+    pub(crate) discovery_root: PathBuf,
+    pub(crate) proposal_root: PathBuf,
 }
 
 impl InstallationPaths {
@@ -55,6 +57,8 @@ impl InstallationPaths {
             runner_db: runner_root.join(RUNNER_DATABASE_FILE),
             runner_root,
             packaged_worker,
+            discovery_root: app_data_dir.join("environment-discovery"),
+            proposal_root: app_data_dir.join("setup-proposals"),
         }
     }
 }
@@ -92,6 +96,8 @@ mod tests {
         assert_eq!(paths.runner_root, root.join("runner"));
         assert_eq!(paths.runner_db, root.join("runner").join("runner.db"));
         assert_eq!(paths.packaged_worker, Some(worker));
+        assert_eq!(paths.discovery_root, root.join("environment-discovery"));
+        assert_eq!(paths.proposal_root, root.join("setup-proposals"));
     }
 
     #[test]

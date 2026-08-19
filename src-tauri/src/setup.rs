@@ -161,6 +161,42 @@ impl SetupPatch {
     pub(crate) fn set_redact_logs(&mut self, value: bool) {
         self.redact_logs = Some(value);
     }
+
+    pub(crate) fn set_invoice_input_folder(&mut self, value: String) {
+        self.invoice_input_folder = Some(value);
+    }
+
+    pub(crate) fn set_invoice_output_folder(&mut self, value: String) {
+        self.invoice_output_folder = Some(value);
+    }
+
+    pub(crate) fn set_invoice_archive_folder(&mut self, value: String) {
+        self.invoice_archive_folder = Some(value);
+    }
+
+    pub(crate) fn set_invoice_log_folder(&mut self, value: String) {
+        self.invoice_log_folder = Some(value);
+    }
+
+    pub(crate) fn set_shared_scan_folder(&mut self, value: String) {
+        self.shared_scan_folder = Some(value);
+    }
+
+    pub(crate) fn set_scans_local_cache_folder(&mut self, value: String) {
+        self.scans_local_cache_folder = Some(value);
+    }
+
+    pub(crate) fn set_ocr_text_output_folder(&mut self, value: String) {
+        self.ocr_text_output_folder = Some(value);
+    }
+
+    pub(crate) fn set_signed_contracts_output_folder(&mut self, value: String) {
+        self.signed_contracts_output_folder = Some(value);
+    }
+
+    pub(crate) fn set_contract_log_folder(&mut self, value: String) {
+        self.contract_log_folder = Some(value);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
