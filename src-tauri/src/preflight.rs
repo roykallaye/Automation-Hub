@@ -52,6 +52,22 @@ pub(crate) struct PreflightReport {
     dependencies: Vec<PreflightItem>,
 }
 
+impl PreflightReport {
+    /// Stable typed projection used by onboarding/application services.
+    /// Callers no longer need to serialize the report and inspect JSON keys.
+    pub(crate) fn deferred_workflow_keys(&self) -> Vec<String> {
+        let mut keys = self
+            .workflows
+            .iter()
+            .filter(|workflow| workflow.command_name.is_some() && !workflow.can_run)
+            .map(|workflow| workflow.key.clone())
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ReadinessStatus {

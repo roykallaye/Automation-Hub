@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::platform::{BuildInfo, InstallationPaths};
 use crate::{
     config::{
         self, AutomationConfig, ClientConfig, FolderPaths, GmailConfig, HubConfig,
@@ -15,7 +17,6 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
 
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
@@ -23,7 +24,7 @@ use std::os::windows::fs::MetadataExt;
 static SETUP_BACKUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SetupDraft {
     #[serde(default = "default_setup_mode")]
     setup_mode: SetupMode,
@@ -103,8 +104,8 @@ struct RecipientRuleDraft {
 
 /// Explicit setup changes. A missing field always means "preserve the current
 /// installed value"; an empty value is still an intentional update.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SetupPatch {
     setup_mode: Option<SetupMode>,
     hotel_display_name: Option<String>,
@@ -143,14 +144,31 @@ pub(crate) struct SetupSnapshot {
     revision: String,
 }
 
+impl SetupSnapshot {
+    pub(crate) fn draft(&self) -> SetupDraft {
+        self.draft.clone()
+    }
+
+    pub(crate) fn revision(&self) -> &str {
+        &self.revision
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupPreview {
+    target_revision: String,
     workspace_base: String,
     folder_plan: Vec<FolderPlanItem>,
     app_config_preview: HubConfig,
     automation_config_preview: serde_json::Value,
     warnings: Vec<String>,
+}
+
+impl SetupPreview {
+    pub(crate) fn target_revision(&self) -> &str {
+        &self.target_revision
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,6 +202,12 @@ pub(crate) struct WorkspaceInitResult {
 impl WorkspaceInitResult {
     pub(crate) fn created_paths(&self) -> Vec<String> {
         self.created_paths.clone()
+    }
+
+    pub(crate) fn has_failures(&self) -> bool {
+        self.folders
+            .iter()
+            .any(|folder| folder.action == FolderAction::Failed)
     }
 }
 
@@ -222,7 +246,13 @@ pub(crate) struct SaveSetupResult {
     revision: String,
 }
 
-#[derive(Debug)]
+impl SaveSetupResult {
+    pub(crate) fn revision(&self) -> &str {
+        &self.revision
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ConfigurationPair {
     app_config_path: PathBuf,
     app_bytes: Vec<u8>,
@@ -234,9 +264,227 @@ struct ConfigurationPair {
     revision: String,
 }
 
+/// Opaque preservation-aware candidate produced from one exact installed
+/// configuration snapshot.  Adapters can inspect its typed preview/revisions,
+/// but only the configuration service can commit its bytes.
+#[derive(Debug)]
+pub(crate) struct ValidatedSetupCandidate {
+    pair: ConfigurationPair,
+    effective_draft: SetupDraft,
+    preview: SetupPreview,
+    next_app_bytes: Vec<u8>,
+    next_automation_bytes: Vec<u8>,
+    next_app_config: HubConfig,
+    automation_path: PathBuf,
+    app_changed: bool,
+    automation_changed: bool,
+    target_revision: String,
+}
+
+impl ValidatedSetupCandidate {
+    pub(crate) fn base_revision(&self) -> &str {
+        &self.pair.revision
+    }
+
+    pub(crate) fn target_revision(&self) -> &str {
+        &self.target_revision
+    }
+
+    pub(crate) fn preview(&self) -> SetupPreview {
+        self.preview.clone()
+    }
+
+    pub(crate) fn effective_draft(&self) -> SetupDraft {
+        self.effective_draft.clone()
+    }
+
+    pub(crate) fn requires_pair_recovery(&self) -> bool {
+        self.app_changed && self.automation_changed
+    }
+}
+
 const SETUP_TRANSACTION_SCHEMA: u32 = 1;
 const SETUP_TRANSACTION_FILE: &str = ".innpilot-setup-transaction.json";
 const MAX_SETUP_TRANSACTION_BYTES: u64 = 64 * 1024;
+
+/// Shared configuration application service used by Tauri today and by
+/// future local adapters. It is deliberately path/repository based and has no
+/// dependency on `AppHandle`.
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigurationService {
+    repository: config::ConfigurationRepository,
+}
+
+#[derive(Debug)]
+pub(crate) enum ConfigurationCandidateError {
+    Stale { current_revision: String },
+    Unavailable { diagnostic: String },
+    Invalid { diagnostic: String },
+}
+
+impl ConfigurationService {
+    pub(crate) fn new(repository: config::ConfigurationRepository) -> Self {
+        Self { repository }
+    }
+
+    pub(crate) fn ensure(&self) -> Result<HubConfig, String> {
+        self.repository.ensure()
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<SetupSnapshot, String> {
+        self.repository.ensure()?;
+        self.repository.with_lock(|config_path| {
+            let pair = load_configuration_pair(config_path)?;
+            Ok(SetupSnapshot {
+                draft: draft_from_installed(&pair.app_config, pair.automation_value.as_ref()),
+                revision: pair.revision,
+            })
+        })
+    }
+
+    pub(crate) fn prepare_candidate(
+        &self,
+        patch: &SetupPatch,
+        expected_revision: &str,
+    ) -> Result<ValidatedSetupCandidate, ConfigurationCandidateError> {
+        self.repository
+            .with_lock(|config_path| {
+                let pair = load_configuration_pair(config_path)?;
+                Ok(pair)
+            })
+            .map_err(|diagnostic| ConfigurationCandidateError::Unavailable { diagnostic })
+            .and_then(|pair| {
+                if pair.revision != expected_revision {
+                    return Err(ConfigurationCandidateError::Stale {
+                        current_revision: pair.revision,
+                    });
+                }
+                build_validated_candidate(pair, patch, expected_revision)
+                    .map_err(|diagnostic| ConfigurationCandidateError::Invalid { diagnostic })
+            })
+    }
+
+    pub(crate) fn preview(
+        &self,
+        patch: &SetupPatch,
+        expected_revision: &str,
+    ) -> Result<SetupPreview, ConfigurationCandidateError> {
+        self.prepare_candidate(patch, expected_revision)
+            .map(|candidate| candidate.preview())
+    }
+
+    pub(crate) fn assert_revision(&self, expected_revision: &str) -> Result<(), String> {
+        self.repository.with_lock(|config_path| {
+            let pair = load_configuration_pair(config_path)?;
+            if pair.revision != expected_revision {
+                return Err(
+                    "The setup changed after this screen was opened. Refresh before continuing."
+                        .to_string(),
+                );
+            }
+            Ok(())
+        })
+    }
+
+    pub(crate) fn commit_candidate(
+        &self,
+        candidate: ValidatedSetupCandidate,
+        recovery_service: &recovery::RecoveryService,
+        runner_root: &Path,
+    ) -> Result<SaveSetupResult, String> {
+        let recovery_point_id = self.stage_recovery_point(&candidate, recovery_service)?;
+        self.commit_candidate_with_recovery_point(candidate, recovery_point_id, runner_root)
+    }
+
+    /// Stages the exact predecessor bytes before onboarding records an apply
+    /// intent. Orphaned points are harmless and subject to normal retention;
+    /// installed configuration is still protected by the commit-time CAS.
+    pub(crate) fn stage_recovery_point(
+        &self,
+        candidate: &ValidatedSetupCandidate,
+        recovery_service: &recovery::RecoveryService,
+    ) -> Result<Option<String>, String> {
+        if !candidate.requires_pair_recovery() {
+            return Ok(None);
+        }
+        recovery_service
+            .create_configuration_point_from_bytes(
+                &candidate.pair.app_bytes,
+                candidate.pair.automation_bytes.as_deref(),
+            )
+            .map(|point| Some(point.id))
+    }
+
+    pub(crate) fn commit_candidate_with_recovery_point(
+        &self,
+        candidate: ValidatedSetupCandidate,
+        recovery_point_id: Option<String>,
+        runner_root: &Path,
+    ) -> Result<SaveSetupResult, String> {
+        if candidate.requires_pair_recovery() && recovery_point_id.is_none() {
+            return Err(
+                "InnPilot could not establish the required configuration recovery point."
+                    .to_string(),
+            );
+        }
+        let _workflow_lock = runner_ledger::ProcessLock::try_acquire_at(
+            runner_root,
+            runner_ledger::ProcessLockKind::Workflow,
+        )
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "Wait for the current automation to finish before saving setup.".to_string()
+        })?;
+        self.repository.with_lock(|_| {
+            let recovery_point_id = recovery_point_id.clone();
+            commit_validated_candidate(candidate, |pair, next_app_bytes, next_automation_bytes| {
+                let point_id = recovery_point_id.ok_or_else(|| {
+                    "InnPilot configuration recovery evidence is missing.".to_string()
+                })?;
+                let journal = SetupTransactionJournal {
+                    schema_version: SETUP_TRANSACTION_SCHEMA,
+                    recovery_point_id: point_id.clone(),
+                    app_config_path: pair.app_config_path.to_string_lossy().to_string(),
+                    old_app_sha256: sha256_bytes(&pair.app_bytes),
+                    new_app_sha256: sha256_bytes(next_app_bytes),
+                    old_automation_path: pair.automation_config_path.to_string_lossy().to_string(),
+                    new_automation_path: String::new(),
+                    old_automation_existed: pair.automation_bytes.is_some(),
+                    old_automation_sha256: pair
+                        .automation_bytes
+                        .as_ref()
+                        .map(|bytes| sha256_bytes(bytes)),
+                    new_automation_sha256: sha256_bytes(next_automation_bytes),
+                };
+                Ok(Some((journal, point_id)))
+            })
+        })
+    }
+
+    pub(crate) fn health(&self, full: bool) -> Result<preflight::AppConfigStatus, String> {
+        let config = self.repository.ensure()?;
+        let path = self.repository.config_path().to_string_lossy().to_string();
+        Ok(if full {
+            preflight::AppConfigStatus::new(path, config)
+        } else {
+            preflight::AppConfigStatus::new_fast(path, config)
+        })
+    }
+
+    pub(crate) fn validate(&self) -> Result<preflight::PreflightReport, String> {
+        self.repository
+            .ensure()
+            .map(|config| preflight::build_preflight_report(&config))
+    }
+
+    pub(crate) fn reconcile_incomplete_commit(
+        &self,
+        recovery_service: &recovery::RecoveryService,
+        runner_root: &Path,
+    ) -> Result<(), String> {
+        reconcile_incomplete_setup_at(self.repository.config_path(), recovery_service, runner_root)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,70 +501,24 @@ struct SetupTransactionJournal {
     new_automation_sha256: String,
 }
 
-pub(crate) fn get_setup_snapshot(app: &AppHandle) -> Result<SetupSnapshot, String> {
-    // Ensure one current config exists before taking a stable pair snapshot.
-    let (_, config_path) = config::ensure_config_with_path(app)?;
-    config::with_configuration_lock(&config_path, || {
-        let pair = load_configuration_pair(&config_path)?;
-        Ok(SetupSnapshot {
-            draft: draft_from_installed(&pair.app_config, pair.automation_value.as_ref()),
-            revision: pair.revision,
-        })
-    })
-}
-
-pub(crate) fn preview_setup(
-    app: &AppHandle,
-    patch: SetupPatch,
-    expected_revision: &str,
-) -> Result<SetupPreview, String> {
-    let config_path = app_config_path(app)?;
-    config::with_configuration_lock(&config_path, || {
-        let pair = load_configuration_pair(&config_path)?;
-        preview_setup_patch(&pair, &patch, expected_revision)
-    })
-}
-
 fn preview_setup_patch(
     pair: &ConfigurationPair,
     patch: &SetupPatch,
     expected_revision: &str,
 ) -> Result<SetupPreview, String> {
-    if pair.revision != expected_revision {
-        return Err(format!(
-            "The setup changed after this screen was opened. Refresh before previewing. Expected revision {expected_revision}, current revision {}.",
-            pair.revision
-        ));
-    }
-    let prepared = prepare_setup_patch(pair, patch)?;
-    let mut app_config_preview = pair.app_config.clone();
-    apply_app_config_patch(
-        &mut app_config_preview,
-        patch,
-        &prepared.generated.app_config,
-    );
-    let automation_config_preview = if pair.automation_value.is_some() {
-        prepared.next_automation_value
-    } else {
-        prepared.generated.automation_config.clone()
-    };
-    Ok(SetupPreview {
-        workspace_base: prepared
-            .generated
-            .workspace_base
-            .to_string_lossy()
-            .to_string(),
-        folder_plan: folder_plan(&prepared.generated.folder_specs),
-        app_config_preview,
-        automation_config_preview,
-        warnings: prepared.generated.warnings,
-    })
+    build_validated_candidate(pair.clone(), patch, expected_revision)
+        .map(|candidate| candidate.preview)
 }
 
 #[cfg(test)]
 fn preview_setup_draft(draft: SetupDraft) -> Result<SetupPreview, String> {
     let generated = GeneratedSetup::from_draft(&draft)?;
+    let app_bytes = serde_json::to_vec_pretty(&generated.app_config)
+        .map_err(|error| format!("Could not prepare setup preview: {error}"))?;
+    let automation_bytes = serde_json::to_vec_pretty(&generated.automation_config)
+        .map_err(|error| format!("Could not prepare setup preview: {error}"))?;
     Ok(SetupPreview {
+        target_revision: configuration_revision(&app_bytes, Some(&automation_bytes)),
         workspace_base: generated.workspace_base.to_string_lossy().to_string(),
         folder_plan: folder_plan(&generated.folder_specs),
         app_config_preview: generated.app_config,
@@ -541,46 +743,6 @@ pub(crate) fn remove_setup_created_empty_folders(
     })
 }
 
-pub(crate) fn save_setup_config(
-    app: &AppHandle,
-    patch: SetupPatch,
-    expected_revision: String,
-    confirmed: bool,
-) -> Result<SaveSetupResult, String> {
-    if !confirmed {
-        return Err(
-            "This setup action needs confirmation before InnPilot can save configuration."
-                .to_string(),
-        );
-    }
-
-    let app_config_path = app_config_path(app)?;
-    let _workflow_lock =
-        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
-            "Wait for the current automation to finish before saving setup.".to_string()
-        })?;
-    config::with_configuration_lock(&app_config_path, || {
-        apply_setup_patch_with_app_locked(app, &app_config_path, patch, &expected_revision)
-    })
-}
-
-pub(crate) fn assert_setup_revision(
-    app: &AppHandle,
-    expected_revision: &str,
-) -> Result<(), String> {
-    let app_config_path = app_config_path(app)?;
-    config::with_configuration_lock(&app_config_path, || {
-        let pair = load_configuration_pair(&app_config_path)?;
-        if pair.revision != expected_revision {
-            return Err(
-                "The setup changed after this screen was opened. Refresh before continuing."
-                    .to_string(),
-            );
-        }
-        Ok(())
-    })
-}
-
 #[cfg(test)]
 fn apply_setup_patch_locked(
     app_config_path: &Path,
@@ -590,42 +752,6 @@ fn apply_setup_patch_locked(
     apply_setup_patch_core(app_config_path, patch, expected_revision, |_, _, _| {
         Ok(None)
     })
-}
-
-fn apply_setup_patch_with_app_locked(
-    app: &AppHandle,
-    app_config_path: &Path,
-    patch: SetupPatch,
-    expected_revision: &str,
-) -> Result<SaveSetupResult, String> {
-    apply_setup_patch_core(
-        app_config_path,
-        patch,
-        expected_revision,
-        |pair, next_app_bytes, next_automation_bytes| {
-            let point = recovery::create_configuration_point_from_bytes_locked(
-                app,
-                &pair.app_bytes,
-                pair.automation_bytes.as_deref(),
-            )?;
-            let journal = SetupTransactionJournal {
-                schema_version: SETUP_TRANSACTION_SCHEMA,
-                recovery_point_id: point.id.clone(),
-                app_config_path: pair.app_config_path.to_string_lossy().to_string(),
-                old_app_sha256: sha256_bytes(&pair.app_bytes),
-                new_app_sha256: sha256_bytes(next_app_bytes),
-                old_automation_path: pair.automation_config_path.to_string_lossy().to_string(),
-                new_automation_path: String::new(),
-                old_automation_existed: pair.automation_bytes.is_some(),
-                old_automation_sha256: pair
-                    .automation_bytes
-                    .as_ref()
-                    .map(|bytes| sha256_bytes(bytes)),
-                new_automation_sha256: sha256_bytes(next_automation_bytes),
-            };
-            Ok(Some((journal, point.id)))
-        },
-    )
 }
 
 fn apply_setup_patch_core<F>(
@@ -642,28 +768,38 @@ where
     ) -> Result<Option<(SetupTransactionJournal, String)>, String>,
 {
     let pair = load_configuration_pair(app_config_path)?;
+    let candidate = build_validated_candidate(pair, &patch, expected_revision)?;
+    commit_validated_candidate(candidate, create_transaction)
+}
+
+fn build_validated_candidate(
+    pair: ConfigurationPair,
+    patch: &SetupPatch,
+    expected_revision: &str,
+) -> Result<ValidatedSetupCandidate, String> {
     if pair.revision != expected_revision {
         return Err(format!(
-            "The setup changed after this screen was opened. Refresh before saving. Expected revision {expected_revision}, current revision {}.",
+            "The setup changed after this screen was opened. Refresh before continuing. Expected revision {expected_revision}, current revision {}.",
             pair.revision
         ));
     }
 
-    if patch.is_empty() && pair.automation_bytes.is_some() {
-        return Ok(SaveSetupResult {
-            app_config_path: pair.app_config_path.to_string_lossy().to_string(),
-            automation_config_path: pair.automation_config_path.to_string_lossy().to_string(),
-            backups: Vec::new(),
-            validation: preflight::build_preflight_report(&pair.app_config),
-            revision: pair.revision,
-        });
-    }
-
-    let prepared = prepare_setup_patch(&pair, &patch)?;
+    let prepared = prepare_setup_patch(&pair, patch)?;
     let PreparedSetupPatch {
+        draft: effective_draft,
         generated,
         next_automation_value,
     } = prepared;
+    let mut app_config_preview = pair.app_config.clone();
+    apply_app_config_patch(&mut app_config_preview, patch, &generated.app_config);
+    let automation_config_preview = if pair.automation_value.is_some() {
+        next_automation_value.clone()
+    } else {
+        generated.automation_config.clone()
+    };
+    let workspace_base = generated.workspace_base.to_string_lossy().to_string();
+    let planned_folders = folder_plan(&generated.folder_specs);
+    let warnings = generated.warnings.clone();
     let legacy_app =
         pair.app_value.get("schemaVersion").is_none() && pair.app_value.get("paths").is_some();
     let mut next_app_value = if legacy_app {
@@ -678,9 +814,9 @@ where
     } else {
         pair.app_value.clone()
     };
-    apply_app_patch(&mut next_app_value, &patch, &generated.app_config)?;
+    apply_app_patch(&mut next_app_value, patch, &generated.app_config)?;
 
-    let app_changed = patch_changes_app(&patch) && next_app_value != pair.app_value;
+    let app_changed = patch_changes_app(patch) && next_app_value != pair.app_value;
     let automation_changed = pair.automation_value.as_ref() != Some(&next_automation_value);
 
     let next_app_bytes = if app_changed {
@@ -706,6 +842,77 @@ where
     let automation_parent = automation_path
         .parent()
         .ok_or_else(|| "Automation setup file path is missing a parent folder.".to_string())?;
+    if automation_path != pair.automation_config_path && automation_path.exists() {
+        return Err("The proposed automation setup path already contains another file. InnPilot left both files unchanged.".to_string());
+    }
+
+    if !automation_parent.is_dir()
+        && !(pair.automation_bytes.is_none() && automation_path == pair.automation_config_path)
+    {
+        return Err(
+            "Automation setup folder is missing. Create the workspace folders before saving setup."
+                .to_string(),
+        );
+    }
+
+    let target_revision = configuration_revision(&next_app_bytes, Some(&next_automation_bytes));
+    let preview = SetupPreview {
+        target_revision: target_revision.clone(),
+        workspace_base,
+        folder_plan: planned_folders,
+        app_config_preview,
+        automation_config_preview,
+        warnings,
+    };
+
+    Ok(ValidatedSetupCandidate {
+        pair,
+        effective_draft,
+        preview,
+        next_app_bytes,
+        next_automation_bytes,
+        next_app_config,
+        automation_path,
+        app_changed,
+        automation_changed,
+        target_revision,
+    })
+}
+
+fn commit_validated_candidate<F>(
+    candidate: ValidatedSetupCandidate,
+    create_transaction: F,
+) -> Result<SaveSetupResult, String>
+where
+    F: FnOnce(
+        &ConfigurationPair,
+        &[u8],
+        &[u8],
+    ) -> Result<Option<(SetupTransactionJournal, String)>, String>,
+{
+    let ValidatedSetupCandidate {
+        pair,
+        next_app_bytes,
+        next_automation_bytes,
+        next_app_config,
+        automation_path,
+        app_changed,
+        automation_changed,
+        target_revision,
+        ..
+    } = candidate;
+
+    let current = load_configuration_pair(&pair.app_config_path)?;
+    if current.revision != pair.revision {
+        return Err(format!(
+            "The setup changed after the approved candidate was prepared. Refresh before saving. Expected revision {}, current revision {}.",
+            pair.revision, current.revision
+        ));
+    }
+
+    let automation_parent = automation_path
+        .parent()
+        .ok_or_else(|| "Automation setup file path is missing a parent folder.".to_string())?;
     if !automation_parent.is_dir() {
         if pair.automation_bytes.is_none() && automation_path == pair.automation_config_path {
             fs::create_dir_all(automation_parent).map_err(|error| {
@@ -717,9 +924,6 @@ where
                     .to_string(),
             );
         }
-    }
-    if automation_path != pair.automation_config_path && automation_path.exists() {
-        return Err("The proposed automation setup path already contains another file. InnPilot left both files unchanged.".to_string());
     }
 
     let pair_change = app_changed && automation_changed;
@@ -788,19 +992,13 @@ where
         clear_setup_transaction_journal(&pair.app_config_path)?;
     }
 
-    let revision = configuration_revision(&next_app_bytes, Some(&next_automation_bytes));
     Ok(SaveSetupResult {
         app_config_path: pair.app_config_path.to_string_lossy().to_string(),
         automation_config_path: automation_path.to_string_lossy().to_string(),
         backups,
         validation: preflight::build_preflight_report(&next_app_config),
-        revision,
+        revision: target_revision,
     })
-}
-
-pub(crate) fn validate_setup(app: &AppHandle) -> Result<preflight::PreflightReport, String> {
-    let config = config::ensure_config(app)?;
-    Ok(preflight::build_preflight_report(&config))
 }
 
 #[derive(Debug)]
@@ -813,6 +1011,7 @@ struct GeneratedSetup {
 }
 
 struct PreparedSetupPatch {
+    draft: SetupDraft,
     generated: GeneratedSetup,
     next_automation_value: serde_json::Value,
 }
@@ -1389,19 +1588,23 @@ enum SetupTransactionState {
     NeedsRollback,
 }
 
-/// Reconciles a setup transaction interrupted between its two atomic file
-/// replacements. This must run before config migration and before the runner.
-pub(crate) fn reconcile_incomplete_setup(app: &AppHandle) -> Result<(), String> {
-    let app_config_path = app_config_path(app)?;
+fn reconcile_incomplete_setup_at(
+    app_config_path: &Path,
+    recovery_service: &recovery::RecoveryService,
+    runner_root: &Path,
+) -> Result<(), String> {
     let journal_path = setup_transaction_path(&app_config_path)?;
     if !journal_path.exists() {
         return Ok(());
     }
-    let _workflow_lock =
-        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
-            "InnPilot cannot recover an incomplete setup while an automation is running."
-                .to_string()
-        })?;
+    let _workflow_lock = runner_ledger::ProcessLock::try_acquire_at(
+        runner_root,
+        runner_ledger::ProcessLockKind::Workflow,
+    )
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| {
+        "InnPilot cannot recover an incomplete setup while an automation is running.".to_string()
+    })?;
     config::with_configuration_lock(&app_config_path, || {
         let journal = read_setup_transaction_journal(&app_config_path)?.ok_or_else(|| {
             "The setup transaction journal disappeared during recovery.".to_string()
@@ -1410,7 +1613,7 @@ pub(crate) fn reconcile_incomplete_setup(app: &AppHandle) -> Result<(), String> 
         let old_automation_path = PathBuf::from(&journal.old_automation_path);
         let new_automation_path = PathBuf::from(&journal.new_automation_path);
         let (recovery_app, recovery_automation) =
-            recovery::read_configuration_point_bytes(app, &journal.recovery_point_id)?;
+            recovery_service.read_configuration_point_bytes(&journal.recovery_point_id)?;
         let recovery_app_text = std::str::from_utf8(&recovery_app)
             .map_err(|_| "The setup recovery settings are not valid UTF-8.".to_string())?;
         let (recovery_config, _) =
@@ -1418,7 +1621,6 @@ pub(crate) fn reconcile_incomplete_setup(app: &AppHandle) -> Result<(), String> 
         let expected_automation_path =
             PathBuf::from(recovery_config.automation.automation_config_path);
         if old_automation_path != expected_automation_path
-            || new_automation_path != expected_automation_path
             || journal.old_automation_existed != recovery_automation.is_some()
         {
             return Err(
@@ -1444,15 +1646,10 @@ pub(crate) fn reconcile_incomplete_setup(app: &AppHandle) -> Result<(), String> 
             restore_recovery_bytes(recovery_automation, &old_automation_path, expected)?;
         }
         if new_automation_path != old_automation_path {
-            match fs::remove_file(&new_automation_path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(format!(
-                        "Could not remove an incomplete setup file: {error}"
-                    ));
-                }
-            }
+            // The recovery point proves the predecessor path and bytes, but it
+            // intentionally does not authorize deletion at a different path.
+            // Leave a harmless orphan rather than trusting a journal path as
+            // deletion authority after an interrupted path-changing commit.
         } else if !journal.old_automation_existed {
             let _ = fs::remove_file(&new_automation_path);
         }
@@ -1729,6 +1926,7 @@ fn prepare_setup_patch(
         apply_automation_patch(&mut next_automation_value, patch, &generated)?;
     }
     Ok(PreparedSetupPatch {
+        draft,
         generated,
         next_automation_value,
     })
@@ -1938,14 +2136,6 @@ fn folder_plan(specs: &[FolderSpec]) -> Vec<FolderPlanItem> {
             }
         })
         .collect()
-}
-
-fn app_config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Could not locate app data directory: {error}"))?;
-    Ok(app_data_dir.join("config.json"))
 }
 
 #[cfg(test)]
@@ -3361,6 +3551,82 @@ mod tests {
             classify_setup_transaction_state(&app_path, &journal).unwrap(),
             SetupTransactionState::Committed
         );
+    }
+
+    #[test]
+    fn path_changing_transaction_reconciles_split_and_committed_states() {
+        for committed in [false, true] {
+            let root = temp_root(if committed {
+                "path_change_committed"
+            } else {
+                "path_change_split"
+            });
+            let paths = InstallationPaths::from_app_data(&root, None);
+            fs::create_dir_all(&paths.runner_root).unwrap();
+            fs::write(&paths.runner_db, b"").unwrap();
+            let old_automation_path = root.join("old").join("config.local.json");
+            let new_automation_path = root.join("new").join("config.local.json");
+            fs::create_dir_all(old_automation_path.parent().unwrap()).unwrap();
+            fs::create_dir_all(new_automation_path.parent().unwrap()).unwrap();
+            let app_fixture =
+                include_str!("../test-fixtures/config-preservation/app-v2-custom.json");
+            let app_bytes = |automation_path: &Path| {
+                app_fixture
+                    .replace(
+                        "__AUTOMATION_CONFIG_PATH__",
+                        &automation_path.to_string_lossy().replace('\\', "\\\\"),
+                    )
+                    .into_bytes()
+            };
+            let old_app = app_bytes(&old_automation_path);
+            let new_app = app_bytes(&new_automation_path);
+            let old_automation =
+                include_bytes!("../test-fixtures/config-preservation/automation-custom.json");
+            let new_automation = br#"{"version":"new-path"}"#;
+            fs::write(&paths.config_file, &old_app).unwrap();
+            fs::write(&old_automation_path, old_automation).unwrap();
+
+            let recovery_service =
+                recovery::RecoveryService::new(recovery::RecoveryEnvironment::from_installation(
+                    &paths,
+                    &BuildInfo::from_version("test"),
+                ));
+            let point = recovery_service
+                .create_configuration_point_from_bytes(&old_app, Some(old_automation))
+                .unwrap();
+            fs::write(&new_automation_path, new_automation).unwrap();
+            if committed {
+                fs::write(&paths.config_file, &new_app).unwrap();
+            }
+            let journal = SetupTransactionJournal {
+                schema_version: SETUP_TRANSACTION_SCHEMA,
+                recovery_point_id: point.id,
+                app_config_path: paths.config_file.to_string_lossy().to_string(),
+                old_app_sha256: sha256_bytes(&old_app),
+                new_app_sha256: sha256_bytes(&new_app),
+                old_automation_path: old_automation_path.to_string_lossy().to_string(),
+                new_automation_path: new_automation_path.to_string_lossy().to_string(),
+                old_automation_existed: true,
+                old_automation_sha256: Some(sha256_bytes(old_automation)),
+                new_automation_sha256: sha256_bytes(new_automation),
+            };
+            write_setup_transaction_journal(&paths.config_file, &journal).unwrap();
+
+            reconcile_incomplete_setup_at(
+                &paths.config_file,
+                &recovery_service,
+                &paths.runner_root,
+            )
+            .unwrap();
+
+            assert_eq!(
+                fs::read(&paths.config_file).unwrap(),
+                if committed { new_app } else { old_app }
+            );
+            assert_eq!(fs::read(&old_automation_path).unwrap(), old_automation);
+            assert_eq!(fs::read(&new_automation_path).unwrap(), new_automation);
+            assert!(!setup_transaction_path(&paths.config_file).unwrap().exists());
+        }
     }
 
     fn remove_pointer(value: &mut serde_json::Value, pointer: &str) {

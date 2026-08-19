@@ -281,6 +281,105 @@ pub(crate) struct SafetyConfig {
     pub(crate) redact_logs: bool,
 }
 
+/// Purpose-specific filesystem repository for InnPilot's installed
+/// configuration.  It owns config bootstrap/migration and the complete
+/// read-modify-write lock; callers never receive arbitrary file-write access.
+///
+/// `packaged_worker` is resolved by the platform adapter.  Keeping it explicit
+/// lets domain/application services run in tests without constructing Tauri.
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigurationRepository {
+    config_path: PathBuf,
+    packaged_worker: Option<PathBuf>,
+}
+
+impl ConfigurationRepository {
+    pub(crate) fn new(config_path: PathBuf, packaged_worker: Option<PathBuf>) -> Self {
+        Self {
+            config_path,
+            packaged_worker,
+        }
+    }
+
+    pub(crate) fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    /// Ensures one validated current configuration.  This is the only
+    /// repository operation that may bootstrap or migrate the primary.
+    pub(crate) fn ensure(&self) -> Result<HubConfig, String> {
+        if let Some(parent) = self.config_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create app data directory: {error}"))?;
+        }
+        with_configuration_lock(&self.config_path, || self.ensure_unlocked())
+    }
+
+    pub(crate) fn ensure_with_path(&self) -> Result<(HubConfig, PathBuf), String> {
+        self.ensure()
+            .map(|config| (config, self.config_path.clone()))
+    }
+
+    /// Applies a narrow typed mutation to the latest validated document while
+    /// holding the installation lock for the full read-modify-write cycle.
+    /// Unknown JSON extensions are preserved by the existing activation path.
+    pub(crate) fn update(
+        &self,
+        update: impl FnOnce(&mut HubConfig) -> Result<(), String>,
+    ) -> Result<HubConfig, String> {
+        if let Some(parent) = self.config_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create app data directory: {error}"))?;
+        }
+        let default = default_config_for_config_path(&self.config_path);
+        with_configuration_lock(&self.config_path, || {
+            let mut config = load_config_with_recovery_unlocked(&self.config_path)?
+                .map(|(config, _)| config)
+                .unwrap_or(default);
+            prefer_packaged_worker_path(self.packaged_worker.as_deref(), &mut config);
+            update(&mut config)?;
+            write_config_with_primary_activation(&self.config_path, &config, atomic_activate_file)?;
+            Ok(config)
+        })
+    }
+
+    /// Serializes a multi-record operation with all other supported
+    /// configuration writers. The callback must use only unlocked helpers.
+    pub(crate) fn with_lock<T>(
+        &self,
+        operation: impl FnOnce(&Path) -> Result<T, String>,
+    ) -> Result<T, String> {
+        with_configuration_lock(&self.config_path, || operation(&self.config_path))
+    }
+
+    pub(crate) fn load_unlocked(&self) -> Result<Option<HubConfig>, String> {
+        load_config_with_recovery_unlocked(&self.config_path)
+            .map(|loaded| loaded.map(|(config, _)| config))
+    }
+
+    fn ensure_unlocked(&self) -> Result<HubConfig, String> {
+        if let Some((mut config, should_rewrite)) =
+            load_config_with_recovery_unlocked(&self.config_path)?
+        {
+            let worker_changed =
+                prefer_packaged_worker_path(self.packaged_worker.as_deref(), &mut config);
+            if should_rewrite || worker_changed {
+                write_config_with_primary_activation(
+                    &self.config_path,
+                    &config,
+                    atomic_activate_file,
+                )?;
+            }
+            Ok(config)
+        } else {
+            let mut config = default_config_for_config_path(&self.config_path);
+            prefer_packaged_worker_path(self.packaged_worker.as_deref(), &mut config);
+            write_config_with_primary_activation(&self.config_path, &config, atomic_activate_file)?;
+            Ok(config)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LegacyHubConfig {
     paths: LegacyHubPaths,
@@ -313,26 +412,8 @@ pub(crate) fn ensure_config_with_path(app: &AppHandle) -> Result<(HubConfig, Pat
         .path()
         .app_data_dir()
         .map_err(|error| format!("Could not locate app data directory: {error}"))?;
-    fs::create_dir_all(&app_data_dir)
-        .map_err(|error| format!("Could not create app data directory: {error}"))?;
-    let config_path = app_data_dir.join("config.json");
-
-    with_configuration_lock(&config_path, || {
-        if let Some((mut config, should_rewrite)) =
-            load_config_with_recovery_unlocked(&config_path)?
-        {
-            let worker_changed = prefer_packaged_worker(app, &mut config);
-            if should_rewrite || worker_changed {
-                write_config_with_primary_activation(&config_path, &config, atomic_activate_file)?;
-            }
-            Ok((config, config_path.clone()))
-        } else {
-            let mut config = default_config_for_app_data(&app_data_dir);
-            prefer_packaged_worker(app, &mut config);
-            write_config_with_primary_activation(&config_path, &config, atomic_activate_file)?;
-            Ok((config, config_path.clone()))
-        }
-    })
+    ConfigurationRepository::new(app_data_dir.join("config.json"), packaged_worker_path(app))
+        .ensure_with_path()
 }
 
 /// Applies a narrow mutation to the latest installed configuration while
@@ -347,15 +428,9 @@ pub(crate) fn update_config_for_app(
         .path()
         .app_data_dir()
         .map_err(|error| format!("Could not locate app data directory: {error}"))?;
-    fs::create_dir_all(&app_data_dir)
-        .map_err(|error| format!("Could not create app data directory: {error}"))?;
     let config_path = app_data_dir.join("config.json");
-    let default = default_config_for_app_data(&app_data_dir);
-
-    let config = update_config_at_path(&config_path, default, |config| {
-        prefer_packaged_worker(app, config);
-        update(config)
-    })?;
+    let repository = ConfigurationRepository::new(config_path.clone(), packaged_worker_path(app));
+    let config = repository.update(update)?;
     Ok((config, config_path))
 }
 
@@ -412,14 +487,14 @@ fn update_config_at_path(
     })
 }
 
-fn prefer_packaged_worker(app: &AppHandle, config: &mut HubConfig) -> bool {
-    let Some(worker) = packaged_worker_path(app) else {
+fn prefer_packaged_worker_path(worker: Option<&Path>, config: &mut HubConfig) -> bool {
+    let Some(worker) = worker else {
         return false;
     };
     if !should_replace_python_selection(&config.automation.python_executable) {
         return false;
     }
-    let worker = user_visible_path(&worker);
+    let worker = user_visible_path(worker);
     if config.automation.python_executable == worker {
         return false;
     }

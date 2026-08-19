@@ -1,13 +1,17 @@
+use crate::{
+    domain::{
+        RetryDirective, WorkspaceError, WorkspaceErrorCategory, WorkspaceErrorCode, WorkspaceResult,
+    },
+    platform::InstallationPaths,
+};
 use fs2::FileExt;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior, MAIN_DB};
 use std::{
     fs::{self, File, OpenOptions},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
-use tauri::{AppHandle, Manager};
-
-const DATABASE_FILE: &str = "runner.db";
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LeasedJob {
@@ -40,20 +44,33 @@ pub(crate) struct RunnerLedger {
 
 impl RunnerLedger {
     pub(crate) fn open(app: &AppHandle) -> Result<Self, String> {
-        let path = runner_directory(app)?.join(DATABASE_FILE);
-        Self::open_path(&path)
+        let paths = InstallationPaths::resolve(app).map_err(|error| error.to_string())?;
+        Self::open_at_path(&paths.runner_db).map_err(|error| error.to_string())
     }
 
-    fn open_path(path: &Path) -> Result<Self, String> {
+    pub(crate) fn open_at_path(path: &Path) -> WorkspaceResult<Self> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("Could not create the runner ledger folder: {error}"))?;
+            fs::create_dir_all(parent).map_err(|error| {
+                persistence_error(
+                    "InnPilot could not prepare its private runner ledger folder.",
+                    format!("runner ledger parent creation failed: {error}"),
+                )
+            })?;
         }
-        let connection = Connection::open(path)
-            .map_err(|error| format!("Could not open the runner ledger: {error}"))?;
+        let connection = Connection::open(path).map_err(|error| {
+            persistence_error(
+                "InnPilot could not open its private runner ledger.",
+                format!("runner ledger open failed: {error}"),
+            )
+        })?;
         connection
             .busy_timeout(Duration::from_secs(5))
-            .map_err(|error| format!("Could not configure the runner ledger: {error}"))?;
+            .map_err(|error| {
+                persistence_error(
+                    "InnPilot could not configure its private runner ledger.",
+                    format!("runner ledger busy-timeout configuration failed: {error}"),
+                )
+            })?;
         connection
             .execute_batch(
                 "
@@ -87,7 +104,12 @@ impl RunnerLedger {
                 PRAGMA user_version = 1;
                 ",
             )
-            .map_err(|error| format!("Could not initialize the runner ledger: {error}"))?;
+            .map_err(|error| {
+                persistence_error(
+                    "InnPilot could not initialize its private runner ledger.",
+                    format!("runner ledger schema initialization failed: {error}"),
+                )
+            })?;
         Ok(Self { connection })
     }
 
@@ -292,27 +314,98 @@ pub(crate) struct ProcessLock {
     file: File,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessLockKind {
+    Workflow,
+    Service,
+}
+
+impl ProcessLockKind {
+    fn file_stem(self) -> &'static str {
+        match self {
+            Self::Workflow => "workflow",
+            Self::Service => "service",
+        }
+    }
+}
+
 impl ProcessLock {
     pub(crate) fn try_acquire(app: &AppHandle, name: &str) -> Result<Option<Self>, String> {
+        let paths = InstallationPaths::resolve(app).map_err(|error| error.to_string())?;
+        Self::try_acquire_named_at(&paths.runner_root, name).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn try_acquire_at(
+        runner_root: &Path,
+        kind: ProcessLockKind,
+    ) -> WorkspaceResult<Option<Self>> {
+        Self::try_acquire_named_at(runner_root, kind.file_stem())
+    }
+
+    /// Transitional path-based wrapper for existing application services.
+    /// New typed callers should prefer `try_acquire_at` with `ProcessLockKind`.
+    pub(crate) fn try_acquire_in_directory(
+        runner_root: &Path,
+        name: &str,
+    ) -> Result<Option<Self>, String> {
+        Self::try_acquire_named_at(runner_root, name).map_err(|error| error.to_string())
+    }
+
+    fn try_acquire_named_at(runner_root: &Path, name: &str) -> WorkspaceResult<Option<Self>> {
         if !name
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
         {
-            return Err("The runner lock name is invalid.".to_string());
+            return Err(WorkspaceError::new(
+                WorkspaceErrorCode::InvalidRequest,
+                WorkspaceErrorCategory::Validation,
+                "The runner coordination lock is invalid.",
+                RetryDirective::Never,
+            ));
         }
-        let path = runner_directory(app)?.join(format!("{name}.lock"));
+        fs::create_dir_all(runner_root).map_err(|error| {
+            persistence_error(
+                "InnPilot could not prepare local operation coordination.",
+                format!("runner lock directory creation failed: {error}"),
+            )
+        })?;
+        let path = runner_root.join(format!("{name}.lock"));
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
             .open(path)
-            .map_err(|error| format!("Could not open the runner lock: {error}"))?;
+            .map_err(|error| {
+                persistence_error(
+                    "InnPilot could not open local operation coordination.",
+                    format!("runner lock open failed: {error}"),
+                )
+            })?;
         match file.try_lock_exclusive() {
             Ok(()) => Ok(Some(Self { file })),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(format!("Could not acquire the runner lock: {error}")),
+            Err(error) if is_lock_contention(&error) => Ok(None),
+            Err(error) => Err(persistence_error(
+                "InnPilot could not coordinate the local operation.",
+                format!("runner lock acquisition failed: {error}"),
+            )),
         }
+    }
+}
+
+fn is_lock_contention(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        // `LockFileEx` reports sharing/lock violations as raw Windows errors
+        // rather than consistently mapping them to `WouldBlock`.
+        matches!(error.raw_os_error(), Some(32 | 33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -322,38 +415,78 @@ impl Drop for ProcessLock {
     }
 }
 pub(crate) fn backup_database(app: &AppHandle, destination: &Path) -> Result<(), String> {
-    let ledger = RunnerLedger::open(app)?;
+    let paths = InstallationPaths::resolve(app).map_err(|error| error.to_string())?;
+    backup_database_at(&paths.runner_db, destination).map_err(|error| error.to_string())
+}
+
+pub(crate) fn backup_database_at(database_path: &Path, destination: &Path) -> WorkspaceResult<()> {
+    let ledger = RunnerLedger::open_at_path(database_path)?;
     backup_connection(&ledger.connection, destination)
 }
 
-fn backup_connection(source: &Connection, destination: &Path) -> Result<(), String> {
+fn backup_connection(source: &Connection, destination: &Path) -> WorkspaceResult<()> {
     if destination.exists() {
-        return Err("The runner ledger backup target already exists.".to_string());
+        return Err(WorkspaceError::new(
+            WorkspaceErrorCode::PersistenceConflict,
+            WorkspaceErrorCategory::Persistence,
+            "InnPilot will not overwrite an existing runner-ledger recovery copy.",
+            RetryDirective::UserAction,
+        ));
     }
-    source
-        .backup(MAIN_DB, destination, None)
-        .map_err(|error| format!("Could not create an online runner ledger backup: {error}"))?;
-    let verification = Connection::open(destination)
-        .map_err(|error| format!("Could not verify the runner ledger backup: {error}"))?;
+    source.backup(MAIN_DB, destination, None).map_err(|error| {
+        WorkspaceError::new(
+            WorkspaceErrorCode::RecoveryFailed,
+            WorkspaceErrorCategory::Recovery,
+            "InnPilot could not create the runner-ledger recovery copy.",
+            RetryDirective::Retry,
+        )
+        .with_diagnostic(format!("online runner ledger backup failed: {error}"))
+    })?;
+    let verification = Connection::open(destination).map_err(|error| {
+        WorkspaceError::new(
+            WorkspaceErrorCode::RecoveryIntegrityFailed,
+            WorkspaceErrorCategory::Recovery,
+            "InnPilot could not verify the runner-ledger recovery copy.",
+            RetryDirective::Retry,
+        )
+        .with_diagnostic(format!(
+            "runner ledger backup verification open failed: {error}"
+        ))
+    })?;
     let integrity: String = verification
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
-        .map_err(|error| format!("Could not check the runner ledger backup: {error}"))?;
+        .map_err(|error| {
+            WorkspaceError::new(
+                WorkspaceErrorCode::RecoveryIntegrityFailed,
+                WorkspaceErrorCategory::Recovery,
+                "InnPilot could not verify the runner-ledger recovery copy.",
+                RetryDirective::Retry,
+            )
+            .with_diagnostic(format!("runner ledger backup quick-check failed: {error}"))
+        })?;
     if integrity != "ok" {
         let _ = fs::remove_file(destination);
-        return Err("The runner ledger backup failed its integrity check.".to_string());
+        return Err(WorkspaceError::new(
+            WorkspaceErrorCode::RecoveryIntegrityFailed,
+            WorkspaceErrorCategory::Recovery,
+            "The runner-ledger recovery copy failed its integrity check.",
+            RetryDirective::Retry,
+        )
+        .with_diagnostic(format!(
+            "runner ledger backup quick-check returned {integrity}"
+        )));
     }
     Ok(())
 }
 
-fn runner_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let directory = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Could not locate the private runner folder: {error}"))?
-        .join("runner");
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("Could not create the private runner folder: {error}"))?;
-    Ok(directory)
+fn persistence_error(summary: &str, diagnostic: String) -> WorkspaceError {
+    WorkspaceError::new(
+        WorkspaceErrorCode::PersistenceFailed,
+        WorkspaceErrorCategory::Persistence,
+        summary,
+        RetryDirective::Retry,
+    )
+    .with_diagnostic(diagnostic)
 }
 
 fn validate_leased_job(job: &LeasedJob) -> Result<(), String> {
@@ -420,6 +553,7 @@ fn is_uuid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn ledger() -> (RunnerLedger, PathBuf) {
@@ -430,7 +564,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("innpilot-ledger-{stamp}"));
         fs::create_dir_all(&root).unwrap();
         (
-            RunnerLedger::open_path(&root.join("runner.db")).unwrap(),
+            RunnerLedger::open_at_path(&root.join("runner.db")).unwrap(),
             root,
         )
     }
@@ -531,6 +665,71 @@ mod tests {
 
         drop(copy);
         drop(ledger);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn path_based_open_prepares_only_the_ledger_parent() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("innpilot-ledger-path-{stamp}"));
+        let database = root.join("runner").join("runner.db");
+
+        let ledger = RunnerLedger::open_at_path(&database).unwrap();
+        assert!(database.is_file());
+
+        drop(ledger);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn typed_process_locks_are_path_based_and_exclusive() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("innpilot-runner-lock-{stamp}"));
+
+        let workflow = ProcessLock::try_acquire_at(&root, ProcessLockKind::Workflow)
+            .unwrap()
+            .expect("first workflow lock");
+        assert!(
+            ProcessLock::try_acquire_at(&root, ProcessLockKind::Workflow)
+                .unwrap()
+                .is_none()
+        );
+        let service = ProcessLock::try_acquire_at(&root, ProcessLockKind::Service)
+            .unwrap()
+            .expect("independent service lock");
+
+        drop(service);
+        drop(workflow);
+        assert!(
+            ProcessLock::try_acquire_at(&root, ProcessLockKind::Workflow)
+                .unwrap()
+                .is_some()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn path_based_backup_returns_a_verified_database() {
+        let (mut ledger, root) = ledger();
+        ledger.record_lease(&fake_job()).unwrap();
+        drop(ledger);
+        let source = root.join("runner.db");
+        let backup = root.join("path-backup.db");
+
+        backup_database_at(&source, &backup).unwrap();
+        let copy = Connection::open(&backup).unwrap();
+        let count: i64 = copy
+            .query_row("SELECT COUNT(*) FROM runner_jobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        drop(copy);
         fs::remove_dir_all(root).unwrap();
     }
 }

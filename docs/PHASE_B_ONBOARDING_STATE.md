@@ -77,11 +77,13 @@ for diagnostics. Recovery advances beyond the lost primary generation and
 refreshes its validated backup, preventing stale revisions from becoming valid
 again even across repeated recoveries.
 
-Onboarding and configuration are separate atomic records. The manual apply flow
-therefore records `applying` before the Phase A configuration transaction and
-records completion afterward. Startup reconciles an interrupted applying or
-verifying session against the exact configuration-pair revisions; it never
-runs a production automation as part of reconciliation.
+Onboarding and configuration remain separate atomic records. Phase C now binds
+manual apply to a durable intent containing the approved operation identity,
+base configuration revision, and exact target revision before the Phase A
+configuration transaction. Startup can therefore distinguish not-applied,
+committed, and conflicting outcomes without replaying a configuration write. It
+never runs a production automation as part of reconciliation. See
+`PHASE_C_DOMAIN_SERVICES.md` for the coordinator and adapter boundary.
 
 ## Startup and legacy installations
 
@@ -151,13 +153,16 @@ identifiers only.
 
 ## Deliberate follow-up debt
 
-Phase B does not claim one transaction across configuration and onboarding.
-Startup revision reconciliation closes the expected interruption window without
-rolling valid configuration back.
+InnPilot does not claim one filesystem transaction across configuration and
+onboarding. Phase C's durable apply intent and deterministic startup
+reconciliation close the expected interruption window without rolling valid
+configuration back or replaying a committed candidate.
 
 The two Phase A configuration-wide gaps remain separate follow-up work:
 
 - a durable two-file crash journal for template updates;
-- a durable two-file crash journal/shared lock for manual recovery restore.
+- a durable two-file crash journal for manual recovery restore. Phase C added
+  the shared workflow/configuration lock and lifecycle reconciliation; the
+  remaining debt is crash consistency between the two replacements.
 
 They are not solved or hidden by onboarding persistence.

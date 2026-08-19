@@ -1,4 +1,5 @@
 mod activity;
+mod application;
 mod automation_install;
 mod branding;
 #[cfg(feature = "cloud-e2e-probe")]
@@ -8,10 +9,12 @@ pub use cloud_probe::run_cloud_e2e_probe;
 mod config;
 mod desktop_service;
 mod discovery;
+mod domain;
 mod folder_discovery;
 mod logs;
 mod onboarding;
 mod paths;
+mod platform;
 mod preflight;
 mod recovery;
 mod redaction;
@@ -30,6 +33,34 @@ use tauri::{AppHandle, State, WindowEvent};
 struct AppState {
     is_running: Mutex<bool>,
     last_run: Mutex<Option<workflows::RunSummary>>,
+}
+
+fn setup_application_service(
+    app: &AppHandle,
+) -> domain::WorkspaceResult<application::SetupApplicationService> {
+    let paths = platform::InstallationPaths::resolve(app)?;
+    application::SetupApplicationService::new(paths, platform::BuildInfo::resolve(app))
+}
+
+fn health_service(app: &AppHandle) -> domain::WorkspaceResult<application::HealthService> {
+    let paths = platform::InstallationPaths::resolve(app)?;
+    let repository = config::ConfigurationRepository::new(paths.config_file, paths.packaged_worker);
+    Ok(application::HealthService::new(
+        setup::ConfigurationService::new(repository),
+    ))
+}
+
+fn recovery_application_service(
+    app: &AppHandle,
+) -> domain::WorkspaceResult<application::RecoveryApplicationService> {
+    let paths = platform::InstallationPaths::resolve(app)?;
+    let environment = recovery::RecoveryEnvironment::from_installation(
+        &paths,
+        &platform::BuildInfo::resolve(app),
+    );
+    Ok(application::RecoveryApplicationService::new(
+        recovery::RecoveryService::new(environment),
+    ))
 }
 
 pub fn run() {
@@ -53,15 +84,32 @@ pub fn run() {
             last_run: Mutex::new(None),
         })
         .setup(|app| {
-            setup::reconcile_incomplete_setup(app.handle()).map_err(std::io::Error::other)?;
+            let paths = platform::InstallationPaths::resolve(app.handle())
+                .map_err(std::io::Error::other)?;
+            let services = application::SetupApplicationService::new(
+                paths.clone(),
+                platform::BuildInfo::resolve(app.handle()),
+            )
+            .map_err(std::io::Error::other)?;
+            services
+                .configuration()
+                .reconcile_incomplete_commit(services.recovery(), &paths.runner_root)
+                .map_err(std::io::Error::other)?;
             // Capture this before `ensure_config` creates first-run defaults so
             // onboarding can distinguish a new installation from an upgrade.
-            let config_preexisted = config::app_config_path(app.handle())?.is_file();
-            config::ensure_config(app.handle()).map_err(std::io::Error::other)?;
+            let config_preexisted = paths.config_file.is_file();
+            services
+                .configuration()
+                .ensure()
+                .map_err(std::io::Error::other)?;
             // A damaged or newer onboarding record must not prevent InnPilot
             // from opening. The typed command routes the UI to Support and
             // preserves the record for explicit recovery.
-            if onboarding::reconcile_startup(app.handle(), config_preexisted).is_err() {
+            if services
+                .onboarding()
+                .reconcile_startup(config_preexisted)
+                .is_err()
+            {
                 eprintln!("InnPilot onboarding state needs recovery or a newer app version.");
             }
             desktop_service::setup(app)?;
@@ -87,19 +135,14 @@ pub fn run() {
             get_onboarding_state,
             begin_or_resume_onboarding,
             record_onboarding_progress,
-            prepare_onboarding_apply,
-            record_onboarding_setup_saved,
-            complete_onboarding,
             mark_onboarding_failed,
             restart_onboarding,
             import_legacy_onboarding_progress,
             recover_onboarding_state,
             get_setup_snapshot,
             preview_setup,
-            initialize_workspace,
-            assert_setup_revision,
+            apply_approved_setup,
             remove_setup_created_empty_folders,
-            save_setup_config,
             validate_setup,
             install_managed_automation_scripts,
             get_activity_history,
@@ -160,13 +203,15 @@ async fn sync_with_lifedesk(app: AppHandle) -> Result<runner_protocol::RunnerSyn
 }
 
 #[tauri::command]
-fn get_recovery_status(app: AppHandle) -> Result<recovery::RecoveryStatus, String> {
-    recovery::status(&app)
+fn get_recovery_status(app: AppHandle) -> Result<recovery::RecoveryStatus, domain::WorkspaceError> {
+    recovery_application_service(&app)?.status()
 }
 
 #[tauri::command]
-fn create_recovery_point(app: AppHandle) -> Result<recovery::RecoveryActionResult, String> {
-    recovery::create(&app)
+fn create_recovery_point(
+    app: AppHandle,
+) -> Result<recovery::RecoveryActionResult, domain::WorkspaceError> {
+    recovery_application_service(&app)?.create()
 }
 
 #[tauri::command]
@@ -174,8 +219,8 @@ fn restore_recovery_configuration(
     app: AppHandle,
     point_id: String,
     confirmed: Option<bool>,
-) -> Result<recovery::RecoveryActionResult, String> {
-    recovery::restore_configuration(&app, &point_id, confirmed.unwrap_or(false))
+) -> Result<recovery::RecoveryActionResult, domain::WorkspaceError> {
+    setup_application_service(&app)?.restore_configuration(&point_id, confirmed.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -218,25 +263,31 @@ fn open_activity_report(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, String> {
-    let (config, config_path) = config::ensure_config_with_path(&app)?;
-    Ok(preflight::AppConfigStatus::new_fast(
-        config_path.to_string_lossy().to_string(),
-        config,
-    ))
+fn get_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, domain::WorkspaceError> {
+    health_service(&app)?.check(application::HealthCheckRequest {
+        mode: application::HealthCheckMode::Fast,
+    })
 }
 
 #[tauri::command]
-async fn refresh_config_status(app: AppHandle) -> Result<preflight::AppConfigStatus, String> {
+async fn refresh_config_status(
+    app: AppHandle,
+) -> Result<preflight::AppConfigStatus, domain::WorkspaceError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (config, config_path) = config::ensure_config_with_path(&app)?;
-        Ok(preflight::AppConfigStatus::new(
-            config_path.to_string_lossy().to_string(),
-            config,
-        ))
+        health_service(&app)?.check(application::HealthCheckRequest {
+            mode: application::HealthCheckMode::Full,
+        })
     })
     .await
-    .map_err(|_| "The automation safety check stopped unexpectedly.".to_string())?
+    .map_err(|error| {
+        domain::WorkspaceError::new(
+            domain::WorkspaceErrorCode::Internal,
+            domain::WorkspaceErrorCategory::Internal,
+            "The automation safety check stopped unexpectedly.",
+            domain::RetryDirective::Retry,
+        )
+        .with_diagnostic(error.to_string())
+    })?
 }
 
 #[tauri::command]
@@ -278,9 +329,10 @@ fn inspect_existing_folder(path: String) -> Result<folder_discovery::FolderInspe
 }
 
 #[tauri::command]
-fn validate_configuration(app: AppHandle) -> Result<preflight::PreflightReport, String> {
-    let config = config::ensure_config(&app)?;
-    Ok(preflight::build_preflight_report(&config))
+fn validate_configuration(
+    app: AppHandle,
+) -> Result<preflight::PreflightReport, domain::WorkspaceError> {
+    health_service(&app)?.validate()
 }
 
 #[tauri::command]
@@ -308,55 +360,6 @@ fn record_onboarding_progress(
     request_id: String,
 ) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
     onboarding::record_progress(&app, checkpoint, expected_revision, request_id)
-}
-
-#[tauri::command]
-fn prepare_onboarding_apply(
-    app: AppHandle,
-    expected_revision: u64,
-    expected_config_revision: String,
-    approval_reference: String,
-    request_id: String,
-) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
-    onboarding::prepare_apply(
-        &app,
-        expected_revision,
-        expected_config_revision,
-        approval_reference,
-        request_id,
-    )
-}
-
-#[tauri::command]
-fn record_onboarding_setup_saved(
-    app: AppHandle,
-    expected_revision: u64,
-    resulting_config_revision: String,
-    request_id: String,
-) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
-    onboarding::record_setup_saved(
-        &app,
-        expected_revision,
-        resulting_config_revision,
-        request_id,
-    )
-}
-
-#[tauri::command]
-fn complete_onboarding(
-    app: AppHandle,
-    expected_revision: u64,
-    resulting_config_revision: String,
-    deferred_items: Vec<String>,
-    request_id: String,
-) -> Result<onboarding::OnboardingSnapshot, onboarding::OnboardingError> {
-    onboarding::complete(
-        &app,
-        expected_revision,
-        resulting_config_revision,
-        deferred_items,
-        request_id,
-    )
 }
 
 #[tauri::command]
@@ -397,8 +400,8 @@ fn recover_onboarding_state(
 }
 
 #[tauri::command]
-fn get_setup_snapshot(app: AppHandle) -> Result<setup::SetupSnapshot, String> {
-    setup::get_setup_snapshot(&app)
+fn get_setup_snapshot(app: AppHandle) -> Result<setup::SetupSnapshot, domain::WorkspaceError> {
+    setup_application_service(&app)?.setup_snapshot()
 }
 
 #[tauri::command]
@@ -406,41 +409,16 @@ fn preview_setup(
     app: AppHandle,
     patch: setup::SetupPatch,
     expected_revision: String,
-) -> Result<setup::SetupPreview, String> {
-    setup::preview_setup(&app, patch, &expected_revision)
+) -> Result<setup::SetupPreview, domain::WorkspaceError> {
+    setup_application_service(&app)?.preview_setup(&patch, &expected_revision)
 }
 
 #[tauri::command]
-fn initialize_workspace(
+fn apply_approved_setup(
     app: AppHandle,
-    draft: setup::SetupDraft,
-    confirmed: Option<bool>,
-    expected_onboarding_revision: u64,
-    request_id: String,
-) -> Result<InitializeWorkspaceCommandResult, onboarding::OnboardingError> {
-    let (workspace, onboarding) = onboarding::initialize_workspace(
-        &app,
-        draft,
-        confirmed.unwrap_or(false),
-        expected_onboarding_revision,
-        request_id,
-    )?;
-    Ok(InitializeWorkspaceCommandResult {
-        workspace,
-        onboarding,
-    })
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InitializeWorkspaceCommandResult {
-    workspace: setup::WorkspaceInitResult,
-    onboarding: Option<onboarding::OnboardingSnapshot>,
-}
-
-#[tauri::command]
-fn assert_setup_revision(app: AppHandle, expected_revision: String) -> Result<(), String> {
-    setup::assert_setup_revision(&app, &expected_revision)
+    request: application::ApplyApprovedSetupRequest,
+) -> Result<application::ApplyApprovedSetupResult, domain::WorkspaceError> {
+    setup_application_service(&app)?.apply_approved_setup(request)
 }
 
 #[tauri::command]
@@ -448,17 +426,9 @@ fn remove_setup_created_empty_folders(
     app: AppHandle,
     expected_onboarding_revision: u64,
     confirmed: Option<bool>,
-) -> Result<CleanupCreatedFoldersCommandResult, onboarding::OnboardingError> {
-    if !confirmed.unwrap_or(false) {
-        return Err(onboarding::OnboardingError {
-            code: "confirmation_required".to_string(),
-            message: "Empty-folder cleanup requires confirmation.".to_string(),
-            recoverable: true,
-            current_revision: Some(expected_onboarding_revision),
-        });
-    }
-    let (cleanup, onboarding) =
-        onboarding::cleanup_created_folders(&app, expected_onboarding_revision)?;
+) -> Result<CleanupCreatedFoldersCommandResult, domain::WorkspaceError> {
+    let (cleanup, onboarding) = setup_application_service(&app)?
+        .cleanup_created_folders(expected_onboarding_revision, confirmed.unwrap_or(false))?;
     Ok(CleanupCreatedFoldersCommandResult {
         cleanup,
         onboarding,
@@ -473,18 +443,8 @@ struct CleanupCreatedFoldersCommandResult {
 }
 
 #[tauri::command]
-fn save_setup_config(
-    app: AppHandle,
-    patch: setup::SetupPatch,
-    expected_revision: String,
-    confirmed: Option<bool>,
-) -> Result<setup::SaveSetupResult, String> {
-    setup::save_setup_config(&app, patch, expected_revision, confirmed.unwrap_or(false))
-}
-
-#[tauri::command]
-fn validate_setup(app: AppHandle) -> Result<preflight::PreflightReport, String> {
-    setup::validate_setup(&app)
+fn validate_setup(app: AppHandle) -> Result<preflight::PreflightReport, domain::WorkspaceError> {
+    health_service(&app)?.validate()
 }
 
 #[tauri::command]

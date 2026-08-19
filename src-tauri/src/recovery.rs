@@ -1,4 +1,8 @@
-use crate::{config, runner_ledger};
+use crate::{
+    config,
+    platform::{BuildInfo, InstallationPaths},
+    runner_ledger,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -8,7 +12,6 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-use tauri::{AppHandle, Manager};
 
 const MANIFEST_SCHEMA: u32 = 1;
 const MANIFEST_FILE: &str = "manifest.json";
@@ -48,6 +51,244 @@ pub(crate) struct RecoveryActionResult {
     pub(crate) restored_configuration: bool,
 }
 
+/// Explicit local installation paths required by configuration recovery.
+///
+/// Keeping these values separate from Tauri lets the UI adapter, startup
+/// reconciliation, and future local adapters share the same recovery behavior
+/// without manufacturing an `AppHandle`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecoveryEnvironment {
+    app_config_path: PathBuf,
+    recovery_root: PathBuf,
+    runner_directory: PathBuf,
+    runner_database_path: PathBuf,
+    packaged_worker: Option<PathBuf>,
+    app_version: String,
+}
+
+impl RecoveryEnvironment {
+    pub(crate) fn new(
+        app_config_path: PathBuf,
+        recovery_root: PathBuf,
+        runner_directory: PathBuf,
+        runner_database_path: PathBuf,
+        packaged_worker: Option<PathBuf>,
+        app_version: String,
+    ) -> Self {
+        Self {
+            app_config_path,
+            recovery_root,
+            runner_directory,
+            runner_database_path,
+            packaged_worker,
+            app_version,
+        }
+    }
+
+    pub(crate) fn from_installation(paths: &InstallationPaths, build: &BuildInfo) -> Self {
+        Self::new(
+            paths.config_file.clone(),
+            paths.recovery_root.clone(),
+            paths.runner_root.clone(),
+            paths.runner_db.clone(),
+            paths.packaged_worker.clone(),
+            build.app_version.clone(),
+        )
+    }
+}
+
+/// Path-based recovery application service.
+///
+/// This service deliberately exposes recovery concepts rather than arbitrary
+/// file operations. Its environment contains only InnPilot-owned paths.
+pub(crate) struct RecoveryService {
+    environment: RecoveryEnvironment,
+}
+
+impl RecoveryService {
+    pub(crate) fn new(environment: RecoveryEnvironment) -> Self {
+        Self { environment }
+    }
+
+    pub(crate) fn status(&self) -> Result<RecoveryStatus, String> {
+        status_in_root(&self.environment.recovery_root)
+    }
+
+    pub(crate) fn read_configuration_point_bytes(
+        &self,
+        point_id: &str,
+    ) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
+        read_configuration_point_bytes_in_root(&self.environment.recovery_root, point_id)
+    }
+
+    pub(crate) fn create(&self) -> Result<RecoveryActionResult, String> {
+        let _workflow_lock = runner_ledger::ProcessLock::try_acquire_at(
+            &self.environment.runner_directory,
+            runner_ledger::ProcessLockKind::Workflow,
+        )
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "Wait for the current automation to finish before creating a recovery point."
+                .to_string()
+        })?;
+        let point = self.create_locked()?;
+        Ok(RecoveryActionResult {
+            point,
+            pre_restore_point_id: None,
+            restored_configuration: false,
+        })
+    }
+
+    pub(crate) fn restore_configuration(
+        &self,
+        point_id: &str,
+        confirmed: bool,
+    ) -> Result<RecoveryActionResult, String> {
+        self.restore_configuration_with_hook(point_id, confirmed, || {})
+    }
+
+    fn restore_configuration_with_hook<F>(
+        &self,
+        point_id: &str,
+        confirmed: bool,
+        before_replacements: F,
+    ) -> Result<RecoveryActionResult, String>
+    where
+        F: FnOnce(),
+    {
+        if !confirmed {
+            return Err("Configuration restore requires confirmation.".to_string());
+        }
+        validate_point_id(point_id)?;
+        let _workflow_lock = runner_ledger::ProcessLock::try_acquire_at(
+            &self.environment.runner_directory,
+            runner_ledger::ProcessLockKind::Workflow,
+        )
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "Wait for the current automation to finish before restoring configuration.".to_string()
+        })?;
+
+        let point_dir = safe_point_dir(&self.environment.recovery_root, point_id)?;
+        let manifest = read_manifest(&point_dir)?;
+        verify_manifest(&point_dir, &manifest)?;
+
+        let app_config_bytes = read_limited(&point_dir.join(APP_CONFIG_FILE), MAX_CONFIG_BYTES)?;
+        let restored_config: config::HubConfig = serde_json::from_slice(&app_config_bytes)
+            .map_err(|_| {
+                "The selected recovery point contains an invalid InnPilot configuration."
+                    .to_string()
+            })?;
+
+        let automation_backup = manifest
+            .files
+            .iter()
+            .find(|file| file.role == "automation_config")
+            .map(|_| read_limited(&point_dir.join(AUTOMATION_CONFIG_FILE), MAX_CONFIG_BYTES))
+            .transpose()?;
+        if let Some(bytes) = &automation_backup {
+            validate_json_object(bytes, "automation configuration")?;
+        }
+
+        let repository = config::ConfigurationRepository::new(
+            self.environment.app_config_path.clone(),
+            self.environment.packaged_worker.clone(),
+        );
+        repository.ensure()?;
+        repository.with_lock(|config_path| {
+            // Keep the predecessor snapshot, recovery-point creation, and both
+            // active replacements in one shared configuration critical section.
+            // The workflow lock is already held, matching setup/template lock order.
+            let pre_restore = self.create_installed_point_locked(&repository, config_path)?;
+            let automation_target = automation_backup
+                .as_ref()
+                .map(|_| aligned_automation_config_path(&restored_config))
+                .transpose()?;
+
+            let previous_automation = automation_target
+                .as_ref()
+                .map(|path| read_optional_limited(path, MAX_CONFIG_BYTES))
+                .transpose()?;
+
+            before_replacements();
+            if let (Some(target), Some(bytes)) = (&automation_target, &automation_backup) {
+                atomic_replace(target, bytes)?;
+            }
+            if let Err(error) = atomic_replace(config_path, &app_config_bytes) {
+                if let (Some(target), Some(previous)) =
+                    (&automation_target, previous_automation.as_ref())
+                {
+                    let _ = match previous {
+                        Some(bytes) => atomic_replace(target, bytes),
+                        None => remove_if_exists(target),
+                    };
+                }
+                return Err(format!(
+                    "Configuration restore was rolled back because InnPilot could not replace its main settings: {error}"
+                ));
+            }
+
+            let point = point_from_manifest(&manifest, "ready");
+            Ok(RecoveryActionResult {
+                point,
+                pre_restore_point_id: Some(pre_restore.id),
+                restored_configuration: true,
+            })
+        })
+    }
+
+    /// Creates a recovery point from a caller-supplied, already-coordinated
+    /// configuration snapshot. This method acquires no configuration lock.
+    pub(crate) fn create_configuration_point_from_bytes(
+        &self,
+        app_config_bytes: &[u8],
+        automation_config_bytes: Option<&[u8]>,
+    ) -> Result<RecoveryPoint, String> {
+        create_configuration_point_from_bytes_in_root(
+            &self.environment.recovery_root,
+            &self.environment.app_version,
+            app_config_bytes,
+            automation_config_bytes,
+            |destination| {
+                runner_ledger::backup_database_at(
+                    &self.environment.runner_database_path,
+                    destination,
+                )
+                .map_err(|error| error.to_string())
+            },
+        )
+    }
+
+    fn create_locked(&self) -> Result<RecoveryPoint, String> {
+        let repository = config::ConfigurationRepository::new(
+            self.environment.app_config_path.clone(),
+            self.environment.packaged_worker.clone(),
+        );
+        repository.ensure()?;
+        repository
+            .with_lock(|config_path| self.create_installed_point_locked(&repository, config_path))
+    }
+
+    fn create_installed_point_locked(
+        &self,
+        repository: &config::ConfigurationRepository,
+        config_path: &Path,
+    ) -> Result<RecoveryPoint, String> {
+        let hub_config = repository
+            .load_unlocked()?
+            .ok_or_else(|| "InnPilot configuration is unavailable for recovery.".to_string())?;
+        let app_config_bytes = read_limited(config_path, MAX_CONFIG_BYTES)?;
+        let automation_config_bytes = aligned_automation_config_path(&hub_config)
+            .ok()
+            .map(|path| read_limited(&path, MAX_CONFIG_BYTES))
+            .transpose()?;
+        self.create_configuration_point_from_bytes(
+            &app_config_bytes,
+            automation_config_bytes.as_deref(),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RecoveryManifest {
@@ -65,143 +306,6 @@ struct RecoveryFile {
     file_name: String,
     sha256: String,
     bytes: u64,
-}
-
-pub(crate) fn status(app: &AppHandle) -> Result<RecoveryStatus, String> {
-    let root = recovery_root(app)?;
-    Ok(status_in_root(&root))
-}
-
-/// Reads the exact configuration bytes from a verified, status-recognized
-/// recovery point. No files are restored or otherwise mutated.
-pub(crate) fn read_configuration_point_bytes(
-    app: &AppHandle,
-    point_id: &str,
-) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
-    let root = recovery_root(app)?;
-    read_configuration_point_bytes_in_root(&root, point_id)
-}
-
-pub(crate) fn create(app: &AppHandle) -> Result<RecoveryActionResult, String> {
-    let _workflow_lock =
-        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
-            "Wait for the current automation to finish before creating a recovery point."
-                .to_string()
-        })?;
-    let point = create_locked(app)?;
-    Ok(RecoveryActionResult {
-        point,
-        pre_restore_point_id: None,
-        restored_configuration: false,
-    })
-}
-
-pub(crate) fn restore_configuration(
-    app: &AppHandle,
-    point_id: &str,
-    confirmed: bool,
-) -> Result<RecoveryActionResult, String> {
-    if !confirmed {
-        return Err("Configuration restore requires confirmation.".to_string());
-    }
-    validate_point_id(point_id)?;
-    let _workflow_lock =
-        runner_ledger::ProcessLock::try_acquire(app, "workflow")?.ok_or_else(|| {
-            "Wait for the current automation to finish before restoring configuration.".to_string()
-        })?;
-
-    let root = recovery_root(app)?;
-    let point_dir = safe_point_dir(&root, point_id)?;
-    let manifest = read_manifest(&point_dir)?;
-    verify_manifest(&point_dir, &manifest)?;
-
-    let app_config_bytes = read_limited(&point_dir.join(APP_CONFIG_FILE), MAX_CONFIG_BYTES)?;
-    let restored_config: config::HubConfig =
-        serde_json::from_slice(&app_config_bytes).map_err(|_| {
-            "The selected recovery point contains an invalid InnPilot configuration.".to_string()
-        })?;
-
-    let automation_backup = manifest
-        .files
-        .iter()
-        .find(|file| file.role == "automation_config")
-        .map(|_| read_limited(&point_dir.join(AUTOMATION_CONFIG_FILE), MAX_CONFIG_BYTES))
-        .transpose()?;
-    if let Some(bytes) = &automation_backup {
-        validate_json_object(bytes, "automation configuration")?;
-    }
-
-    let pre_restore = create_locked(app)?;
-    let (_, app_config_path) = config::ensure_config_with_path(app)?;
-    let automation_target = automation_backup
-        .as_ref()
-        .map(|_| aligned_automation_config_path(&restored_config))
-        .transpose()?;
-
-    let previous_automation = automation_target
-        .as_ref()
-        .map(|path| read_optional_limited(path, MAX_CONFIG_BYTES))
-        .transpose()?;
-
-    if let (Some(target), Some(bytes)) = (&automation_target, &automation_backup) {
-        atomic_replace(target, bytes)?;
-    }
-    if let Err(error) = atomic_replace(&app_config_path, &app_config_bytes) {
-        if let (Some(target), Some(previous)) = (&automation_target, previous_automation.as_ref()) {
-            let _ = match previous {
-                Some(bytes) => atomic_replace(target, bytes),
-                None => remove_if_exists(target),
-            };
-        }
-        return Err(format!(
-            "Configuration restore was rolled back because InnPilot could not replace its main settings: {error}"
-        ));
-    }
-
-    let point = point_from_manifest(&manifest, "ready");
-    Ok(RecoveryActionResult {
-        point,
-        pre_restore_point_id: Some(pre_restore.id),
-        restored_configuration: true,
-    })
-}
-
-fn create_locked(app: &AppHandle) -> Result<RecoveryPoint, String> {
-    let (hub_config, config_path) = config::ensure_config_with_path(app)?;
-    let app_config_bytes = read_limited(&config_path, MAX_CONFIG_BYTES)?;
-    let automation_config_bytes = aligned_automation_config_path(&hub_config)
-        .ok()
-        .map(|path| read_limited(&path, MAX_CONFIG_BYTES))
-        .transpose()?;
-    create_configuration_point_from_bytes_locked(
-        app,
-        &app_config_bytes,
-        automation_config_bytes.as_deref(),
-    )
-}
-
-/// Creates a normal, status-visible recovery point from an exact configuration
-/// snapshot that the caller has already loaded while holding the workflow and
-/// installation configuration locks.
-///
-/// This helper deliberately acquires neither of those locks and does not infer
-/// or constrain the automation configuration path. That makes it suitable for
-/// an existing-folders installation whose automation file is not directly
-/// below the configured automation root. The supplied bytes remain subject to
-/// the same JSON, size, integrity, and retention rules as user-created points.
-pub(crate) fn create_configuration_point_from_bytes_locked(
-    app: &AppHandle,
-    app_config_bytes: &[u8],
-    automation_config_bytes: Option<&[u8]>,
-) -> Result<RecoveryPoint, String> {
-    let root = recovery_root(app)?;
-    create_configuration_point_from_bytes_in_root(
-        &root,
-        &app.package_info().version.to_string(),
-        app_config_bytes,
-        automation_config_bytes,
-        |destination| runner_ledger::backup_database(app, destination),
-    )
 }
 
 fn create_configuration_point_from_bytes_in_root<F>(
@@ -292,17 +396,19 @@ where
     result
 }
 
-fn recovery_root(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map(|directory| directory.join("recovery"))
-        .map_err(|error| format!("Could not locate the private recovery folder: {error}"))
-}
-
-fn status_in_root(root: &Path) -> RecoveryStatus {
+fn status_in_root(root: &Path) -> Result<RecoveryStatus, String> {
     let mut points = Vec::new();
-    if let Ok(entries) = fs::read_dir(root) {
-        for entry in entries.flatten() {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => {
+            return Err("The private recovery folder could not be read.".to_string());
+        }
+    };
+    if let Some(entries) = entries {
+        for entry in entries {
+            let entry =
+                entry.map_err(|_| "The private recovery folder could not be read.".to_string())?;
             let Some(id) = entry.file_name().to_str().map(str::to_string) else {
                 continue;
             };
@@ -331,7 +437,7 @@ fn status_in_root(root: &Path) -> RecoveryStatus {
         }
     }
     points.sort_by(|left, right| right.id.cmp(&left.id));
-    RecoveryStatus {
+    Ok(RecoveryStatus {
         points,
         retention_limit: MAX_RECOVERY_POINTS,
         excluded_data: vec![
@@ -340,7 +446,7 @@ fn status_in_root(root: &Path) -> RecoveryStatus {
             "activity_logs_and_reports".to_string(),
             "device_private_key".to_string(),
         ],
-    }
+    })
 }
 
 fn read_configuration_point_bytes_in_root(
@@ -621,7 +727,7 @@ fn remove_if_exists(path: &Path) -> Result<(), String> {
 }
 
 fn prune_old_points(root: &Path) -> Result<(), String> {
-    let status = status_in_root(root);
+    let status = status_in_root(root)?;
     for point in status.points.iter().skip(MAX_RECOVERY_POINTS) {
         let point_dir = safe_point_dir(root, &point.id)?;
         fs::remove_dir_all(point_dir)
@@ -700,9 +806,21 @@ mod tests {
         let root = temp_root("status");
         fs::create_dir(root.join(".partial-secret")).unwrap();
         fs::create_dir(root.join("not-a-point")).unwrap();
-        let status = status_in_root(&root);
+        let status = status_in_root(&root).unwrap();
         assert!(status.points.is_empty());
         assert_eq!(status.retention_limit, MAX_RECOVERY_POINTS);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn status_surfaces_an_unreadable_recovery_root() {
+        let root = temp_root("status_error");
+        let not_a_directory = root.join("not-a-directory");
+        fs::write(&not_a_directory, b"not a directory").unwrap();
+
+        let error = status_in_root(&not_a_directory).unwrap_err();
+
+        assert_eq!(error, "The private recovery folder could not be read.");
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -718,7 +836,7 @@ mod tests {
         )
         .unwrap();
 
-        let status = status_in_root(&root);
+        let status = status_in_root(&root).unwrap();
         assert_eq!(status.points.len(), 1);
         assert_eq!(status.points[0], point);
         assert_eq!(point.integrity, "ready");
@@ -833,13 +951,66 @@ mod tests {
             .unwrap();
         }
 
-        let status = status_in_root(&root);
+        let status = status_in_root(&root).unwrap();
         assert_eq!(status.points.len(), MAX_RECOVERY_POINTS);
         assert!(status.points.iter().all(|point| point.integrity == "ready"));
         assert!(status
             .points
             .iter()
             .all(|point| point.includes_app_config && point.includes_runner_ledger));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn path_based_service_creates_reads_and_restores_without_tauri() {
+        let root = temp_root("path_service_round_trip");
+        let app_data = root.join("app-data");
+        let app_config_path = app_data.join("config.json");
+        let recovery_root = app_data.join("recovery");
+        let runner_root = app_data.join("runner");
+        let automation_root = root.join("automation");
+        let automation_path = automation_root.join("config.local.json");
+        fs::create_dir_all(&app_data).unwrap();
+        fs::create_dir_all(&automation_root).unwrap();
+
+        let mut installed = config::default_config();
+        installed.client.display_name = "Hotel Before".to_string();
+        installed.automation.automation_root_folder = automation_root.to_string_lossy().to_string();
+        installed.automation.automation_config_path = automation_path.to_string_lossy().to_string();
+        let original_app = serde_json::to_vec_pretty(&installed).unwrap();
+        let original_automation = br#"{"paths":{"invoiceInputDir":"C:\\Input"}}"#;
+        fs::write(&app_config_path, &original_app).unwrap();
+        fs::write(&automation_path, original_automation).unwrap();
+
+        let service = RecoveryService::new(RecoveryEnvironment::new(
+            app_config_path.clone(),
+            recovery_root,
+            runner_root.clone(),
+            runner_root.join(LEDGER_FILE),
+            None,
+            "0.1.0-test".to_string(),
+        ));
+        let created = service.create().unwrap();
+        let point_id = created.point.id.clone();
+        assert_eq!(service.status().unwrap().points.len(), 1);
+        let (saved_app, saved_automation) =
+            service.read_configuration_point_bytes(&point_id).unwrap();
+        assert_eq!(saved_app, original_app);
+        assert_eq!(saved_automation.as_deref(), Some(&original_automation[..]));
+
+        installed.client.display_name = "Hotel After".to_string();
+        fs::write(
+            &app_config_path,
+            serde_json::to_vec_pretty(&installed).unwrap(),
+        )
+        .unwrap();
+        fs::write(&automation_path, br#"{"changed":true}"#).unwrap();
+
+        let restored = service.restore_configuration(&point_id, true).unwrap();
+        assert!(restored.restored_configuration);
+        assert!(restored.pre_restore_point_id.is_some());
+        assert_eq!(fs::read(&app_config_path).unwrap(), original_app);
+        assert_eq!(fs::read(&automation_path).unwrap(), original_automation);
         fs::remove_dir_all(root).unwrap();
     }
 }

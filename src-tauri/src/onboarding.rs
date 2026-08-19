@@ -96,6 +96,27 @@ pub(crate) struct CreatedFolderEvidence {
     recorded_at: String,
 }
 
+/// Durable identity for one approved setup application.
+///
+/// The exact target revision is recorded before configuration bytes are
+/// changed. Startup can therefore distinguish "not applied", "the approved
+/// candidate committed", and "an unrelated configuration won the race"
+/// without replaying a write.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ApplyIntent {
+    pub(crate) operation_id: String,
+    pub(crate) payload_digest: String,
+    pub(crate) base_config_revision: String,
+    pub(crate) target_config_revision: String,
+    pub(crate) recovery_point_id: Option<String>,
+    /// Backend-owned evidence that the approved workspace plan completed
+    /// without folder failures. This disambiguates a legitimate no-op
+    /// configuration apply from a crash before workspace initialization.
+    #[serde(default)]
+    pub(crate) workspace_initialized: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct OnboardingSession {
@@ -114,6 +135,8 @@ pub(crate) struct OnboardingSession {
     deferred_items: Vec<String>,
     #[serde(default)]
     verified_config_revision: Option<String>,
+    #[serde(default)]
+    apply_intent: Option<ApplyIntent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +146,10 @@ struct CompletedSessionSummary {
     completed_at: String,
     resulting_config_revision: String,
     state: OnboardingState,
+    #[serde(default)]
+    operation_id: Option<String>,
+    #[serde(default)]
+    payload_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +212,25 @@ pub(crate) struct OnboardingSnapshot {
     etag: String,
 }
 
+impl OnboardingSnapshot {
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn state(&self) -> OnboardingState {
+        self.state.clone()
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(
+            self.state,
+            OnboardingState::Ready
+                | OnboardingState::ReadyWithDeferredItems
+                | OnboardingState::ReadyLegacy
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OnboardingError {
@@ -220,33 +266,353 @@ impl OnboardingError {
 
 type OnboardingResult<T> = Result<T, OnboardingError>;
 
+/// Purpose-specific filesystem repository for the durable onboarding record.
+/// It deliberately knows only the installation config path and the derived
+/// onboarding store; it is not an arbitrary filesystem capability.
+#[derive(Debug, Clone)]
+pub(crate) struct FileOnboardingRepository {
+    config_path: PathBuf,
+    paths: StorePaths,
+}
+
+impl FileOnboardingRepository {
+    pub(crate) fn new(config_path: PathBuf) -> OnboardingResult<Self> {
+        let paths = store_paths(&config_path)?;
+        Ok(Self { config_path, paths })
+    }
+
+    /// `config::with_configuration_lock` predates typed workspace errors and
+    /// accepts a string error. Keep that compatibility encoding contained in
+    /// this filesystem adapter so the service/domain surface remains typed.
+    fn with_locked<T>(
+        &self,
+        operation: impl FnOnce(&StorePaths, &Path) -> OnboardingResult<T>,
+    ) -> OnboardingResult<T> {
+        config::with_configuration_lock(&self.config_path, || {
+            operation(&self.paths, &self.config_path)
+                .map_err(|error| serde_json::to_string(&error).unwrap_or(error.message))
+        })
+        .map_err(decode_locked_error)
+    }
+}
+
+/// Reusable onboarding application service. Tauri is only responsible for
+/// resolving `config_path` and `runner_root`; all lifecycle decisions and
+/// durable state access are available without an AppHandle.
+#[derive(Debug, Clone)]
+pub(crate) struct OnboardingService {
+    repository: FileOnboardingRepository,
+    runner_root: PathBuf,
+}
+
+impl OnboardingService {
+    pub(crate) fn new(config_path: PathBuf, runner_root: PathBuf) -> OnboardingResult<Self> {
+        Ok(Self {
+            repository: FileOnboardingRepository::new(config_path)?,
+            runner_root,
+        })
+    }
+
+    pub(crate) fn reconcile_startup(
+        &self,
+        config_preexisted: bool,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        self.repository.with_locked(|paths, config_path| {
+            if !paths.primary.exists() {
+                if paths.backup.exists() {
+                    return Err(OnboardingError::new(
+                        "missing_primary",
+                        "InnPilot onboarding state is missing but a recovery copy exists.",
+                        true,
+                    ));
+                }
+                let document = classify_installation(config_path, config_preexisted)?;
+                persist_new(paths, &document)?;
+                return snapshot(&document, false);
+            }
+
+            let (mut document, raw) = read_document(&paths.primary)?;
+            let current = current_config_context(config_path)?;
+            let changed = reconcile_document_after_restart(&mut document, &current)?;
+            if changed {
+                advance_revision(&mut document)?;
+                persist(paths, &document, Some(raw))?;
+            }
+            snapshot(&document, false)
+        })
+    }
+
+    pub(crate) fn get(&self) -> OnboardingResult<OnboardingSnapshot> {
+        self.repository.with_locked(|paths, _| {
+            let (document, _) = read_document(&paths.primary)?;
+            snapshot(&document, false)
+        })
+    }
+
+    pub(crate) fn begin_or_resume(
+        &self,
+        mode: OnboardingMode,
+        expected_revision: u64,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        begin_or_resume_with_service(self, mode, expected_revision, request_id)
+    }
+
+    pub(crate) fn record_progress(
+        &self,
+        checkpoint: ManualSetupCheckpoint,
+        expected_revision: u64,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        record_progress_with_service(self, checkpoint, expected_revision, request_id)
+    }
+
+    pub(crate) fn prepare_apply(
+        &self,
+        expected_revision: u64,
+        expected_config_revision: String,
+        approval_reference: String,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        prepare_apply_with_service(
+            self,
+            expected_revision,
+            expected_config_revision,
+            approval_reference,
+            request_id,
+        )
+    }
+
+    pub(crate) fn record_setup_saved(
+        &self,
+        expected_revision: u64,
+        resulting_config_revision: String,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        record_setup_saved_with_service(
+            self,
+            expected_revision,
+            resulting_config_revision,
+            request_id,
+        )
+    }
+
+    pub(crate) fn complete(
+        &self,
+        expected_revision: u64,
+        resulting_config_revision: String,
+        deferred_items: Vec<String>,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        complete_with_service(
+            self,
+            expected_revision,
+            resulting_config_revision,
+            deferred_items,
+            request_id,
+        )
+    }
+
+    pub(crate) fn mark_failed(
+        &self,
+        expected_revision: u64,
+        failure_code: String,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        mark_failed_with_service(self, expected_revision, failure_code, request_id)
+    }
+
+    pub(crate) fn restart(
+        &self,
+        mode: OnboardingMode,
+        expected_revision: u64,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        restart_with_service(self, mode, expected_revision, request_id)
+    }
+
+    pub(crate) fn import_legacy(
+        &self,
+        raw_json: String,
+        expected_revision: u64,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        import_legacy_with_service(self, raw_json, expected_revision, request_id)
+    }
+
+    fn mutate<T: Serialize>(
+        &self,
+        expected_revision: u64,
+        request_id: &str,
+        operation_name: &str,
+        payload: &T,
+        operation: impl FnOnce(&mut OnboardingDocument, &CurrentConfigContext) -> OnboardingResult<()>,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        validate_request_id(request_id)?;
+        let digest = request_digest(operation_name, payload)?;
+        self.repository.with_locked(|paths, config_path| {
+            mutate_locked(
+                paths,
+                config_path,
+                expected_revision,
+                request_id,
+                operation_name,
+                digest,
+                operation,
+            )
+        })
+    }
+
+    pub(crate) fn find_apply_operation(
+        &self,
+        operation_id: &str,
+        payload_digest: &str,
+    ) -> OnboardingResult<Option<OnboardingSnapshot>> {
+        validate_apply_identity(operation_id, payload_digest)?;
+        self.repository.with_locked(|paths, _| {
+            let (document, _) = read_document(&paths.primary)?;
+            if apply_operation_matches(&document, operation_id, payload_digest)? {
+                return snapshot(&document, false).map(Some);
+            }
+            Ok(None)
+        })
+    }
+
+    pub(crate) fn prepare_apply_with_intent(
+        &self,
+        expected_revision: u64,
+        expected_config_revision: String,
+        target_config_revision: String,
+        approval_reference: String,
+        operation_id: String,
+        payload_digest: String,
+        recovery_point_id: Option<String>,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        validate_apply_identity(&operation_id, &payload_digest)?;
+        validate_config_revision(&expected_config_revision)?;
+        validate_config_revision(&target_config_revision)?;
+        validate_recovery_point_id(recovery_point_id.as_deref())?;
+        if approval_reference != "manual-ui-confirmation" {
+            return Err(OnboardingError::new(
+                "approval_required",
+                "Manual setup requires an explicit InnPilot confirmation.",
+                true,
+            ));
+        }
+        let intent = ApplyIntent {
+            operation_id: operation_id.clone(),
+            payload_digest: payload_digest.clone(),
+            base_config_revision: expected_config_revision.clone(),
+            target_config_revision,
+            recovery_point_id,
+            workspace_initialized: false,
+        };
+        let receipt_payload = json!({
+            "approvalReference": approval_reference,
+            "intent": intent,
+        });
+        let receipt_digest = request_digest("prepareApplyWithIntent", &receipt_payload)?;
+
+        self.repository.with_locked(|paths, config_path| {
+            let (mut document, raw) = read_document(&paths.primary)?;
+            if apply_operation_matches(&document, &operation_id, &payload_digest)? {
+                return snapshot(&document, false);
+            }
+            if let Some(receipt) = document
+                .recent_request_receipts
+                .iter()
+                .find(|receipt| receipt.request_id == operation_id)
+            {
+                if receipt.operation != "prepareApplyWithIntent"
+                    || receipt.payload_digest != receipt_digest
+                {
+                    return Err(OnboardingError::new(
+                        "request_conflict",
+                        "This onboarding request identifier was already used for another operation.",
+                        false,
+                    )
+                    .at_revision(document.revision));
+                }
+                return snapshot(&document, false);
+            }
+            if document.revision != expected_revision {
+                return Err(OnboardingError::new(
+                    "stale_revision",
+                    "Onboarding changed after this screen was loaded. Refresh and try again.",
+                    true,
+                )
+                .at_revision(document.revision));
+            }
+            let context = current_config_context(config_path)?;
+            prepare_apply_intent_transition(
+                &mut document,
+                &context,
+                expected_config_revision.as_str(),
+                intent,
+            )?;
+            advance_revision(&mut document)?;
+            document.installation.updated_at = now();
+            document.recent_request_receipts.push(RequestReceipt {
+                request_id: operation_id,
+                operation: "prepareApplyWithIntent".to_string(),
+                payload_digest: receipt_digest,
+                resulting_revision: document.revision,
+            });
+            trim_history(&mut document);
+            persist(paths, &document, Some(raw))?;
+            snapshot(&document, false)
+        })
+    }
+
+    pub(crate) fn recover(&self) -> OnboardingResult<OnboardingSnapshot> {
+        self.repository
+            .with_locked(|paths, _| recover_locked(paths))
+    }
+
+    pub(crate) fn initialize_workspace(
+        &self,
+        draft: setup::SetupDraft,
+        confirmed: bool,
+        expected_revision: u64,
+        request_id: String,
+    ) -> OnboardingResult<(setup::WorkspaceInitResult, Option<OnboardingSnapshot>)> {
+        initialize_workspace_with_service(self, draft, confirmed, expected_revision, request_id)
+    }
+
+    pub(crate) fn cleanup_created_folders(
+        &self,
+        expected_revision: u64,
+    ) -> OnboardingResult<(setup::SetupCleanupResult, OnboardingSnapshot)> {
+        cleanup_created_folders_with_service(self, expected_revision)
+    }
+}
+
+fn service_for_app(app: &AppHandle) -> OnboardingResult<OnboardingService> {
+    let config_path = config::app_config_path(app).map_err(|_| {
+        OnboardingError::new(
+            "persistence_failed",
+            "InnPilot could not locate its private onboarding store.",
+            true,
+        )
+    })?;
+    let runner_root = config_path
+        .parent()
+        .map(|parent| parent.join("runner"))
+        .ok_or_else(|| {
+            OnboardingError::new(
+                "persistence_failed",
+                "InnPilot app data has no parent folder.",
+                false,
+            )
+        })?;
+    OnboardingService::new(config_path, runner_root)
+}
+
 pub(crate) fn reconcile_startup(
     app: &AppHandle,
     config_preexisted: bool,
 ) -> OnboardingResult<OnboardingSnapshot> {
-    with_app_store(app, |paths, config_path| {
-        if !paths.primary.exists() {
-            if paths.backup.exists() {
-                return Err(OnboardingError::new(
-                    "missing_primary",
-                    "InnPilot onboarding state is missing but a recovery copy exists.",
-                    true,
-                ));
-            }
-            let document = classify_installation(config_path, config_preexisted)?;
-            persist_new(paths, &document)?;
-            return snapshot(&document, false);
-        }
-
-        let (mut document, raw) = read_document(&paths.primary)?;
-        let current = current_config_context(config_path)?;
-        let changed = reconcile_document_after_restart(&mut document, &current)?;
-        if changed {
-            advance_revision(&mut document)?;
-            persist(paths, &document, Some(raw))?;
-        }
-        snapshot(&document, false)
-    })
+    service_for_app(app)?.reconcile_startup(config_preexisted)
 }
 
 fn reconcile_document_after_restart(
@@ -258,31 +624,51 @@ fn reconcile_document_after_restart(
         .as_ref()
         .map(|session| session.state.clone())
     else {
+        if document.installation.readiness != InstallationReadiness::NotStarted
+            && !current.structurally_complete
+        {
+            // An explicit configuration restore can legitimately move the
+            // installed pair behind the historically completed onboarding
+            // record. Re-open a review session instead of routing the user to
+            // Home with an incomplete restored configuration.
+            let from = effective_state(document);
+            let timestamp = now();
+            document.active_session = Some(OnboardingSession {
+                id: random_id("session")?,
+                state: OnboardingState::BootstrapCreated,
+                mode: OnboardingMode::Manual,
+                origin: OnboardingOrigin::ManualReview,
+                created_at: timestamp.clone(),
+                updated_at: timestamp,
+                base_config_revision: current.revision.clone(),
+                manual_progress: None,
+                created_folders: Vec::new(),
+                failure_code: None,
+                deferred_items: Vec::new(),
+                verified_config_revision: None,
+                apply_intent: None,
+            });
+            append_event(
+                document,
+                from,
+                OnboardingState::BootstrapCreated,
+                "configurationRestoreNeedsReview",
+                "backend",
+            )?;
+            return Ok(true);
+        }
         return Ok(false);
     };
+
+    if state == OnboardingState::Applying {
+        return reconcile_applying_after_restart(document, current);
+    }
 
     let transition = match state {
         OnboardingState::DiscoveryRunning => Some((
             OnboardingState::FailedRecoverable,
             "interrupted_discovery",
             "interruptedDiscovery",
-        )),
-        OnboardingState::Applying
-            if document
-                .active_session
-                .as_ref()
-                .is_some_and(|session| current.revision == session.base_config_revision) =>
-        {
-            Some((
-                OnboardingState::NeedsUserInput,
-                "interrupted_before_apply",
-                "resumedBeforeApply",
-            ))
-        }
-        OnboardingState::Applying => Some((
-            OnboardingState::FailedRecoverable,
-            "apply_outcome_unknown",
-            "applyOutcomeNeedsReview",
         )),
         OnboardingState::Verifying
             if document.active_session.as_ref().is_some_and(|session| {
@@ -318,11 +704,108 @@ fn reconcile_document_after_restart(
     Ok(true)
 }
 
+fn reconcile_applying_after_restart(
+    document: &mut OnboardingDocument,
+    current: &CurrentConfigContext,
+) -> OnboardingResult<bool> {
+    let (base_revision, intent) = document
+        .active_session
+        .as_ref()
+        .map(|session| {
+            (
+                session.base_config_revision.clone(),
+                session.apply_intent.clone(),
+            )
+        })
+        .ok_or_else(|| {
+            OnboardingError::new(
+                "state_missing",
+                "The onboarding session is no longer available.",
+                true,
+            )
+        })?;
+
+    if let Some(intent) = intent {
+        if current.revision == intent.target_config_revision
+            && intent.workspace_initialized
+            && (intent.target_config_revision != intent.base_config_revision
+                || current.structurally_complete)
+        {
+            let deferred = derive_deferred_items(&current.config);
+            {
+                let session = active_session_mut(document)?;
+                session.state = OnboardingState::Verifying;
+                session.failure_code = None;
+                session.verified_config_revision = Some(current.revision.clone());
+                session.deferred_items = deferred;
+                session.updated_at = now();
+            }
+            append_event(
+                document,
+                OnboardingState::Applying,
+                OnboardingState::Verifying,
+                "approvedConfigurationCommitObserved",
+                "startup",
+            )?;
+            finish_reconciled_session(document, current)?;
+            return Ok(true);
+        }
+
+        if current.revision == intent.base_config_revision {
+            let session = active_session_mut(document)?;
+            session.state = OnboardingState::NeedsUserInput;
+            session.failure_code = Some("interrupted_before_apply".to_string());
+            session.updated_at = now();
+            append_event(
+                document,
+                OnboardingState::Applying,
+                OnboardingState::NeedsUserInput,
+                "resumedBeforeApply",
+                "startup",
+            )?;
+            return Ok(true);
+        }
+
+        let session = active_session_mut(document)?;
+        session.state = OnboardingState::FailedRecoverable;
+        session.failure_code = Some("configuration_conflict".to_string());
+        session.updated_at = now();
+        append_event(
+            document,
+            OnboardingState::Applying,
+            OnboardingState::FailedRecoverable,
+            "applyConfigurationConflict",
+            "startup",
+        )?;
+        return Ok(true);
+    }
+
+    // Backward compatibility for Phase B records created before durable apply
+    // intent existed. Without an exact target revision, a changed pair remains
+    // ambiguous and must not be promoted or replayed.
+    let (to, failure_code, reason) = if current.revision == base_revision {
+        (
+            OnboardingState::NeedsUserInput,
+            "interrupted_before_apply",
+            "resumedBeforeApply",
+        )
+    } else {
+        (
+            OnboardingState::FailedRecoverable,
+            "apply_outcome_unknown",
+            "applyOutcomeNeedsReview",
+        )
+    };
+    let session = active_session_mut(document)?;
+    session.state = to.clone();
+    session.failure_code = Some(failure_code.to_string());
+    session.updated_at = now();
+    append_event(document, OnboardingState::Applying, to, reason, "startup")?;
+    Ok(true)
+}
+
 pub(crate) fn get(app: &AppHandle) -> OnboardingResult<OnboardingSnapshot> {
-    with_app_store(app, |paths, _| {
-        let (document, _) = read_document(&paths.primary)?;
-        snapshot(&document, false)
-    })
+    service_for_app(app)?.get()
 }
 
 pub(crate) fn begin_or_resume(
@@ -331,9 +814,17 @@ pub(crate) fn begin_or_resume(
     expected_revision: u64,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.begin_or_resume(mode, expected_revision, request_id)
+}
+
+fn begin_or_resume_with_service(
+    service: &OnboardingService,
+    mode: OnboardingMode,
+    expected_revision: u64,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
     let payload_mode = mode.clone();
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "beginOrResume",
@@ -353,6 +844,7 @@ pub(crate) fn begin_or_resume(
                             session.base_config_revision = context.revision.clone();
                             session.manual_progress = None;
                             session.verified_config_revision = None;
+                            session.apply_intent = None;
                             session.deferred_items.clear();
                         }
                         session.updated_at = now();
@@ -390,6 +882,7 @@ pub(crate) fn begin_or_resume(
                 failure_code: None,
                 deferred_items: Vec::new(),
                 verified_config_revision: None,
+                apply_intent: None,
             };
             document.active_session = Some(session);
             push_transition_event(
@@ -409,10 +902,18 @@ pub(crate) fn record_progress(
     expected_revision: u64,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.record_progress(checkpoint, expected_revision, request_id)
+}
+
+fn record_progress_with_service(
+    service: &OnboardingService,
+    checkpoint: ManualSetupCheckpoint,
+    expected_revision: u64,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
     let checkpoint = validate_checkpoint(checkpoint)?;
     let payload_checkpoint = checkpoint.clone();
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "recordProgress",
@@ -453,6 +954,7 @@ pub(crate) fn record_progress(
             session.updated_at = now();
             session.failure_code = None;
             session.manual_progress = Some(checkpoint);
+            session.apply_intent = None;
             push_transition_event(
                 document,
                 from,
@@ -471,6 +973,21 @@ pub(crate) fn prepare_apply(
     approval_reference: String,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.prepare_apply(
+        expected_revision,
+        expected_config_revision,
+        approval_reference,
+        request_id,
+    )
+}
+
+fn prepare_apply_with_service(
+    service: &OnboardingService,
+    expected_revision: u64,
+    expected_config_revision: String,
+    approval_reference: String,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
     if approval_reference != "manual-ui-confirmation" {
         return Err(OnboardingError::new(
             "approval_required",
@@ -482,8 +999,7 @@ pub(crate) fn prepare_apply(
         "expectedConfigRevision": expected_config_revision,
         "approvalReference": approval_reference,
     });
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "prepareApply",
@@ -542,6 +1058,7 @@ pub(crate) fn prepare_apply(
             session.state = OnboardingState::Applying;
             session.updated_at = now();
             session.verified_config_revision = None;
+            session.apply_intent = None;
             session.deferred_items.clear();
             push_transition_event(
                 document,
@@ -562,8 +1079,20 @@ pub(crate) fn record_setup_saved(
     resulting_config_revision: String,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
-    mutate(
-        app,
+    service_for_app(app)?.record_setup_saved(
+        expected_revision,
+        resulting_config_revision,
+        request_id,
+    )
+}
+
+fn record_setup_saved_with_service(
+    service: &OnboardingService,
+    expected_revision: u64,
+    resulting_config_revision: String,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
+    service.mutate(
         expected_revision,
         &request_id,
         "recordSetupSaved",
@@ -577,10 +1106,19 @@ pub(crate) fn record_setup_saved(
                 )
                 .at_revision(document.revision));
             }
-            let (state, base_revision) = document
+            let (state, base_revision, intended_target) = document
                 .active_session
                 .as_ref()
-                .map(|session| (session.state.clone(), session.base_config_revision.clone()))
+                .map(|session| {
+                    (
+                        session.state.clone(),
+                        session.base_config_revision.clone(),
+                        session
+                            .apply_intent
+                            .as_ref()
+                            .map(|intent| intent.target_config_revision.clone()),
+                    )
+                })
                 .ok_or_else(|| {
                     OnboardingError::new(
                         "no_active_session",
@@ -591,6 +1129,17 @@ pub(crate) fn record_setup_saved(
                 })?;
             if state != OnboardingState::Applying {
                 return invalid_transition(document, &state, OnboardingState::Verifying);
+            }
+            if intended_target
+                .as_deref()
+                .is_some_and(|target| target != resulting_config_revision)
+            {
+                return Err(OnboardingError::new(
+                    "configuration_conflict",
+                    "The installed configuration does not match the approved setup candidate.",
+                    true,
+                )
+                .at_revision(document.revision));
             }
             // An unchanged revision is a valid review only when the installed
             // pair already has the required structure. A fresh/default config
@@ -628,6 +1177,21 @@ pub(crate) fn complete(
     deferred_items: Vec<String>,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.complete(
+        expected_revision,
+        resulting_config_revision,
+        deferred_items,
+        request_id,
+    )
+}
+
+fn complete_with_service(
+    service: &OnboardingService,
+    expected_revision: u64,
+    resulting_config_revision: String,
+    deferred_items: Vec<String>,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
     if !deferred_items.is_empty() {
         return Err(OnboardingError::new(
             "validation_failed",
@@ -639,8 +1203,7 @@ pub(crate) fn complete(
         "resultingConfigRevision": resulting_config_revision,
         "deferredItems": [],
     });
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "complete",
@@ -688,6 +1251,14 @@ pub(crate) fn complete(
                 completed_at: now(),
                 resulting_config_revision,
                 state: final_state.clone(),
+                operation_id: session
+                    .apply_intent
+                    .as_ref()
+                    .map(|intent| intent.operation_id.clone()),
+                payload_digest: session
+                    .apply_intent
+                    .as_ref()
+                    .map(|intent| intent.payload_digest.clone()),
             });
             push_transition_event(
                 document,
@@ -702,6 +1273,15 @@ pub(crate) fn complete(
 
 pub(crate) fn mark_failed(
     app: &AppHandle,
+    expected_revision: u64,
+    failure_code: String,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.mark_failed(expected_revision, failure_code, request_id)
+}
+
+fn mark_failed_with_service(
+    service: &OnboardingService,
     expected_revision: u64,
     failure_code: String,
     request_id: String,
@@ -721,8 +1301,7 @@ pub(crate) fn mark_failed(
         ));
     }
     let payload_code = failure_code.clone();
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "markFailed",
@@ -770,9 +1349,17 @@ pub(crate) fn restart(
     expected_revision: u64,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
+    service_for_app(app)?.restart(mode, expected_revision, request_id)
+}
+
+fn restart_with_service(
+    service: &OnboardingService,
+    mode: OnboardingMode,
+    expected_revision: u64,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
     let payload_mode = mode.clone();
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "restart",
@@ -818,6 +1405,7 @@ pub(crate) fn restart(
                 failure_code: None,
                 deferred_items: Vec::new(),
                 verified_config_revision: None,
+                apply_intent: None,
             });
             push_transition_event(
                 document,
@@ -836,7 +1424,16 @@ pub(crate) fn import_legacy(
     expected_revision: u64,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
-    let current = get(app)?;
+    service_for_app(app)?.import_legacy(raw_json, expected_revision, request_id)
+}
+
+fn import_legacy_with_service(
+    service: &OnboardingService,
+    raw_json: String,
+    expected_revision: u64,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
+    let current = service.get()?;
     if current.installation.legacy_storage_migration != LegacyStorageMigration::NotSeen {
         return Ok(current);
     }
@@ -856,8 +1453,7 @@ pub(crate) fn import_legacy(
     } else {
         parse_legacy_session(&raw_json)
     };
-    mutate(
-        app,
+    service.mutate(
         expected_revision,
         &request_id,
         "importLegacy",
@@ -956,6 +1552,7 @@ fn apply_legacy_import(
         failure_code: None,
         deferred_items: Vec::new(),
         verified_config_revision: None,
+        apply_intent: None,
     });
     if session.base_config_revision != context.revision {
         document.installation.legacy_storage_migration = LegacyStorageMigration::DiscardedStale;
@@ -988,6 +1585,16 @@ pub(crate) fn initialize_workspace(
     expected_revision: u64,
     request_id: String,
 ) -> OnboardingResult<(setup::WorkspaceInitResult, Option<OnboardingSnapshot>)> {
+    service_for_app(app)?.initialize_workspace(draft, confirmed, expected_revision, request_id)
+}
+
+fn initialize_workspace_with_service(
+    service: &OnboardingService,
+    draft: setup::SetupDraft,
+    confirmed: bool,
+    expected_revision: u64,
+    request_id: String,
+) -> OnboardingResult<(setup::WorkspaceInitResult, Option<OnboardingSnapshot>)> {
     if !confirmed {
         return Err(OnboardingError::new(
             "confirmation_required",
@@ -997,22 +1604,23 @@ pub(crate) fn initialize_workspace(
     }
     validate_request_id(&request_id)?;
     let workspace_base = draft.workspace_base().to_string();
-    let _workflow_lock = runner_ledger::ProcessLock::try_acquire(app, "workflow")
-        .map_err(|_| {
-            OnboardingError::new(
-                "workspace_failed",
-                "InnPilot could not coordinate workspace initialization.",
-                true,
-            )
-        })?
-        .ok_or_else(|| {
-            OnboardingError::new(
-                "busy",
-                "Wait for the current automation or setup save before creating folders.",
-                true,
-            )
-        })?;
-    with_app_store(app, |paths, _| {
+    let _workflow_lock =
+        runner_ledger::ProcessLock::try_acquire_in_directory(&service.runner_root, "workflow")
+            .map_err(|_| {
+                OnboardingError::new(
+                    "workspace_failed",
+                    "InnPilot could not coordinate workspace initialization.",
+                    true,
+                )
+            })?
+            .ok_or_else(|| {
+                OnboardingError::new(
+                    "busy",
+                    "Wait for the current automation or setup save before creating folders.",
+                    true,
+                )
+            })?;
+    service.repository.with_locked(|paths, _| {
         let (mut document, raw) = read_document(&paths.primary)?;
         if document.revision != expected_revision {
             return Err(OnboardingError::new(
@@ -1041,10 +1649,8 @@ pub(crate) fn initialize_workspace(
             )
             .at_revision(document.revision)
         })?;
+        let initialization_succeeded = !workspace.has_failures();
         let created_paths = workspace.created_paths();
-        if created_paths.is_empty() {
-            return Ok((workspace, None));
-        }
         if created_paths.len() > MAX_CREATED_FOLDERS
             || workspace_base.chars().count() > 4096
             || created_paths.iter().any(|path| path.chars().count() > 4096)
@@ -1056,6 +1662,15 @@ pub(crate) fn initialize_workspace(
                 true,
             )
             .at_revision(document.revision));
+        }
+        let should_record_workspace_initialized = initialization_succeeded
+            && document
+                .active_session
+                .as_ref()
+                .and_then(|session| session.apply_intent.as_ref())
+                .is_some_and(|intent| !intent.workspace_initialized);
+        if created_paths.is_empty() && !should_record_workspace_initialized {
+            return Ok((workspace, None));
         }
         let event_state = {
             let session = active_session_mut(&mut document)?;
@@ -1073,13 +1688,22 @@ pub(crate) fn initialize_workspace(
                 }
             }
             session.created_folders.truncate(MAX_CREATED_FOLDERS);
+            if should_record_workspace_initialized {
+                if let Some(intent) = session.apply_intent.as_mut() {
+                    intent.workspace_initialized = true;
+                }
+            }
             session.updated_at = now();
             session.state.clone()
         };
         push_same_state_event(
             &mut document,
             event_state,
-            "createdFoldersRecorded",
+            if should_record_workspace_initialized {
+                "workspaceInitializationRecorded"
+            } else {
+                "createdFoldersRecorded"
+            },
             "backend",
         )?;
         advance_revision(&mut document)?;
@@ -1097,22 +1721,30 @@ pub(crate) fn cleanup_created_folders(
     app: &AppHandle,
     expected_revision: u64,
 ) -> OnboardingResult<(setup::SetupCleanupResult, OnboardingSnapshot)> {
-    let _workflow_lock = runner_ledger::ProcessLock::try_acquire(app, "workflow")
-        .map_err(|_| {
-            OnboardingError::new(
-                "cleanup_failed",
-                "InnPilot could not coordinate empty-folder cleanup.",
-                true,
-            )
-        })?
-        .ok_or_else(|| {
-            OnboardingError::new(
-                "busy",
-                "Wait for the current automation or setup save to finish before cleanup.",
-                true,
-            )
-        })?;
-    with_app_store(app, |paths, _| {
+    service_for_app(app)?.cleanup_created_folders(expected_revision)
+}
+
+fn cleanup_created_folders_with_service(
+    service: &OnboardingService,
+    expected_revision: u64,
+) -> OnboardingResult<(setup::SetupCleanupResult, OnboardingSnapshot)> {
+    let _workflow_lock =
+        runner_ledger::ProcessLock::try_acquire_in_directory(&service.runner_root, "workflow")
+            .map_err(|_| {
+                OnboardingError::new(
+                    "cleanup_failed",
+                    "InnPilot could not coordinate empty-folder cleanup.",
+                    true,
+                )
+            })?
+            .ok_or_else(|| {
+                OnboardingError::new(
+                    "busy",
+                    "Wait for the current automation or setup save to finish before cleanup.",
+                    true,
+                )
+            })?;
+    service.repository.with_locked(|paths, _| {
         cleanup_created_folders_locked(paths, expected_revision, |workspace, paths| {
             setup::remove_setup_created_empty_folders(workspace, paths, true)
         })
@@ -1216,7 +1848,7 @@ fn cleanup_created_folders_locked(
 }
 
 pub(crate) fn recover(app: &AppHandle) -> OnboardingResult<OnboardingSnapshot> {
-    with_app_store(app, |paths, _| recover_locked(paths))
+    service_for_app(app)?.recover()
 }
 
 fn recover_locked(paths: &StorePaths) -> OnboardingResult<OnboardingSnapshot> {
@@ -1292,7 +1924,7 @@ fn recover_locked(paths: &StorePaths) -> OnboardingResult<OnboardingSnapshot> {
     snapshot(&recovered, true)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StorePaths {
     directory: PathBuf,
     primary: PathBuf,
@@ -1304,25 +1936,6 @@ struct CurrentConfigContext {
     revision: String,
     config: config::HubConfig,
     structurally_complete: bool,
-}
-
-fn with_app_store<T>(
-    app: &AppHandle,
-    operation: impl FnOnce(&StorePaths, &Path) -> OnboardingResult<T>,
-) -> OnboardingResult<T> {
-    let config_path = config::app_config_path(app).map_err(|_| {
-        OnboardingError::new(
-            "persistence_failed",
-            "InnPilot could not locate its private onboarding store.",
-            true,
-        )
-    })?;
-    config::with_configuration_lock(&config_path, || {
-        let paths = store_paths(&config_path).map_err(|error| error.message)?;
-        operation(&paths, &config_path)
-            .map_err(|error| serde_json::to_string(&error).unwrap_or(error.message))
-    })
-    .map_err(decode_locked_error)
 }
 
 fn decode_locked_error(value: String) -> OnboardingError {
@@ -1370,29 +1983,6 @@ fn store_paths(config_path: &Path) -> OnboardingResult<StorePaths> {
         primary: directory.join(STATE_RELATIVE_PATH[1]),
         backup: directory.join("state.json.bak"),
         directory,
-    })
-}
-
-fn mutate<T: Serialize>(
-    app: &AppHandle,
-    expected_revision: u64,
-    request_id: &str,
-    operation_name: &str,
-    payload: &T,
-    operation: impl FnOnce(&mut OnboardingDocument, &CurrentConfigContext) -> OnboardingResult<()>,
-) -> OnboardingResult<OnboardingSnapshot> {
-    validate_request_id(request_id)?;
-    let digest = request_digest(operation_name, payload)?;
-    with_app_store(app, |paths, config_path| {
-        mutate_locked(
-            paths,
-            config_path,
-            expected_revision,
-            request_id,
-            operation_name,
-            digest,
-            operation,
-        )
     })
 }
 
@@ -1517,6 +2107,7 @@ fn classify_installation(
             failure_code: None,
             deferred_items: Vec::new(),
             verified_config_revision: None,
+            apply_intent: None,
         };
         Ok(OnboardingDocument {
             schema: SCHEMA_NAME.to_string(),
@@ -1645,11 +2236,21 @@ fn finish_reconciled_session(
     } else {
         InstallationReadiness::ReadyWithDeferredItems
     };
+    let operation_id = session
+        .apply_intent
+        .as_ref()
+        .map(|intent| intent.operation_id.clone());
+    let payload_digest = session
+        .apply_intent
+        .as_ref()
+        .map(|intent| intent.payload_digest.clone());
     document.installation.last_completed_session = Some(CompletedSessionSummary {
         id: session.id,
         completed_at: now(),
         resulting_config_revision: context.revision.clone(),
         state: final_state.clone(),
+        operation_id,
+        payload_digest,
     });
     push_transition_event(
         document,
@@ -1661,22 +2262,10 @@ fn finish_reconciled_session(
 }
 
 fn derive_deferred_items(config: &config::HubConfig) -> Vec<String> {
-    let report = preflight::build_preflight_report(config);
-    let report_value = serde_json::to_value(report).unwrap_or(Value::Null);
-    let mut deferred = report_value
-        .get("workflows")
-        .and_then(Value::as_array)
+    let mut deferred = preflight::build_preflight_report(config)
+        .deferred_workflow_keys()
         .into_iter()
-        .flatten()
-        .filter(|workflow| {
-            workflow
-                .get("commandName")
-                .is_some_and(|value| !value.is_null())
-        })
-        .filter(|workflow| workflow.get("canRun").and_then(Value::as_bool) == Some(false))
-        .filter_map(|workflow| workflow.get("key").and_then(Value::as_str))
         .filter(|code| valid_code(code))
-        .map(str::to_string)
         .take(MAX_DEFERRED_ITEMS)
         .collect::<Vec<_>>();
     deferred.sort();
@@ -2031,6 +2620,123 @@ fn active_session_mut(
     })
 }
 
+fn prepare_apply_intent_transition(
+    document: &mut OnboardingDocument,
+    context: &CurrentConfigContext,
+    expected_config_revision: &str,
+    intent: ApplyIntent,
+) -> OnboardingResult<()> {
+    let (state, mode, has_progress, base_revision) = document
+        .active_session
+        .as_ref()
+        .map(|session| {
+            (
+                session.state.clone(),
+                session.mode.clone(),
+                session.manual_progress.is_some(),
+                session.base_config_revision.clone(),
+            )
+        })
+        .ok_or_else(|| {
+            OnboardingError::new(
+                "no_active_session",
+                "No onboarding session is active.",
+                true,
+            )
+            .at_revision(document.revision)
+        })?;
+    if mode != OnboardingMode::Manual {
+        return Err(OnboardingError::new(
+            "feature_unavailable",
+            "Agent-originated apply is not enabled.",
+            false,
+        )
+        .at_revision(document.revision));
+    }
+    if !has_progress {
+        return Err(OnboardingError::new(
+            "progress_required",
+            "Save manual onboarding progress before applying it.",
+            true,
+        )
+        .at_revision(document.revision));
+    }
+    if context.revision != expected_config_revision
+        || base_revision != expected_config_revision
+        || intent.base_config_revision != expected_config_revision
+    {
+        return Err(OnboardingError::new(
+            "config_changed",
+            "InnPilot configuration changed before setup could be applied.",
+            true,
+        )
+        .at_revision(document.revision));
+    }
+    if intent.target_config_revision == intent.base_config_revision
+        && !context.structurally_complete
+    {
+        return Err(OnboardingError::new(
+            "validation_failed",
+            "The installed configuration is still incomplete.",
+            true,
+        )
+        .at_revision(document.revision));
+    }
+    if state != OnboardingState::NeedsUserInput {
+        return invalid_transition(document, &state, OnboardingState::Applying);
+    }
+    let session = active_session_mut(document)?;
+    session.state = OnboardingState::Applying;
+    session.updated_at = now();
+    session.failure_code = None;
+    session.verified_config_revision = None;
+    session.deferred_items.clear();
+    session.apply_intent = Some(intent);
+    push_transition_event(
+        document,
+        state,
+        OnboardingState::Applying,
+        "approvedApplyIntentRecorded",
+        "backend",
+    )
+}
+
+fn apply_operation_matches(
+    document: &OnboardingDocument,
+    operation_id: &str,
+    payload_digest: &str,
+) -> OnboardingResult<bool> {
+    let active = document
+        .active_session
+        .as_ref()
+        .and_then(|session| session.apply_intent.as_ref())
+        .map(|intent| (&intent.operation_id, &intent.payload_digest));
+    let completed = document
+        .installation
+        .last_completed_session
+        .as_ref()
+        .and_then(|session| {
+            session
+                .operation_id
+                .as_ref()
+                .zip(session.payload_digest.as_ref())
+        });
+    for (saved_id, saved_digest) in active.into_iter().chain(completed) {
+        if saved_id == operation_id {
+            if saved_digest != payload_digest {
+                return Err(OnboardingError::new(
+                    "request_conflict",
+                    "This setup operation identifier was already used for another candidate.",
+                    false,
+                )
+                .at_revision(document.revision));
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn trim_history(document: &mut OnboardingDocument) {
     if document.events.len() > MAX_EVENTS {
         document.events.drain(0..document.events.len() - MAX_EVENTS);
@@ -2085,6 +2791,34 @@ fn validate_document(document: &OnboardingDocument) -> OnboardingResult<()> {
         }
         if let Some(checkpoint) = &session.manual_progress {
             validate_checkpoint(checkpoint.clone())?;
+        }
+        if let Some(intent) = &session.apply_intent {
+            if intent.base_config_revision != session.base_config_revision
+                || validate_apply_identity(&intent.operation_id, &intent.payload_digest).is_err()
+                || validate_config_revision(&intent.base_config_revision).is_err()
+                || validate_config_revision(&intent.target_config_revision).is_err()
+                || validate_recovery_point_id(intent.recovery_point_id.as_deref()).is_err()
+            {
+                return Err(OnboardingError::new(
+                    "corrupt_state",
+                    "InnPilot onboarding state has invalid setup-application evidence.",
+                    true,
+                ));
+            }
+        }
+    }
+    if let Some(completed) = &document.installation.last_completed_session {
+        match (&completed.operation_id, &completed.payload_digest) {
+            (Some(operation_id), Some(payload_digest))
+                if validate_apply_identity(operation_id, payload_digest).is_ok() => {}
+            (None, None) => {}
+            _ => {
+                return Err(OnboardingError::new(
+                    "corrupt_state",
+                    "InnPilot completed onboarding evidence has an invalid operation identity.",
+                    true,
+                ));
+            }
         }
     }
     for event in &document.events {
@@ -2423,6 +3157,54 @@ fn validate_request_id(value: &str) -> OnboardingResult<()> {
     Ok(())
 }
 
+fn validate_apply_identity(operation_id: &str, payload_digest: &str) -> OnboardingResult<()> {
+    validate_request_id(operation_id)?;
+    validate_config_revision(payload_digest).map_err(|_| {
+        OnboardingError::new(
+            "validation_failed",
+            "The setup operation payload digest is invalid.",
+            true,
+        )
+    })
+}
+
+fn validate_config_revision(value: &str) -> OnboardingResult<()> {
+    let Some(digest) = value.strip_prefix("sha256:") else {
+        return Err(OnboardingError::new(
+            "validation_failed",
+            "The configuration revision is invalid.",
+            true,
+        ));
+    };
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(OnboardingError::new(
+            "validation_failed",
+            "The configuration revision is invalid.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_recovery_point_id(value: Option<&str>) -> OnboardingResult<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.len() < 20
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return Err(OnboardingError::new(
+            "validation_failed",
+            "The setup recovery point identifier is invalid.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
 fn request_digest<T: Serialize>(operation: &str, payload: &T) -> OnboardingResult<String> {
     let payload = serde_json::to_vec(payload).map_err(|_| {
         OnboardingError::new(
@@ -2583,6 +3365,26 @@ mod tests {
             failure_code: None,
             deferred_items: Vec::new(),
             verified_config_revision: None,
+            apply_intent: None,
+        }
+    }
+
+    fn path_service(root: &Path, config_path: &Path) -> OnboardingService {
+        OnboardingService::new(config_path.to_path_buf(), root.join("runner")).unwrap()
+    }
+
+    fn fixture_revision(byte: char) -> String {
+        format!("sha256:{}", byte.to_string().repeat(64))
+    }
+
+    fn fixture_intent(base_config_revision: String, target_config_revision: String) -> ApplyIntent {
+        ApplyIntent {
+            operation_id: "apply-operation-0001".to_string(),
+            payload_digest: fixture_revision('a'),
+            base_config_revision,
+            target_config_revision,
+            recovery_point_id: Some("20260818T000000000Z-abcd".to_string()),
+            workspace_initialized: false,
         }
     }
 
@@ -2638,6 +3440,29 @@ mod tests {
         let session = incomplete.active_session.unwrap();
         assert_eq!(session.state, OnboardingState::NeedsUserInput);
         assert_eq!(session.origin, OnboardingOrigin::LegacyIncompleteMigration);
+    }
+
+    #[test]
+    fn restored_incomplete_configuration_reopens_review_for_ready_installation() {
+        let (root, config_path, paths) = configured_store("restored_incomplete", true);
+        let document = classify_installation(&config_path, true).unwrap();
+        assert_eq!(
+            document.installation.readiness,
+            InstallationReadiness::ReadyLegacy
+        );
+        persist_new(&paths, &document).unwrap();
+        fs::remove_file(root.join("automation").join("config.local.json")).unwrap();
+
+        let snapshot = path_service(&root, &config_path)
+            .reconcile_startup(true)
+            .unwrap();
+
+        assert_eq!(snapshot.state(), OnboardingState::BootstrapCreated);
+        assert!(snapshot.active_session.is_some());
+        assert_eq!(
+            snapshot.installation.readiness,
+            InstallationReadiness::ReadyLegacy
+        );
     }
 
     #[test]
@@ -3136,5 +3961,276 @@ mod tests {
 
         assert_eq!(fs::read(&config_path).unwrap(), app_before);
         assert_eq!(fs::read(&automation_path).unwrap(), automation_before);
+    }
+
+    #[test]
+    fn path_service_runs_the_manual_lifecycle_without_tauri() {
+        let (root, config_path, _) = configured_store("path_service", true);
+        let service = path_service(&root, &config_path);
+
+        let initial = service.reconcile_startup(false).unwrap();
+        assert_eq!(initial.state(), OnboardingState::NotStarted);
+
+        let started = service
+            .begin_or_resume(
+                OnboardingMode::Manual,
+                initial.revision(),
+                "request-begin-0001".to_string(),
+            )
+            .unwrap();
+        assert_eq!(started.state(), OnboardingState::BootstrapCreated);
+
+        let progressed = service
+            .record_progress(
+                checkpoint(&root),
+                started.revision(),
+                "request-progress-0001".to_string(),
+            )
+            .unwrap();
+        assert_eq!(progressed.state(), OnboardingState::NeedsUserInput);
+        assert_eq!(service.get().unwrap().revision(), progressed.revision());
+    }
+
+    #[test]
+    fn restart_with_apply_intent_at_base_resumes_without_replaying_apply() {
+        let (root, config_path, paths) = configured_store("intent_base", true);
+        let context = current_config_context(&config_path).unwrap();
+        let mut document = classify_installation(&config_path, false).unwrap();
+        let mut session = active_session(&context, OnboardingState::Applying);
+        session.apply_intent = Some(fixture_intent(
+            context.revision.clone(),
+            fixture_revision('b'),
+        ));
+        document.active_session = Some(session);
+        persist_new(&paths, &document).unwrap();
+
+        let service = path_service(&root, &config_path);
+        let snapshot = service.reconcile_startup(false).unwrap();
+        assert_eq!(snapshot.state(), OnboardingState::NeedsUserInput);
+        let session = snapshot.active_session.as_ref().unwrap();
+        assert_eq!(
+            session.failure_code.as_deref(),
+            Some("interrupted_before_apply")
+        );
+        assert!(session.apply_intent.is_some());
+
+        let progressed = service
+            .record_progress(
+                checkpoint(&root),
+                snapshot.revision(),
+                "request-progress-after-interruption".to_string(),
+            )
+            .unwrap();
+        let retried = service
+            .prepare_apply_with_intent(
+                progressed.revision(),
+                context.revision.clone(),
+                context.revision,
+                "manual-ui-confirmation".to_string(),
+                "apply-operation-retry-0002".to_string(),
+                fixture_revision('d'),
+                None,
+            )
+            .unwrap();
+        assert_eq!(retried.state(), OnboardingState::Applying);
+        assert_eq!(
+            retried
+                .active_session
+                .unwrap()
+                .apply_intent
+                .unwrap()
+                .operation_id,
+            "apply-operation-retry-0002"
+        );
+    }
+
+    #[test]
+    fn restart_with_apply_intent_at_target_finalizes_and_replays_terminal_receipt() {
+        let (root, config_path, paths) = configured_store("intent_target", true);
+        let context = current_config_context(&config_path).unwrap();
+        let mut document = classify_installation(&config_path, false).unwrap();
+        let base_revision = fixture_revision('b');
+        let mut intent = fixture_intent(base_revision.clone(), context.revision.clone());
+        intent.workspace_initialized = true;
+        let mut session = active_session(&context, OnboardingState::Applying);
+        session.base_config_revision = base_revision;
+        session.apply_intent = Some(intent.clone());
+        document.active_session = Some(session);
+        persist_new(&paths, &document).unwrap();
+
+        let service = path_service(&root, &config_path);
+        let reconciled = service.reconcile_startup(false).unwrap();
+        assert!(reconciled.is_ready());
+        assert!(reconciled.active_session.is_none());
+        let completed = reconciled.installation.last_completed_session.unwrap();
+        assert_eq!(
+            completed.operation_id.as_deref(),
+            Some(intent.operation_id.as_str())
+        );
+        assert_eq!(
+            completed.payload_digest.as_deref(),
+            Some(intent.payload_digest.as_str())
+        );
+
+        let replay = service
+            .find_apply_operation(&intent.operation_id, &intent.payload_digest)
+            .unwrap()
+            .expect("completed operation remains replayable");
+        assert!(replay.is_ready());
+        let conflict = service
+            .find_apply_operation(&intent.operation_id, &fixture_revision('c'))
+            .unwrap_err();
+        assert_eq!(conflict.code, "request_conflict");
+    }
+
+    #[test]
+    fn restart_with_apply_intent_at_unrelated_revision_reports_config_conflict() {
+        let (root, config_path, paths) = configured_store("intent_conflict", true);
+        let context = current_config_context(&config_path).unwrap();
+        let mut document = classify_installation(&config_path, false).unwrap();
+        let base_revision = fixture_revision('b');
+        let mut session = active_session(&context, OnboardingState::Applying);
+        session.base_config_revision = base_revision.clone();
+        session.apply_intent = Some(fixture_intent(base_revision, fixture_revision('c')));
+        document.active_session = Some(session);
+        persist_new(&paths, &document).unwrap();
+
+        let snapshot = path_service(&root, &config_path)
+            .reconcile_startup(false)
+            .unwrap();
+        assert_eq!(snapshot.state(), OnboardingState::FailedRecoverable);
+        assert_eq!(
+            snapshot.active_session.unwrap().failure_code.as_deref(),
+            Some("configuration_conflict")
+        );
+    }
+
+    #[test]
+    fn no_op_apply_intent_without_workspace_evidence_resumes_for_input() {
+        let (root, config_path, _) = configured_store("intent_prepare", true);
+        let context = current_config_context(&config_path).unwrap();
+        let service = path_service(&root, &config_path);
+        let initial = service.reconcile_startup(false).unwrap();
+        let started = service
+            .begin_or_resume(
+                OnboardingMode::Manual,
+                initial.revision(),
+                "request-begin-intent".to_string(),
+            )
+            .unwrap();
+        let progressed = service
+            .record_progress(
+                checkpoint(&root),
+                started.revision(),
+                "request-progress-intent".to_string(),
+            )
+            .unwrap();
+        let operation_id = "apply-operation-prepare".to_string();
+        let payload_digest = fixture_revision('d');
+        let applying = service
+            .prepare_apply_with_intent(
+                progressed.revision(),
+                context.revision.clone(),
+                context.revision.clone(),
+                "manual-ui-confirmation".to_string(),
+                operation_id.clone(),
+                payload_digest.clone(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(applying.state(), OnboardingState::Applying);
+
+        let duplicate = service
+            .prepare_apply_with_intent(
+                0,
+                context.revision.clone(),
+                context.revision,
+                "manual-ui-confirmation".to_string(),
+                operation_id.clone(),
+                payload_digest.clone(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(duplicate.revision(), applying.revision());
+
+        let resumed = service.reconcile_startup(false).unwrap();
+        assert_eq!(resumed.state(), OnboardingState::NeedsUserInput);
+        let active_intent = resumed
+            .active_session
+            .as_ref()
+            .and_then(|session| session.apply_intent.as_ref())
+            .expect("the interrupted operation identity remains available");
+        assert!(!active_intent.workspace_initialized);
+        let active_duplicate = service
+            .find_apply_operation(&operation_id, &payload_digest)
+            .unwrap()
+            .expect("active replay identity");
+        assert_eq!(active_duplicate.revision(), resumed.revision());
+        assert!(!active_duplicate.is_ready());
+    }
+
+    #[test]
+    fn no_op_apply_finalizes_after_zero_creation_workspace_evidence() {
+        let (root, config_path, _) = configured_store("intent_noop_evidence", true);
+        let context = current_config_context(&config_path).unwrap();
+        let service = path_service(&root, &config_path);
+        let initial = service.reconcile_startup(false).unwrap();
+        let started = service
+            .begin_or_resume(
+                OnboardingMode::Manual,
+                initial.revision(),
+                "request-begin-noop".to_string(),
+            )
+            .unwrap();
+        let progressed = service
+            .record_progress(
+                checkpoint(&root),
+                started.revision(),
+                "request-progress-noop".to_string(),
+            )
+            .unwrap();
+        let operation_id = "apply-operation-noop".to_string();
+        let payload_digest = fixture_revision('e');
+        let applying = service
+            .prepare_apply_with_intent(
+                progressed.revision(),
+                context.revision.clone(),
+                context.revision,
+                "manual-ui-confirmation".to_string(),
+                operation_id.clone(),
+                payload_digest.clone(),
+                None,
+            )
+            .unwrap();
+
+        let draft: setup::SetupDraft = serde_json::from_value(manual_draft(&root)).unwrap();
+        let first_initialization = setup::initialize_workspace(draft.clone(), true).unwrap();
+        assert!(!first_initialization.has_failures());
+        assert!(!first_initialization.created_paths().is_empty());
+
+        let (workspace, evidence_snapshot) = service
+            .initialize_workspace(
+                draft,
+                true,
+                applying.revision(),
+                "workspace-evidence-0001".to_string(),
+            )
+            .unwrap();
+        assert!(!workspace.has_failures());
+        assert!(workspace.created_paths().is_empty());
+        let evidence_snapshot = evidence_snapshot.expect("zero-creation evidence is persisted");
+        assert!(evidence_snapshot
+            .active_session
+            .as_ref()
+            .and_then(|session| session.apply_intent.as_ref())
+            .is_some_and(|intent| intent.workspace_initialized));
+
+        let completed = service.reconcile_startup(false).unwrap();
+        assert!(completed.is_ready());
+        let terminal_duplicate = service
+            .find_apply_operation(&operation_id, &payload_digest)
+            .unwrap()
+            .expect("terminal replay receipt");
+        assert_eq!(terminal_duplicate.revision(), completed.revision());
     }
 }
