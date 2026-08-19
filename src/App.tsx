@@ -13,6 +13,7 @@ import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import { deriveNextAction } from "./nextAction";
 import {
+  commandErrorMessage,
   getInitialOnboardingState,
   initialPageForOnboarding,
   normalizeOnboardingError,
@@ -408,7 +409,7 @@ function App() {
 }
 
 function readError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  return commandErrorMessage(error);
 }
 
 export default App;

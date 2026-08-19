@@ -16,6 +16,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { ReadinessBadge } from "../components/StatusBadges";
 import { StatusHint, type StatusTone } from "../components/StatusOrb";
 import { useI18n } from "../i18n";
+import { commandErrorMessage } from "../onboarding";
 import type {
   AppConfigStatus,
   AppPage,
@@ -62,7 +63,7 @@ export function SupportPage({
         if (active) setRecoveryStatus(status);
       })
       .catch((error) => {
-        if (active) setRecoveryError(error instanceof Error ? error.message : String(error));
+        if (active) setRecoveryError(commandErrorMessage(error));
       });
     return () => {
       active = false;
@@ -130,7 +131,7 @@ export function SupportPage({
         }),
       );
     } catch (error) {
-      setRecoveryError(error instanceof Error ? error.message : String(error));
+      setRecoveryError(commandErrorMessage(error));
     } finally {
       setRecoveryBusy(null);
     }
@@ -151,7 +152,7 @@ export function SupportPage({
       await refreshRecoveryStatus();
       setRecoveryNotice(t("support.recoveryRestored"));
     } catch (error) {
-      setRecoveryError(error instanceof Error ? error.message : String(error));
+      setRecoveryError(commandErrorMessage(error));
     } finally {
       setRecoveryBusy(null);
     }
@@ -268,7 +269,7 @@ export function SupportPage({
                 const result = await onInstallAutomation();
                 setInstallResult(result);
               } catch (error) {
-                setInstallError(error instanceof Error ? error.message : String(error));
+                setInstallError(commandErrorMessage(error));
               } finally {
                 setInstalling(false);
               }

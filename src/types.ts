@@ -247,6 +247,7 @@ export type SetupFolderPlanItem = {
 };
 
 export type SetupPreview = {
+  targetRevision: string;
   workspaceBase: string;
   folderPlan: SetupFolderPlanItem[];
   appConfigPreview: HubConfig;

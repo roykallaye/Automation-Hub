@@ -65,6 +65,15 @@ export type CreatedFolderEvidence = {
   recordedAt: string;
 };
 
+export type ApplyIntent = {
+  operationId: string;
+  payloadDigest: string;
+  baseConfigRevision: string;
+  targetConfigRevision: string;
+  recoveryPointId: string | null;
+  workspaceInitialized: boolean;
+};
+
 export type OnboardingSession = {
   id: string;
   state: OnboardingState;
@@ -78,6 +87,7 @@ export type OnboardingSession = {
   failureCode: string | null;
   deferredItems: string[];
   verifiedConfigRevision: string | null;
+  applyIntent: ApplyIntent | null;
 };
 
 export type CompletedOnboardingSession = {
@@ -85,6 +95,8 @@ export type CompletedOnboardingSession = {
   completedAt: string;
   resultingConfigRevision: string;
   state: OnboardingState;
+  operationId: string | null;
+  payloadDigest: string | null;
 };
 
 export type InstallationOnboarding = {
@@ -130,6 +142,15 @@ export type OnboardingErrorShape = {
   message: string;
   recoverable: boolean;
   currentRevision: number | null;
+};
+
+export type WorkspaceErrorShape = {
+  code: string;
+  category: string;
+  summary: string;
+  retry: "never" | "retry" | "refresh" | "userAction" | "recovery";
+  refreshRequired: boolean;
+  details: unknown;
 };
 
 export class OnboardingCommandError extends Error implements OnboardingErrorShape {
@@ -194,45 +215,6 @@ export function recordOnboardingProgress(
   return invokeSnapshot("record_onboarding_progress", {
     checkpoint,
     expectedRevision,
-    requestId,
-  });
-}
-
-export function prepareOnboardingApply(
-  expectedRevision: number,
-  expectedConfigRevision: string,
-  requestId = createOnboardingRequestId("prepare"),
-) {
-  return invokeSnapshot("prepare_onboarding_apply", {
-    expectedRevision,
-    expectedConfigRevision,
-    approvalReference: "manual-ui-confirmation",
-    requestId,
-  });
-}
-
-export function completeOnboarding(
-  expectedRevision: number,
-  resultingConfigRevision: string,
-  deferredItems: string[],
-  requestId = createOnboardingRequestId("complete"),
-) {
-  return invokeSnapshot("complete_onboarding", {
-    expectedRevision,
-    resultingConfigRevision,
-    deferredItems,
-    requestId,
-  });
-}
-
-export function recordOnboardingSetupSaved(
-  expectedRevision: number,
-  resultingConfigRevision: string,
-  requestId = createOnboardingRequestId("saved"),
-) {
-  return invokeSnapshot("record_onboarding_setup_saved", {
-    expectedRevision,
-    resultingConfigRevision,
     requestId,
   });
 }
@@ -302,6 +284,14 @@ export function normalizeOnboardingError(error: unknown): OnboardingCommandError
   if (isOnboardingErrorShape(candidate)) {
     return new OnboardingCommandError(candidate);
   }
+  if (isWorkspaceErrorShape(candidate)) {
+    return new OnboardingCommandError({
+      code: candidate.code,
+      message: candidate.summary,
+      recoverable: candidate.retry !== "never",
+      currentRevision: onboardingRevisionFromDetails(candidate.details),
+    });
+  }
 
   if (error instanceof Error) {
     return new OnboardingCommandError({
@@ -318,6 +308,14 @@ export function normalizeOnboardingError(error: unknown): OnboardingCommandError
     recoverable: true,
     currentRevision: null,
   });
+}
+
+export function commandErrorMessage(
+  error: unknown,
+  fallback = "InnPilot could not complete the request.",
+) {
+  const message = normalizeOnboardingError(error).message.trim();
+  return message || fallback;
 }
 
 export function createOnboardingRequestId(operation: string) {
@@ -435,6 +433,30 @@ function isOnboardingErrorShape(value: unknown): value is OnboardingErrorShape {
     typeof value.recoverable === "boolean" &&
     (value.currentRevision === null || typeof value.currentRevision === "number")
   );
+}
+
+function isWorkspaceErrorShape(value: unknown): value is WorkspaceErrorShape {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.code === "string" &&
+    typeof value.category === "string" &&
+    typeof value.summary === "string" &&
+    typeof value.retry === "string" &&
+    typeof value.refreshRequired === "boolean"
+  );
+}
+
+function onboardingRevisionFromDetails(value: unknown) {
+  if (
+    !isRecord(value) ||
+    value.kind !== "revision" ||
+    value.resource !== "onboarding" ||
+    typeof value.current !== "string"
+  ) {
+    return null;
+  }
+  const revision = Number(value.current);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

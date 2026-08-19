@@ -15,17 +15,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n, type TranslationKey } from "../../i18n";
 import {
   beginOrResumeOnboarding,
-  completeOnboarding,
+  commandErrorMessage,
   createOnboardingRequestId,
   getOnboardingState,
   isOnboardingReady,
-  markOnboardingFailed,
   normalizeOnboardingError,
-  prepareOnboardingApply,
   recordOnboardingProgress,
-  recordOnboardingSetupSaved,
   type ManualSetupCheckpoint,
-  type OnboardingFailureCode,
   type OnboardingSnapshot,
 } from "../../onboarding";
 import type {
@@ -35,7 +31,6 @@ import type {
   PreflightReport,
   PreflightItem,
   SaveSetupResult,
-  SetupPreview,
   SetupSnapshot,
   WorkflowPreflight,
   WorkspaceInitResult,
@@ -109,9 +104,11 @@ type CleanupCreatedFoldersCommandResult = {
   onboarding: OnboardingSnapshot;
 };
 
-type InitializeWorkspaceCommandResult = {
-  workspace: WorkspaceInitResult;
-  onboarding: OnboardingSnapshot | null;
+type ApplyApprovedSetupResult = {
+  outcome: "completed" | "replayed" | "workspaceNeedsAttention";
+  workspace: WorkspaceInitResult | null;
+  save: SaveSetupResult | null;
+  onboarding: OnboardingSnapshot;
 };
 
 type WizardBootstrapResult = {
@@ -153,6 +150,7 @@ export function SetupWizard({
   const lastScheduledCheckpointRef = useRef<string | null>(null);
   const backendSessionReadyRef = useRef(false);
   const progressPausedRef = useRef(false);
+  const pendingApplyRequestRef = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const steps = useMemo<WizardStepMeta[]>(
     () =>
       stepDefinitions
@@ -664,9 +662,6 @@ export function SetupWizard({
 
     setSetupAction("finish");
     setSetupResult(null);
-    let applyPrepared = false;
-    let onboardingCompleted = false;
-    let failureCode: OnboardingFailureCode = "manual_apply_failed";
     try {
       scheduleOnboardingProgress(
         {
@@ -680,52 +675,44 @@ export function SetupWizard({
       await flushOnboardingProgress();
       progressPausedRef.current = true;
 
-      // Refuse a known-stale wizard before creating even empty workspace
-      // folders. The save command repeats this check under its own lock/CAS.
-      await invoke("assert_setup_revision", { expectedRevision: baseRevision });
       const patch = diffSetupDraft(baseDraftRef.current, draft);
-      await invoke<SetupPreview>("preview_setup", {
-        patch,
-        expectedRevision: baseRevision,
-      });
-
-      const prepared = await runOnboardingMutation(
-        (snapshot) =>
-          prepareOnboardingApply(
-            snapshot.revision,
-            baseRevision,
-            createOnboardingRequestId("prepare"),
-          ),
-      );
-      applyPrepared = true;
-      failureCode = "folder_initialization_failed";
-
-      const initialized = await invoke<InitializeWorkspaceCommandResult>("initialize_workspace", {
-        draft,
-        confirmed: true,
-        expectedOnboardingRevision: prepared.revision,
-        requestId: createOnboardingRequestId("workspace"),
-      });
-      if (initialized.onboarding) {
-        acceptOnboardingSnapshot(initialized.onboarding);
+      const fingerprint = JSON.stringify({ patch, baseRevision });
+      if (pendingApplyRequestRef.current?.fingerprint !== fingerprint) {
+        pendingApplyRequestRef.current = {
+          fingerprint,
+          requestId: createOnboardingRequestId("apply"),
+        };
       }
-      const workspaceResult = initialized.workspace;
-      const created = workspaceResult.folders.filter(
+      const applied = await invoke<ApplyApprovedSetupResult>("apply_approved_setup", {
+        request: {
+          patch,
+          expectedConfigRevision: baseRevision,
+          expectedOnboardingRevision: onboardingRef.current.revision,
+          approval: "manualUi",
+          requestId: pendingApplyRequestRef.current.requestId,
+          confirmed: true,
+        },
+      });
+      pendingApplyRequestRef.current = null;
+      acceptOnboardingSnapshot(applied.onboarding);
+
+      const workspaceResult = applied.workspace;
+      const folders = workspaceResult?.folders ?? [];
+      const created = folders.filter(
         (folder) => folder.action === "created",
       ).length;
-      const alreadyExists = workspaceResult.folders.filter(
+      const alreadyExists = folders.filter(
         (folder) => folder.action === "alreadyExists",
       ).length;
-      const failed = workspaceResult.folders.filter(
+      const failed = folders.filter(
         (folder) => folder.action === "failed",
       ).length;
       setCreatedFolderCount(
         onboardingRef.current.activeSession?.createdFolders.length ?? created,
       );
 
-      if (failed) {
-        await safelyMarkOnboardingFailed("folder_initialization_failed");
-        const invalidPathFailure = workspaceResult.folders.some(
+      if (applied.outcome === "workspaceNeedsAttention" || failed) {
+        const invalidPathFailure = folders.some(
           (folder) =>
             folder.message.includes("os error 123") ||
             folder.message.toLowerCase().includes("invalid path"),
@@ -749,41 +736,20 @@ export function SetupWizard({
         return;
       }
 
-      failureCode = "persistence_failed";
-      const result = await invoke<SaveSetupResult>("save_setup_config", {
-        patch,
-        expectedRevision: baseRevision,
-        confirmed: true,
-      });
-
-      failureCode = "validation_failed";
-      await runOnboardingMutation(
-        (snapshot) =>
-          recordOnboardingSetupSaved(
-            snapshot.revision,
-            result.revision,
-            createOnboardingRequestId("saved"),
-          ),
-      );
-      await runOnboardingMutation(
-        (snapshot) =>
-          completeOnboarding(
-            snapshot.revision,
-            result.revision,
-            [],
-            createOnboardingRequestId("complete"),
-          ),
-      );
-      onboardingCompleted = true;
+      const result = applied.save;
+      const installedSnapshot = result
+        ? null
+        : await invoke<SetupSnapshot>("get_setup_snapshot");
       backendSessionReadyRef.current = false;
       setBackendSessionReady(false);
       pendingCheckpointRef.current = null;
       baseDraftRef.current = draft;
-      setBaseRevision(result.revision);
-      const blocking = result.validation.workflows.filter(
+      setBaseRevision(result?.revision ?? installedSnapshot?.revision ?? baseRevision);
+      const blocking = result?.validation.workflows.filter(
         (workflow) => workflow.commandName && !workflow.canRun,
-      ).length;
-      const guidance = validationGuidance(result.validation, t);
+      ).length ?? 0;
+      const guidance = result ? validationGuidance(result.validation, t) : "";
+      const backupCount = result?.backups.length ?? 0;
       setCompletedActions(
         blocking
           ? ["preview", "initialize", "save"]
@@ -794,24 +760,52 @@ export function SetupWizard({
         title: blocking ? t("wizard.savedOneStep") : t("wizard.setupReady"),
         message: blocking
           ? `${guidance} ${t("wizard.backupsCreated", {
-              count: result.backups.length,
+              count: backupCount,
               backupWord:
-                result.backups.length === 1
+                backupCount === 1
                   ? t("wizard.backupSingular")
                   : t("wizard.backupPlural"),
             })}`
-          : t("wizard.setupSavedBackups", {
-              count: result.backups.length,
-              backupWord:
-                result.backups.length === 1
-                  ? t("wizard.backupSingular")
-                  : t("wizard.backupPlural"),
-            }),
+          : result
+            ? t("wizard.setupSavedBackups", {
+                count: backupCount,
+                backupWord:
+                  backupCount === 1
+                    ? t("wizard.backupSingular")
+                    : t("wizard.backupPlural"),
+              })
+            : t("wizard.setupReady"),
       });
       await onSetupSaved();
     } catch (error) {
-      if (applyPrepared && !onboardingCompleted) {
-        await safelyMarkOnboardingFailed(failureCode);
+      try {
+        const latest = await getOnboardingState();
+        acceptOnboardingSnapshot(latest);
+        if (isOnboardingReady(latest)) {
+          const installed = await invoke<SetupSnapshot>("get_setup_snapshot");
+          pendingApplyRequestRef.current = null;
+          baseDraftRef.current = draft;
+          setBaseRevision(installed.revision);
+          setCompletedActions(["preview", "initialize", "save", "validate"]);
+          setSetupResult({
+            kind: "success",
+            title: t("wizard.setupReady"),
+            message: t("wizard.setupReady"),
+          });
+          await onSetupSaved();
+          return;
+        }
+        if (
+          latest.state === "needsUserInput" &&
+          latest.activeSession?.failureCode === "interrupted_before_apply"
+        ) {
+          // The backend proved that the configuration stayed at the base
+          // revision. The previous operation is closed; a retry must use a
+          // fresh id after the durable checkpoint is saved again.
+          pendingApplyRequestRef.current = null;
+        }
+      } catch {
+        // Keep the operation ID for an idempotent retry when the result is uncertain.
       }
       const message = normalizeOnboardingError(error).message;
       const invalidPathMessage =
@@ -826,34 +820,6 @@ export function SetupWizard({
     } finally {
       progressPausedRef.current = false;
       setSetupAction(null);
-    }
-  }
-
-  async function safelyMarkOnboardingFailed(failureCode: OnboardingFailureCode) {
-    try {
-      const latest = await getOnboardingState();
-      acceptOnboardingSnapshot(latest);
-      if (latest.state === "verifying" || isOnboardingReady(latest)) {
-        return;
-      }
-      await runOnboardingMutation(
-        (snapshot) =>
-          snapshot.state === "verifying" || isOnboardingReady(snapshot)
-            ? Promise.resolve(snapshot)
-            : markOnboardingFailed(
-                snapshot.revision,
-                failureCode,
-                createOnboardingRequestId("failed"),
-              ),
-      );
-    } catch {
-      // Preserve the original apply failure. Startup reconciliation and
-      // Support can still recover the durable applying/verifying state.
-      try {
-        acceptOnboardingSnapshot(await getOnboardingState());
-      } catch {
-        // The original error remains the actionable message.
-      }
     }
   }
 
@@ -873,8 +839,8 @@ export function SetupWizard({
       const commandResult = await invoke<CleanupCreatedFoldersCommandResult>(
         "remove_setup_created_empty_folders",
         {
-        expectedOnboardingRevision: onboardingRef.current.revision,
-        confirmed: true,
+          expectedOnboardingRevision: onboardingRef.current.revision,
+          confirmed: true,
         },
       );
       acceptOnboardingSnapshot(commandResult.onboarding);
@@ -896,7 +862,7 @@ export function SetupWizard({
       setSetupResult({
         kind: "error",
         title: t("wizard.cleanupCouldNotFinish"),
-        message: error instanceof Error ? error.message : String(error),
+        message: commandErrorMessage(error),
       });
     } finally {
       setSetupAction(null);
