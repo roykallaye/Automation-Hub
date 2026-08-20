@@ -22,6 +22,10 @@ use crate::{
     onboarding::OnboardingSnapshot,
     platform::{BuildInfo, InstallationPaths},
     preflight::{ReadinessStatus, SafePreflightSummary},
+    proposal_apply::{
+        ApproveAndApplyProposalRequest, ManagerProposalApplySummary, ProposalApplyResult,
+        ProposalApplyService,
+    },
     runner_identity::{protect_for_current_user, unprotect_for_current_user},
     setup::SetupPatch,
 };
@@ -397,6 +401,26 @@ pub struct LocalAgentConnectionStatus {
 pub(crate) struct LocalDiscoveryManagerView {
     pub discovery: ManagerDiscoveryStatus,
     pub proposal: Option<ManagerSetupProposalView>,
+    pub review: Option<ManagerProposalReview>,
+    pub application: Option<ManagerProposalApplySummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ManagerProposalReview {
+    pub(crate) fields: Vec<ManagerProposalReviewField>,
+    pub(crate) will_not_change: Vec<String>,
+    pub(crate) approval_eligible: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ManagerProposalReviewField {
+    pub(crate) field: String,
+    pub(crate) current_value: String,
+    pub(crate) proposed_value: String,
+    pub(crate) evidence: String,
+    pub(crate) validation: String,
 }
 
 #[derive(Clone)]
@@ -1678,6 +1702,35 @@ pub(crate) fn manager_discovery_status(
     facade.manager_discovery_view()
 }
 
+/// Trusted desktop-only command seam. This is intentionally not part of the
+/// MCP router or its public helper API.
+pub(crate) fn approve_and_apply_setup_proposal(
+    app: &AppHandle,
+    request: ApproveAndApplyProposalRequest,
+) -> Result<ProposalApplyResult, WorkspaceError> {
+    let (facade, _) = facade_for_app(app)?;
+    let grant = facade
+        .active_grant()
+        .map_err(map_safe_error_to_workspace)?
+        .filter(|grant| grant.revoked_at.is_none() && !expired_grant(grant))
+        .ok_or_else(|| {
+            WorkspaceError::new(
+                WorkspaceErrorCode::CapabilityUnavailable,
+                WorkspaceErrorCategory::Capability,
+                "The proposal's originating local assistant connection is no longer active.",
+                RetryDirective::UserAction,
+            )
+        })?;
+    facade
+        .authorize(&grant.profile_id, "proposal.read")
+        .map_err(map_safe_error_to_workspace)?;
+    ProposalApplyService::new(facade.paths.clone(), facade.build.clone())?.approve_and_apply(
+        &grant.profile_id,
+        true,
+        request,
+    )
+}
+
 pub(crate) fn approve_discovery_scope(
     app: &AppHandle,
     request: ApproveDiscoveryScopeRequest,
@@ -1806,7 +1859,7 @@ impl LocalMcpFacade {
             .get()
             .map_err(map_onboarding_error)
             .map_err(map_safe_error_to_workspace)?;
-        let (_, configuration_revision) =
+        let (_configuration, configuration_revision) =
             self.setup.configuration().read_existing().map_err(|_| {
                 WorkspaceError::new(
                     WorkspaceErrorCode::ConfigurationUnavailable,
@@ -1827,9 +1880,25 @@ impl LocalMcpFacade {
             onboarding.revision(),
             grant_active,
         )?;
+        let installed_draft = self
+            .setup
+            .setup_snapshot()
+            .ok()
+            .and_then(|snapshot| serde_json::to_value(snapshot.draft()).ok());
+        let review = proposal
+            .as_ref()
+            .map(|proposal| manager_proposal_review(installed_draft.as_ref(), proposal));
+        let application = if let Some(proposal) = proposal.as_ref() {
+            ProposalApplyService::new(self.paths.clone(), self.build.clone())?
+                .latest_summary(onboarding.installation_id(), &proposal.safe.proposal_id)?
+        } else {
+            None
+        };
         Ok(LocalDiscoveryManagerView {
             discovery,
             proposal,
+            review,
+            application,
         })
     }
 
@@ -1889,6 +1958,71 @@ impl LocalMcpFacade {
             codex_config_toml: toml,
             connection_is_read_only: true,
         })
+    }
+}
+
+fn manager_proposal_review(
+    installed_draft: Option<&serde_json::Value>,
+    proposal: &ManagerSetupProposalView,
+) -> ManagerProposalReview {
+    let proposed = serde_json::to_value(&proposal.safe.changes).unwrap_or_default();
+    let mut fields = Vec::new();
+    for field in &proposal.safe.changed_fields {
+        let path = proposal
+            .local_paths
+            .iter()
+            .find(|path| path.field == *field);
+        let current = installed_draft
+            .and_then(|value| value.get(field))
+            .map(review_value)
+            .unwrap_or_else(|| "—".to_string());
+        let proposed_value = path
+            .map(|path| path.local_path.clone())
+            .or_else(|| proposed.get(field).map(review_value))
+            .unwrap_or_else(|| "—".to_string());
+        fields.push(ManagerProposalReviewField {
+            field: field.clone(),
+            current_value: current,
+            proposed_value,
+            evidence: path
+                .map(|path| format!("Structural snapshot · {}", path.evidence_ref))
+                .unwrap_or_else(|| "Validated configuration field".to_string()),
+            validation: if proposal.safe.status == "ready_for_review"
+                && proposal.safe.unresolved_questions.is_empty()
+            {
+                "valid".to_string()
+            } else {
+                "needsReview".to_string()
+            },
+        });
+    }
+    ManagerProposalReview {
+        fields,
+        will_not_change: vec![
+            "unrelatedConfigurationPreserved".to_string(),
+            "existingFilesUntouched".to_string(),
+            "scriptsNotExecuted".to_string(),
+            "documentsNotMovedOrDeleted".to_string(),
+            "gmailCredentialsUntouched".to_string(),
+        ],
+        approval_eligible: proposal.safe.status == "ready_for_review"
+            && proposal.safe.unresolved_questions.is_empty()
+            && proposal.safe.invalidation_reason.is_none(),
+    }
+}
+
+fn review_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Bool(value) => {
+            if *value {
+                "Yes".to_string()
+            } else {
+                "No".to_string()
+            }
+        }
+        serde_json::Value::Null => "—".to_string(),
+        other => other.to_string(),
     }
 }
 

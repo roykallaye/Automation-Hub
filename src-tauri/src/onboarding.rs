@@ -441,6 +441,22 @@ impl OnboardingService {
         mark_failed_with_service(self, expected_revision, failure_code, request_id)
     }
 
+    pub(crate) fn record_verified_rollback(
+        &self,
+        expected_revision: u64,
+        restored_config_revision: String,
+        failure_code: String,
+        request_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        record_verified_rollback_with_service(
+            self,
+            expected_revision,
+            restored_config_revision,
+            failure_code,
+            request_id,
+        )
+    }
+
     pub(crate) fn restart(
         &self,
         mode: OnboardingMode,
@@ -583,6 +599,119 @@ impl OnboardingService {
         })
     }
 
+    /// Backend-only Phase F entry point. A protected local proposal approval
+    /// may begin an agent-assisted apply even when a completed installation has
+    /// no active wizard session. The caller cannot supply candidate contents;
+    /// it supplies only the already-verified operation identity and revisions.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_proposal_apply_with_intent(
+        &self,
+        expected_revision: u64,
+        expected_config_revision: String,
+        target_config_revision: String,
+        approval_id: String,
+        operation_id: String,
+        payload_digest: String,
+        recovery_point_id: String,
+    ) -> OnboardingResult<OnboardingSnapshot> {
+        validate_apply_identity(&operation_id, &payload_digest)?;
+        validate_config_revision(&expected_config_revision)?;
+        validate_config_revision(&target_config_revision)?;
+        validate_recovery_point_id(Some(&recovery_point_id))?;
+        validate_request_id(&approval_id)?;
+        let intent = ApplyIntent {
+            operation_id: operation_id.clone(),
+            payload_digest: payload_digest.clone(),
+            base_config_revision: expected_config_revision.clone(),
+            target_config_revision,
+            recovery_point_id: Some(recovery_point_id),
+            workspace_initialized: false,
+        };
+        let receipt_payload = json!({ "approvalId": approval_id, "intent": intent });
+        let receipt_digest = request_digest("prepareProposalApply", &receipt_payload)?;
+        self.repository.with_locked(|paths, config_path| {
+            let (mut document, raw) = read_document(&paths.primary)?;
+            if apply_operation_matches(&document, &operation_id, &payload_digest)? {
+                return snapshot(&document, false);
+            }
+            if document.revision != expected_revision {
+                return Err(OnboardingError::new(
+                    "stale_revision",
+                    "Onboarding changed after the proposal was reviewed.",
+                    true,
+                )
+                .at_revision(document.revision));
+            }
+            let context = current_config_context(config_path)?;
+            if context.revision != expected_config_revision {
+                return Err(OnboardingError::new(
+                    "config_changed",
+                    "InnPilot configuration changed before the approved proposal could apply.",
+                    true,
+                )
+                .at_revision(document.revision));
+            }
+            let from = effective_state(&document);
+            if let Some(session) = document.active_session.as_ref() {
+                if session.base_config_revision != expected_config_revision
+                    || !matches!(
+                        session.state,
+                        OnboardingState::ProposalReady
+                            | OnboardingState::WaitingForApproval
+                            | OnboardingState::NeedsUserInput
+                            | OnboardingState::BootstrapCreated
+                            | OnboardingState::FailedRecoverable
+                            | OnboardingState::RolledBack
+                    )
+                {
+                    return invalid_transition(
+                        &document,
+                        &session.state,
+                        OnboardingState::Applying,
+                    );
+                }
+            }
+            let timestamp = now();
+            let session = document.active_session.get_or_insert(OnboardingSession {
+                id: random_id("session")?,
+                state: OnboardingState::Applying,
+                mode: OnboardingMode::AgentAssisted,
+                origin: OnboardingOrigin::ManualReview,
+                created_at: timestamp.clone(),
+                updated_at: timestamp.clone(),
+                base_config_revision: expected_config_revision,
+                manual_progress: None,
+                created_folders: Vec::new(),
+                failure_code: None,
+                deferred_items: Vec::new(),
+                verified_config_revision: None,
+                apply_intent: Some(intent.clone()),
+            });
+            session.state = OnboardingState::Applying;
+            session.mode = OnboardingMode::AgentAssisted;
+            session.updated_at = timestamp;
+            session.failure_code = None;
+            session.verified_config_revision = None;
+            session.deferred_items.clear();
+            session.apply_intent = Some(intent);
+            push_proposal_apply_transition_event(
+                &mut document,
+                from,
+                "proposalApprovedApplyIntentRecorded",
+            )?;
+            advance_revision(&mut document)?;
+            document.recent_request_receipts.push(RequestReceipt {
+                request_id: operation_id,
+                operation: "prepareProposalApply".to_string(),
+                payload_digest: receipt_digest,
+                resulting_revision: document.revision,
+            });
+            trim_history(&mut document);
+            persist(paths, &document, Some(raw))?;
+            snapshot(&document, false)
+        })
+    }
+
     pub(crate) fn recover(&self) -> OnboardingResult<OnboardingSnapshot> {
         self.repository
             .with_locked(|paths, _| recover_locked(paths))
@@ -683,6 +812,28 @@ fn reconcile_document_after_restart(
         return reconcile_applying_after_restart(document, current);
     }
 
+    if state == OnboardingState::Verifying
+        && document.active_session.as_ref().is_some_and(|session| {
+            session
+                .apply_intent
+                .as_ref()
+                .is_some_and(|intent| intent.operation_id.starts_with("phasef-operation-"))
+        })
+    {
+        let session = active_session_mut(document)?;
+        session.state = OnboardingState::FailedRecoverable;
+        session.failure_code = Some("phase_f_reconciliation_required".to_string());
+        session.updated_at = now();
+        append_event(
+            document,
+            OnboardingState::Verifying,
+            OnboardingState::FailedRecoverable,
+            "phaseFVerificationNeedsRecovery",
+            "startup",
+        )?;
+        return Ok(true);
+    }
+
     let transition = match state {
         OnboardingState::DiscoveryRunning => Some((
             OnboardingState::FailedRecoverable,
@@ -745,6 +896,20 @@ fn reconcile_applying_after_restart(
         })?;
 
     if let Some(intent) = intent {
+        if intent.operation_id.starts_with("phasef-operation-") {
+            let session = active_session_mut(document)?;
+            session.state = OnboardingState::FailedRecoverable;
+            session.failure_code = Some("phase_f_reconciliation_required".to_string());
+            session.updated_at = now();
+            append_event(
+                document,
+                OnboardingState::Applying,
+                OnboardingState::FailedRecoverable,
+                "phaseFApplyNeedsRecovery",
+                "startup",
+            )?;
+            return Ok(true);
+        }
         if current.revision == intent.target_config_revision
             && intent.workspace_initialized
             && (intent.target_config_revision != intent.base_config_revision
@@ -1305,12 +1470,14 @@ fn mark_failed_with_service(
     failure_code: String,
     request_id: String,
 ) -> OnboardingResult<OnboardingSnapshot> {
-    const ALLOWED: [&str; 5] = [
+    const ALLOWED: [&str; 7] = [
         "manual_apply_failed",
         "folder_initialization_failed",
         "validation_failed",
         "interrupted_apply",
         "persistence_failed",
+        "phase_f_verification_failed",
+        "phase_f_rollback_failed",
     ];
     if !ALLOWED.contains(&failure_code.as_str()) {
         return Err(OnboardingError::new(
@@ -1357,6 +1524,56 @@ fn mark_failed_with_service(
                 OnboardingState::FailedRecoverable,
                 "onboardingFailed",
                 "ui",
+            )
+        },
+    )
+}
+
+fn record_verified_rollback_with_service(
+    service: &OnboardingService,
+    expected_revision: u64,
+    restored_config_revision: String,
+    failure_code: String,
+    request_id: String,
+) -> OnboardingResult<OnboardingSnapshot> {
+    let payload = json!({
+        "restoredConfigRevision": restored_config_revision,
+        "failureCode": failure_code,
+    });
+    service.mutate(
+        expected_revision,
+        &request_id,
+        "recordVerifiedRollback",
+        &payload,
+        |document, context| {
+            if context.revision != restored_config_revision {
+                return Err(OnboardingError::new(
+                    "configuration_conflict",
+                    "The restored configuration does not match the approved predecessor.",
+                    true,
+                )
+                .at_revision(document.revision));
+            }
+            let session = active_session_mut(document)?;
+            if !matches!(
+                session.state,
+                OnboardingState::Applying
+                    | OnboardingState::Verifying
+                    | OnboardingState::FailedRecoverable
+            ) {
+                let state = session.state.clone();
+                return invalid_transition(document, &state, OnboardingState::RolledBack);
+            }
+            let from = session.state.clone();
+            session.state = OnboardingState::RolledBack;
+            session.failure_code = Some(failure_code);
+            session.updated_at = now();
+            push_transition_event(
+                document,
+                from,
+                OnboardingState::RolledBack,
+                "configurationRollbackVerified",
+                "backend",
             )
         },
     )
@@ -1657,7 +1874,13 @@ fn initialize_workspace_with_service(
             )
             .at_revision(document.revision)
         })?;
-        if session.manual_progress.is_none() || session.state != OnboardingState::Applying {
+        let protected_proposal_apply = session
+            .apply_intent
+            .as_ref()
+            .is_some_and(|intent| intent.operation_id.starts_with("phasef-operation-"));
+        if (session.manual_progress.is_none() && !protected_proposal_apply)
+            || session.state != OnboardingState::Applying
+        {
             return invalid_transition(&document, &session.state, OnboardingState::Applying);
         }
         let workspace = setup::initialize_workspace(draft, true).map_err(|_| {
@@ -2526,6 +2749,41 @@ fn append_event(
     source: &str,
 ) -> OnboardingResult<()> {
     push_transition_event(document, from, to, code, source)
+}
+
+/// A protected Phase F approval is the only authority allowed to enter an
+/// agent-assisted apply directly from a completed or proposal-review state.
+/// Keep this exception out of the generic/manual transition graph.
+fn push_proposal_apply_transition_event(
+    document: &mut OnboardingDocument,
+    from: OnboardingState,
+    code: &str,
+) -> OnboardingResult<()> {
+    use OnboardingState::*;
+    if !matches!(
+        from,
+        NotStarted
+            | BootstrapCreated
+            | ProposalReady
+            | WaitingForApproval
+            | NeedsUserInput
+            | FailedRecoverable
+            | RolledBack
+            | Ready
+            | ReadyWithDeferredItems
+            | ReadyLegacy
+    ) {
+        return invalid_transition(document, &from, Applying);
+    }
+    document.events.push(OnboardingEvent {
+        revision: u64::MAX,
+        at: now(),
+        code: code.to_string(),
+        from_state: Some(from),
+        to_state: Applying,
+        source: "backend".to_string(),
+    });
+    Ok(())
 }
 
 fn allowed_transition(from: &OnboardingState, to: &OnboardingState) -> bool {

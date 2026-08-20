@@ -66,6 +66,38 @@ impl PreflightReport {
         keys.dedup();
         keys
     }
+
+    /// Product-level Phase F completion policy.  The hotel profile and primary
+    /// invoice workflow are required for an operational InnPilot setup. Other
+    /// workflows remain visible as deferred integrations and do not run during
+    /// verification.
+    pub(crate) fn required_setup_blocker_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+        if self
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "clientProfile")
+            .is_none_or(|workflow| workflow.status != ReadinessStatus::Ready)
+        {
+            keys.push("clientProfile".to_string());
+        }
+        if self
+            .workflows
+            .iter()
+            .find(|workflow| workflow.key == "invoiceWorkflow")
+            .is_none_or(|workflow| !workflow.can_run)
+        {
+            keys.push("invoiceWorkflow".to_string());
+        }
+        keys
+    }
+
+    pub(crate) fn optional_deferred_workflow_keys(&self) -> Vec<String> {
+        self.deferred_workflow_keys()
+            .into_iter()
+            .filter(|key| key != "invoiceWorkflow")
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

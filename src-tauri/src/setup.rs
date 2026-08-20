@@ -363,6 +363,10 @@ impl ValidatedSetupCandidate {
     pub(crate) fn requires_pair_recovery(&self) -> bool {
         self.app_changed && self.automation_changed
     }
+
+    pub(crate) fn has_changes(&self) -> bool {
+        self.app_changed || self.automation_changed
+    }
 }
 
 const SETUP_TRANSACTION_SCHEMA: u32 = 1;
@@ -375,6 +379,15 @@ const MAX_SETUP_TRANSACTION_BYTES: u64 = 64 * 1024;
 #[derive(Debug, Clone)]
 pub(crate) struct ConfigurationService {
     repository: config::ConfigurationRepository,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ApprovedProposalJournalContext {
+    pub(crate) proposal_id: String,
+    pub(crate) proposal_digest: String,
+    pub(crate) approval_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) workspace_prepared: bool,
 }
 
 #[derive(Debug)]
@@ -487,11 +500,69 @@ impl ConfigurationService {
             .map(|point| Some(point.id))
     }
 
+    /// Phase F approval requires a readable, byte-exact predecessor point for
+    /// every mutation, including a one-file candidate.  Creation alone is not
+    /// sufficient: read the protected manifest back and compare the exact
+    /// configuration pair before returning authority to commit.
+    pub(crate) fn stage_verified_recovery_point(
+        &self,
+        candidate: &ValidatedSetupCandidate,
+        recovery_service: &recovery::RecoveryService,
+    ) -> Result<Option<String>, String> {
+        if !candidate.has_changes() {
+            return Ok(None);
+        }
+        let point = recovery_service.create_configuration_point_from_bytes(
+            &candidate.pair.app_bytes,
+            candidate.pair.automation_bytes.as_deref(),
+        )?;
+        let (app_bytes, automation_bytes) =
+            recovery_service.read_configuration_point_bytes(&point.id)?;
+        if app_bytes != candidate.pair.app_bytes
+            || automation_bytes != candidate.pair.automation_bytes
+        {
+            return Err(
+                "The configuration recovery point did not verify against the installed predecessor."
+                    .to_string(),
+            );
+        }
+        Ok(Some(point.id))
+    }
+
     pub(crate) fn commit_candidate_with_recovery_point(
         &self,
         candidate: ValidatedSetupCandidate,
         recovery_point_id: Option<String>,
         runner_root: &Path,
+    ) -> Result<SaveSetupResult, String> {
+        self.commit_candidate_with_context(candidate, recovery_point_id, runner_root, None)
+    }
+
+    /// The existing Phase A pair journal remains the sole authority for an
+    /// interrupted two-file configuration activation. Phase F adds only safe
+    /// identity/digest context; verification and approval consumption remain
+    /// in the separate protected lifecycle record.
+    pub(crate) fn commit_approved_proposal_candidate(
+        &self,
+        candidate: ValidatedSetupCandidate,
+        recovery_point_id: String,
+        runner_root: &Path,
+        approval: ApprovedProposalJournalContext,
+    ) -> Result<SaveSetupResult, String> {
+        self.commit_candidate_with_context(
+            candidate,
+            Some(recovery_point_id),
+            runner_root,
+            Some(approval),
+        )
+    }
+
+    fn commit_candidate_with_context(
+        &self,
+        candidate: ValidatedSetupCandidate,
+        recovery_point_id: Option<String>,
+        runner_root: &Path,
+        approval: Option<ApprovedProposalJournalContext>,
     ) -> Result<SaveSetupResult, String> {
         if candidate.requires_pair_recovery() && recovery_point_id.is_none() {
             return Err(
@@ -527,6 +598,20 @@ impl ConfigurationService {
                         .as_ref()
                         .map(|bytes| sha256_bytes(bytes)),
                     new_automation_sha256: sha256_bytes(next_automation_bytes),
+                    approved_proposal: approval.clone().map(|context| {
+                        SetupJournalApprovedProposal {
+                            proposal_id: context.proposal_id,
+                            proposal_digest: context.proposal_digest,
+                            approval_id: context.approval_id,
+                            operation_id: context.operation_id,
+                            base_configuration_revision: pair.revision.clone(),
+                            target_configuration_revision: configuration_revision(
+                                next_app_bytes,
+                                Some(next_automation_bytes),
+                            ),
+                            workspace_prepared: context.workspace_prepared,
+                        }
+                    }),
                 };
                 Ok(Some((journal, point_id)))
             })
@@ -571,6 +656,20 @@ struct SetupTransactionJournal {
     old_automation_existed: bool,
     old_automation_sha256: Option<String>,
     new_automation_sha256: String,
+    #[serde(default)]
+    approved_proposal: Option<SetupJournalApprovedProposal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetupJournalApprovedProposal {
+    proposal_id: String,
+    proposal_digest: String,
+    approval_id: String,
+    operation_id: String,
+    base_configuration_revision: String,
+    target_configuration_revision: String,
+    workspace_prepared: bool,
 }
 
 fn preview_setup_patch(
@@ -3607,6 +3706,7 @@ mod tests {
             old_automation_existed: true,
             old_automation_sha256: Some(sha256_bytes(old_automation)),
             new_automation_sha256: sha256_bytes(new_automation),
+            approved_proposal: None,
         };
 
         assert_eq!(
@@ -3681,6 +3781,7 @@ mod tests {
                 old_automation_existed: true,
                 old_automation_sha256: Some(sha256_bytes(old_automation)),
                 new_automation_sha256: sha256_bytes(new_automation),
+                approved_proposal: None,
             };
             write_setup_transaction_journal(&paths.config_file, &journal).unwrap();
 

@@ -18,6 +18,7 @@ mod onboarding;
 mod paths;
 mod platform;
 mod preflight;
+mod proposal_apply;
 mod recovery;
 mod redaction;
 mod runner_identity;
@@ -104,6 +105,17 @@ pub fn run() {
                 .configuration()
                 .ensure()
                 .map_err(std::io::Error::other)?;
+            // Phase F approval/apply evidence must reconcile a committed
+            // candidate before generic onboarding restart logic can promote it.
+            if proposal_apply::ProposalApplyService::new(
+                paths.clone(),
+                platform::BuildInfo::resolve(app.handle()),
+            )
+            .and_then(|service| service.reconcile_startup())
+            .is_err()
+            {
+                eprintln!("InnPilot proposal application state needs recovery.");
+            }
             // A damaged or newer onboarding record must not prevent InnPilot
             // from opening. The typed command routes the UI to Support and
             // preserves the record for explicit recovery.
@@ -167,6 +179,7 @@ pub fn run() {
             create_local_agent_connection,
             revoke_local_agent_connection,
             get_environment_discovery_status,
+            approve_and_apply_setup_proposal,
             approve_environment_discovery,
             revoke_environment_discovery
         ])
@@ -186,6 +199,14 @@ fn get_environment_discovery_status(
     app: AppHandle,
 ) -> Result<local_mcp::LocalDiscoveryManagerView, domain::WorkspaceError> {
     local_mcp::manager_discovery_status(&app)
+}
+
+#[tauri::command]
+fn approve_and_apply_setup_proposal(
+    app: AppHandle,
+    request: proposal_apply::ApproveAndApplyProposalRequest,
+) -> Result<proposal_apply::ProposalApplyResult, domain::WorkspaceError> {
+    local_mcp::approve_and_apply_setup_proposal(&app, request)
 }
 
 #[tauri::command]

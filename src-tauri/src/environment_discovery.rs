@@ -11,6 +11,7 @@ use crate::{
         RetryDirective, WorkspaceError, WorkspaceErrorCategory, WorkspaceErrorCode, WorkspaceResult,
     },
     runner_identity::{protect_for_current_user, unprotect_for_current_user},
+    setup::SetupPatch,
 };
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use fs2::FileExt;
@@ -450,6 +451,31 @@ pub(crate) struct ManagerPathAssignment {
     pub(crate) field: String,
     pub(crate) local_path: String,
     pub(crate) evidence_ref: String,
+}
+
+/// Authoritative, local-only proposal material for the trusted approval path.
+/// This type is never serialized to MCP and contains the real resolved paths
+/// required to build the exact preservation-aware configuration candidate.
+#[derive(Debug, Clone)]
+pub(crate) struct EligibleLocalProposal {
+    pub(crate) proposal_id: String,
+    pub(crate) revision: u64,
+    pub(crate) proposal_digest: String,
+    pub(crate) schema_version: u32,
+    pub(crate) originating_profile_id: String,
+    pub(crate) base_configuration_revision: String,
+    pub(crate) target_configuration_revision: String,
+    pub(crate) onboarding_revision: u64,
+    pub(crate) snapshot_digest: String,
+    pub(crate) changed_fields: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+    resolved: ResolvedProposal,
+}
+
+impl EligibleLocalProposal {
+    pub(crate) fn setup_patch(&self) -> WorkspaceResult<SetupPatch> {
+        setup_patch_from_resolved(&self.resolved)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1094,6 +1120,136 @@ impl ProposalService {
         .map(|proposal| proposal.map(|proposal| proposal.manager_view()))
     }
 
+    /// Reloads and proves the exact immutable proposal that a local manager is
+    /// attempting to approve.  The caller supplies only identity/digest
+    /// selectors; all proposal contents and local paths come from the protected
+    /// repository and the still-valid discovery snapshot.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn eligible_for_local_approval(
+        &self,
+        discovery: &DiscoveryService,
+        installation_id: &str,
+        profile_id: &str,
+        current_configuration_revision: &str,
+        current_onboarding_revision: u64,
+        grant_active: bool,
+        proposal_id: &str,
+        proposal_revision: u64,
+        supplied_digest: &str,
+    ) -> WorkspaceResult<EligibleLocalProposal> {
+        validate_opaque_id(proposal_id)?;
+        let proposal = self
+            .refresh_and_get(
+                discovery,
+                installation_id,
+                Some(profile_id),
+                current_configuration_revision,
+                current_onboarding_revision,
+                grant_active,
+            )?
+            .ok_or_else(|| stale("proposal_missing"))?;
+        if proposal.proposal_id != proposal_id
+            || proposal.revision != proposal_revision
+            || proposal.proposal_digest != supplied_digest
+        {
+            return Err(stale("proposal_identity_mismatch"));
+        }
+        if proposal.schema_version != PROPOSAL_SCHEMA
+            || proposal.status != ProposalStatus::ReadyForReview
+            || !proposal.unresolved_questions.is_empty()
+        {
+            return Err(stale("proposal_not_eligible"));
+        }
+
+        let (_scope, snapshot) = discovery.resolve_snapshot(
+            installation_id,
+            profile_id,
+            &proposal.scope_id,
+            proposal.scope_revision,
+            &proposal.snapshot_id,
+            &proposal.snapshot_digest,
+        )?;
+        let mut resolved_paths = Vec::with_capacity(proposal.path_assignments.len());
+        for assignment in &proposal.path_assignments {
+            let evidence = snapshot
+                .roots
+                .iter()
+                .flat_map(|root| root.evidence.iter())
+                .find(|evidence| {
+                    evidence.evidence_ref == assignment.evidence_ref
+                        && evidence.path_ref == assignment.path_ref
+                })
+                .ok_or_else(|| stale("proposal_evidence_missing"))?;
+            let local_digest =
+                sha256_hex(comparison_key(Path::new(&assignment.local_path)).as_bytes());
+            if local_digest != assignment.local_path_digest
+                || evidence.local_path_digest != assignment.local_path_digest
+                || comparison_key(Path::new(&evidence.canonical_path))
+                    != comparison_key(Path::new(&assignment.local_path))
+            {
+                return Err(stale("proposal_evidence_mismatch"));
+            }
+            resolved_paths.push(ResolvedPathChange {
+                field: assignment.field.clone(),
+                path_ref: assignment.path_ref.clone(),
+                evidence_ref: assignment.evidence_ref.clone(),
+                display_label: assignment.display_label.clone(),
+                local_path: assignment.local_path.clone(),
+            });
+        }
+
+        let request = PrepareDiscoveryProposalRequest {
+            request_id: proposal.request_id.clone(),
+            proposal_id: proposal.proposal_id.clone(),
+            contract_version: PROPOSAL_CONTRACT.to_string(),
+            base_configuration_revision: proposal.base_configuration_revision.clone(),
+            onboarding_revision: proposal.onboarding_revision,
+            scope_id: proposal.scope_id.clone(),
+            scope_revision: proposal.scope_revision,
+            snapshot_id: proposal.snapshot_id.clone(),
+            snapshot_digest: proposal.snapshot_digest.clone(),
+            changes: proposal.changes.clone(),
+            evidence_refs: proposal.evidence_refs.clone(),
+            unresolved_questions: proposal.unresolved_questions.clone(),
+            agent_confidence: proposal.agent_confidence,
+            parent_proposal_id: proposal.parent_proposal_id.clone(),
+        };
+        let validation = DeterministicProposalValidation {
+            target_configuration_revision: proposal.target_configuration_revision.clone(),
+            changed_fields: proposal.changed_fields.clone(),
+            warnings: proposal.warnings.clone(),
+        };
+        let recomputed = proposal_digest(
+            &request,
+            &proposal.changes,
+            &proposal.path_assignments,
+            &validation,
+            &proposal.status,
+            proposal.revision,
+        )?;
+        if recomputed != proposal.proposal_digest {
+            return Err(stale("proposal_digest_mismatch"));
+        }
+
+        Ok(EligibleLocalProposal {
+            proposal_id: proposal.proposal_id,
+            revision: proposal.revision,
+            proposal_digest: proposal.proposal_digest,
+            schema_version: proposal.schema_version,
+            originating_profile_id: proposal.originating_profile_id,
+            base_configuration_revision: proposal.base_configuration_revision,
+            target_configuration_revision: proposal.target_configuration_revision,
+            onboarding_revision: proposal.onboarding_revision,
+            snapshot_digest: proposal.snapshot_digest,
+            changed_fields: proposal.changed_fields,
+            warnings: proposal.warnings,
+            resolved: ResolvedProposal {
+                safe_changes: proposal.changes,
+                resolved_paths,
+            },
+        })
+    }
+
     pub(crate) fn invalidate_profile(&self, profile_id: &str) -> WorkspaceResult<()> {
         self.with_lock(|| {
             let mut document = self.load_proposals_unlocked()?;
@@ -1387,6 +1543,54 @@ impl StoredProposal {
                 .collect(),
         }
     }
+}
+
+fn setup_patch_from_resolved(resolved: &ResolvedProposal) -> WorkspaceResult<SetupPatch> {
+    let mut patch = SetupPatch::default();
+    let changes = &resolved.safe_changes;
+    if let Some(value) = changes.hotel_display_name.clone() {
+        patch.set_hotel_display_name(value);
+    }
+    if let Some(value) = changes.invoice_delivery_mode.clone() {
+        patch.set_invoice_delivery_mode(match value {
+            ProposalInvoiceDeliveryMode::PrepareOnly => config::InvoiceDeliveryMode::PrepareOnly,
+            ProposalInvoiceDeliveryMode::GmailDrafts => config::InvoiceDeliveryMode::GmailDrafts,
+        });
+    }
+    if let Some(value) = changes.invoice_file_selection_mode.clone() {
+        patch.set_invoice_file_selection_mode(match value {
+            ProposalInvoiceFileSelectionMode::AllPdfs => config::InvoiceFileSelectionMode::AllPdfs,
+            ProposalInvoiceFileSelectionMode::FilenamePatterns => {
+                config::InvoiceFileSelectionMode::FilenamePatterns
+            }
+        });
+    }
+    if let Some(value) = changes.safe_mode {
+        patch.set_safe_mode(value);
+    }
+    if let Some(value) = changes.archive_originals {
+        patch.set_archive_originals(value);
+    }
+    if let Some(value) = changes.redact_logs {
+        patch.set_redact_logs(value);
+    }
+    for path in &resolved.resolved_paths {
+        match path.field.as_str() {
+            "invoiceInputFolder" => patch.set_invoice_input_folder(path.local_path.clone()),
+            "invoiceOutputFolder" => patch.set_invoice_output_folder(path.local_path.clone()),
+            "invoiceArchiveFolder" => patch.set_invoice_archive_folder(path.local_path.clone()),
+            "invoiceLogFolder" => patch.set_invoice_log_folder(path.local_path.clone()),
+            "sharedScanFolder" => patch.set_shared_scan_folder(path.local_path.clone()),
+            "scansLocalCacheFolder" => patch.set_scans_local_cache_folder(path.local_path.clone()),
+            "ocrTextOutputFolder" => patch.set_ocr_text_output_folder(path.local_path.clone()),
+            "signedContractsOutputFolder" => {
+                patch.set_signed_contracts_output_folder(path.local_path.clone())
+            }
+            "contractLogFolder" => patch.set_contract_log_folder(path.local_path.clone()),
+            _ => return Err(invalid("proposal_path_field")),
+        }
+    }
+    Ok(patch)
 }
 
 fn approve_root(supplied: &str) -> WorkspaceResult<ApprovedRoot> {
