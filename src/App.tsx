@@ -14,7 +14,9 @@ import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
 import {
   commandErrorMessage,
   getInitialOnboardingState,
+  getOnboardingState,
   isOnboardingReady,
+  isOnboardingStateReady,
   normalizeOnboardingError,
   type OnboardingSnapshot,
 } from "./onboarding";
@@ -64,6 +66,12 @@ function App() {
   const [lifedesk, setLifedesk] = useState<LifeDeskConnectionStatus | null>(null);
   /** Set when the manager deliberately chooses the manual/advanced path. */
   const [manualSetup, setManualSetup] = useState(false);
+  /**
+   * Set when the manager leaves the journey from the Ready screen. Only ever
+   * honoured while the backend itself reports a ready state — it decides which
+   * screen to show, never whether setup succeeded.
+   */
+  const [leftJourney, setLeftJourney] = useState(false);
   const configRefreshId = useRef(0);
 
   const browserPreview =
@@ -314,6 +322,12 @@ function App() {
   if (!onboardingResolved) return null;
 
   const onboardingComplete = onboarding === null ? browserPreview : isOnboardingReady(onboarding);
+  // The session record can outlive a successful apply, so honour the manager's
+  // exit once the backend state says ready rather than trapping them on Ready.
+  const showJourney =
+    onboarding !== null &&
+    !onboardingComplete &&
+    !(leftJourney && isOnboardingStateReady(onboarding));
 
   /* -------- Manual / advanced setup: preserved, deliberately opt-in -------- */
   if (manualSetup && onboarding) {
@@ -345,14 +359,16 @@ function App() {
   }
 
   /* ---------------- Fresh install: the four-stage journey ---------------- */
-  if (!onboardingComplete && onboarding) {
+  if (showJourney && onboarding) {
     return (
       <I18nProvider language={configStatus?.config.language}>
         <div className="ip-app">
           <OnboardingJourney
             onFinished={() => {
+              setLeftJourney(true);
               setCurrentPage("home");
               void refreshAll();
+              void getOnboardingState().then(setOnboarding).catch(() => undefined);
             }}
             onManualSetup={() => setManualSetup(true)}
             onOpenSupport={() => {

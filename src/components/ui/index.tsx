@@ -279,23 +279,32 @@ export function DetailList({ items }: { items: { label: string; value: string; m
 
 /* ------------------------------------------------------------ empty & note */
 
+/**
+ * `level` must match where the empty state sits in the page outline: 2 when it
+ * follows the page <h1> directly, 3 when it lives inside a <Section> (whose
+ * title is already an <h2>). Screen readers navigate by heading level, so a
+ * skipped level is a real navigation bug, not a styling detail.
+ */
 export function EmptyState({
   icon: Icon,
   title,
   message,
   action,
+  level = 2,
 }: {
   icon: LucideIcon;
   title: string;
   message: string;
   action?: ReactNode;
+  level?: 2 | 3;
 }) {
+  const Heading = level === 2 ? "h2" : "h3";
   return (
     <div className="ip-empty">
       <span className="ip-empty__icon">
         <Icon aria-hidden="true" size={20} />
       </span>
-      <h3>{title}</h3>
+      <Heading>{title}</Heading>
       <p>{message}</p>
       {action ? <div style={{ marginTop: 12 }}>{action}</div> : null}
     </div>

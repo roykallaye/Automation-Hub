@@ -130,6 +130,7 @@ export function HomePage({
             {recent.length === 0 ? (
               <EmptyState
                 icon={History}
+                level={3}
                 message={t("home.noRecentText")}
                 title={t("home.noRecent")}
               />

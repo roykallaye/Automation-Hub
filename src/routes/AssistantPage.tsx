@@ -175,6 +175,7 @@ export function AssistantPage({
             ) : (
               <EmptyState
                 icon={Bot}
+                level={3}
                 message={t("assistant.noActivityText")}
                 title={t("assistant.noActivityTitle")}
               />

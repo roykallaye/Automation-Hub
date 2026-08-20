@@ -267,6 +267,21 @@ export function isOnboardingReady(snapshot: OnboardingSnapshot) {
   return READY_STATES.has(snapshot.state) && snapshot.activeSession === null;
 }
 
+/**
+ * Whether the backend's own state says setup succeeded, ignoring whether the
+ * session record has been retired yet.
+ *
+ * `isOnboardingReady` additionally requires the session to be cleared, which is
+ * the right test for "is this installation settled". It is the wrong test for
+ * "may the manager leave the setup journey": between a successful apply and the
+ * session being retired, the backend reports a ready state with a session still
+ * attached, and gating the exit on that would leave "Go to InnPilot" doing
+ * nothing. This asks only the presentational question.
+ */
+export function isOnboardingStateReady(snapshot: OnboardingSnapshot) {
+  return READY_STATES.has(snapshot.state);
+}
+
 export function onboardingErrorNeedsSupport(error: unknown) {
   const normalized = normalizeOnboardingError(error);
   return (

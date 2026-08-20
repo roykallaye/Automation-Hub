@@ -279,6 +279,7 @@ export function SupportPage({
             ) : (
               <EmptyState
                 icon={Save}
+                level={3}
                 message={t("support.recoveryText")}
                 title={t("support.recoveryNone")}
               />
