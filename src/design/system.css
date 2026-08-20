@@ -1167,18 +1167,34 @@ button.ip-row:hover {
 
 /* Review groups */
 
-.ip-review-group + .ip-review-group {
-  margin-top: 18px;
-}
-
-.ip-review-group__title {
+/* The card's own heading: "Will change" / "Will stay as it is". */
+.ip-review-heading {
   align-items: center;
   color: var(--ip-ink);
   display: flex;
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 650;
   gap: 8px;
-  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+  margin: 0 0 16px;
+}
+
+.ip-review-group + .ip-review-group {
+  margin-top: 22px;
+}
+
+/* A business grouping inside it: "Invoice processing", "Scans", "Email".
+   Deliberately quieter than the card heading so the hierarchy reads. */
+.ip-review-group__title {
+  align-items: center;
+  color: var(--ip-faint);
+  display: flex;
+  font-size: 0.73rem;
+  font-weight: 650;
+  gap: 8px;
+  letter-spacing: 0.05em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
 }
 
 .ip-review-item {
@@ -1384,6 +1400,136 @@ button.ip-row:hover {
   overflow-x: auto;
   padding: 10px 12px;
   white-space: pre;
+}
+
+/* Variable chips (email template editor) */
+
+.ip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ip-chip {
+  background: var(--ip-surface-sunk);
+  border: 1px solid var(--ip-line);
+  border-radius: 999px;
+  color: var(--ip-ink-soft);
+  cursor: pointer;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  padding: 3px 9px;
+  transition: background var(--ip-motion) ease;
+}
+
+.ip-chip:hover {
+  background: var(--ip-accent-soft);
+  border-color: var(--ip-accent-line);
+  color: var(--ip-accent-text);
+}
+
+.ip-template-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 900px) {
+  .ip-template-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.ip-template-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ip-template-preview__sheet {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  flex: 1;
+  padding: 14px;
+}
+
+.ip-template-preview__subject {
+  border-bottom: 1px solid var(--ip-line);
+  color: var(--ip-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+  padding-bottom: 9px;
+}
+
+.ip-template-preview__body {
+  color: var(--ip-ink-soft);
+  font-family: inherit;
+  font-size: 0.865rem;
+  line-height: 1.6;
+  margin: 11px 0 0;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+/* ============================================================
+   Info hint
+   ============================================================ */
+
+.ip-hint {
+  display: inline-flex;
+  flex: none;
+  position: relative;
+  vertical-align: middle;
+}
+
+.ip-hint__mark {
+  align-items: center;
+  background: var(--ip-surface-sunk);
+  border: 1px solid var(--ip-line);
+  border-radius: 50%;
+  color: var(--ip-muted);
+  cursor: help;
+  display: grid;
+  height: 18px;
+  justify-content: center;
+  place-items: center;
+  transition: background var(--ip-motion) ease, color var(--ip-motion) ease;
+  width: 18px;
+}
+
+.ip-hint__mark:hover {
+  background: var(--ip-accent-soft);
+  color: var(--ip-accent-text);
+}
+
+.ip-hint__bubble {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  box-shadow: var(--ip-shadow-lift);
+  color: var(--ip-ink-soft);
+  display: none;
+  font-size: 0.79rem;
+  left: 50%;
+  line-height: 1.5;
+  margin-top: 7px;
+  padding: 9px 11px;
+  pointer-events: none;
+  position: absolute;
+  text-align: left;
+  top: 100%;
+  transform: translateX(-50%);
+  width: 230px;
+  z-index: 40;
+}
+
+.ip-hint:hover .ip-hint__bubble,
+.ip-hint:focus-within .ip-hint__bubble,
+.ip-hint__bubble.is-open {
+  display: block;
 }
 
 /* ============================================================

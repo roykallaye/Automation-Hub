@@ -2,22 +2,22 @@ import { Info } from "lucide-react";
 import { useId, useState } from "react";
 
 /*
-  InfoHint: a small friendly "i" bubble that keeps explanatory sentences out
-  of sight until wanted. The hint shows on hover and keyboard focus, and can
-  be toggled by click/Enter for touch users. It is a span (not a button) so it
-  can live safely inside clickable cards; clicks never trigger the card.
+  InfoHint: a small "i" bubble that keeps an explanatory sentence out of sight
+  until wanted. It shows on hover and keyboard focus, and toggles on
+  click/Enter for touch users. It is a span rather than a button so it can sit
+  safely inside clickable rows without triggering them.
 */
 export function InfoHint({ text }: { text: string }) {
   const id = useId();
   const [open, setOpen] = useState(false);
 
   return (
-    <span className="group/info relative inline-flex shrink-0 align-middle">
+    <span className="ip-hint">
       <span
-        tabIndex={0}
-        aria-label="More about this"
         aria-describedby={id}
-        className="grid h-5 w-5 cursor-help place-items-center rounded-full bg-white/80 text-brand-700 ring-1 ring-brand-200 transition hover:bg-brand-50 hover:text-brand-800"
+        aria-label="More about this"
+        className="ip-hint__mark"
+        onBlur={() => setOpen(false)}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -31,20 +31,15 @@ export function InfoHint({ text }: { text: string }) {
           }
           if (event.key === "Escape") setOpen(false);
         }}
-        onBlur={() => setOpen(false)}
         onMouseLeave={() => setOpen(false)}
+        tabIndex={0}
       >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        <Info aria-hidden="true" size={13} />
       </span>
       <span
+        className={`ip-hint__bubble${open ? " is-open" : ""}`}
         id={id}
         role="tooltip"
-        className={[
-          "pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-60 -translate-x-1/2 rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-left text-xs font-medium leading-5 text-slate-700 shadow-lift backdrop-blur",
-          open
-            ? "block animate-pop"
-            : "hidden group-hover/info:block group-hover/info:animate-pop group-focus-within/info:block",
-        ].join(" ")}
       >
         {text}
       </span>

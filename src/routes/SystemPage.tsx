@@ -14,7 +14,6 @@ import {
   Card,
   DetailList,
   IconButton,
-  Note,
   PageHead,
   Row,
   Rows,
@@ -200,10 +199,6 @@ export function SystemPage({
             </Rows>
           </Card>
         </Section>
-
-        {!ready && onboarding ? (
-          <Note tone="attention">{t("system.innpilotIncomplete")}</Note>
-        ) : null}
 
         <TechnicalDetails label={t("common.technicalDetails")}>
           <DetailList

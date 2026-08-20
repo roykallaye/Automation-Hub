@@ -497,9 +497,7 @@ export function ReviewStage({
 
       {/* ---- Will change ---- */}
       <Card pad>
-        <h2 className="ip-review-group__title" style={{ marginBottom: 14 }}>
-          {t("review.willChange")}
-        </h2>
+        <h2 className="ip-review-heading">{t("review.willChange")}</h2>
         {grouped.length === 0 ? (
           <p style={{ color: "var(--ip-muted)", fontSize: "0.875rem", margin: 0 }}>
             {t("review.noProposalText")}
@@ -520,9 +518,7 @@ export function ReviewStage({
       {review.willNotChange.length > 0 ? (
         <div style={{ marginTop: 16 }}>
           <Card pad quiet>
-            <h2 className="ip-review-group__title" style={{ marginBottom: 10 }}>
-              {t("review.willStay")}
-            </h2>
+            <h2 className="ip-review-heading">{t("review.willStay")}</h2>
             <ul style={{ display: "grid", gap: 7, listStyle: "none", margin: 0, padding: 0 }}>
               {review.willNotChange.map((item) => (
                 <li
@@ -548,8 +544,8 @@ export function ReviewStage({
       {proposal.warnings.length > 0 || proposal.unresolvedQuestions.length > 0 ? (
         <div style={{ marginTop: 16 }}>
           <Card pad>
-            <h2 className="ip-review-group__title" style={{ marginBottom: 10 }}>
-              <AlertTriangle aria-hidden="true" size={15} style={{ color: "var(--ip-attention)" }} />
+            <h2 className="ip-review-heading">
+              <AlertTriangle aria-hidden="true" size={16} style={{ color: "var(--ip-attention)" }} />
               {t("review.needsAttention")}
             </h2>
             <ul style={{ display: "grid", gap: 7, listStyle: "none", margin: 0, padding: 0 }}>

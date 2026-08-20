@@ -3,63 +3,40 @@
 @tailwind utilities;
 
 /*
-  InnPilot design tokens.
+  Shared Tailwind tokens.
 
-  Color tokens are RGB triplets so Tailwind can apply alpha (rgb(var(--x) / a)).
-  Client branding overrides these at runtime via applyBrandingToDocument()
-  in src/branding.ts — components must reference brand-* / ink utilities,
-  never hardcoded palette colors, for hotel theming to work.
+  The refreshed product surface is built from src/design/system.css. What
+  remains here is the token layer that the manual/advanced setup wizard still
+  consumes through Tailwind utilities, retuned so that screen belongs to the
+  same visual family as the rest of the app rather than keeping the old
+  oxblood-and-glass look.
+
+  Color tokens are RGB triplets so Tailwind can apply alpha
+  (rgb(var(--x) / a)). Client branding may still override them at runtime via
+  applyBrandingToDocument() in src/branding.ts.
 */
 :root {
-  /* Brand accent scale (default: InnPilot deep teal) */
-  --brand-50: 253 246 246;
-  --brand-100: 248 231 232;
-  --brand-200: 239 204 206;
-  --brand-300: 222 157 161;
-  --brand-700: 153 43 51;
-  --brand-800: 126 32 39;
-  --brand-900: 101 25 31;
-  --brand-950: 57 13 17;
+  /* InnPilot product accent: a single deep petrol. */
+  --brand-50: 240 246 248;
+  --brand-100: 223 236 240;
+  --brand-200: 202 221 227;
+  --brand-300: 138 178 192;
+  --brand-700: 29 78 95;
+  --brand-800: 24 64 78;
+  --brand-900: 20 52 63;
+  --brand-950: 11 29 35;
 
-  /* Primary action / CTA ("ink") surface — derives from brand at runtime
-     (see applyBrandingToDocument). Default mirrors the teal brand-800/900. */
-  --ink: 24 24 27;
-  --ink-soft: 39 39 42;
-  --cta: 153 43 51;
-  --cta-soft: 126 32 39;
+  /* Primary action surface. */
+  --ink: 28 27 23;
+  --ink-soft: 70 66 58;
+  --cta: 29 78 95;
+  --cta-soft: 24 64 78;
 
-  /* Decorative card tints (palette-derived at runtime). These fallbacks use
-     the default teal family so cards are never unstyled before JS runs. */
-  --tint-brand-bg: 248 231 232;
-  --tint-brand-fg: 126 32 39;
-  --tint-brand-ring: 239 204 206;
-  --tint-brand-wash: 253 246 246;
-  --tint-sky-bg: 244 244 245;
-  --tint-sky-fg: 63 63 70;
-  --tint-sky-ring: 228 228 231;
-  --tint-sky-wash: 250 250 250;
-  --tint-violet-bg: 244 244 245;
-  --tint-violet-fg: 63 63 70;
-  --tint-violet-ring: 228 228 231;
-  --tint-violet-wash: 250 250 250;
-  --tint-amber-bg: 251 247 239;
-  --tint-amber-fg: 117 70 23;
-  --tint-amber-ring: 232 209 170;
-  --tint-amber-wash: 253 251 247;
-  --tint-emerald-bg: 244 245 244;
-  --tint-emerald-fg: 53 61 56;
-  --tint-emerald-ring: 214 219 216;
-  --tint-emerald-wash: 250 250 250;
-  --tint-rose-bg: 248 231 232;
-  --tint-rose-fg: 126 32 39;
-  --tint-rose-ring: 239 204 206;
-  --tint-rose-wash: 253 246 246;
-
-  /* App background wash */
-  --app-bg: #f2f2f1;
-  --app-bg-from: #fafafa;
-  --app-bg-via: #efefee;
-  --app-bg-to: #f7f7f6;
+  /* App canvas — matches --ip-canvas in design/system.css. */
+  --app-bg: #f5f4f1;
+  --app-bg-from: #f5f4f1;
+  --app-bg-via: #f5f4f1;
+  --app-bg-to: #f5f4f1;
 
   /* Branded watermark */
   --watermark-opacity: 0.06;
@@ -69,7 +46,7 @@
   --motion-base: 240ms;
 
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
-  color: #0f172a;
+  color: #1c1b17;
   background: var(--app-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -90,10 +67,6 @@ button {
   font: inherit;
 }
 
-pre {
-  scrollbar-color: rgb(var(--brand-700) / 0.8) rgba(15, 23, 42, 0.4);
-}
-
 /* Accessible, consistent keyboard focus */
 :focus-visible {
   outline: 2px solid rgb(var(--brand-700));
@@ -102,200 +75,27 @@ pre {
 }
 
 /*
-  Palette-derived card tints. Each tile sets background + icon color and the
-  ring color (used by Tailwind's `ring-1`). Each wash is a soft gradient for a
-  card surface. The colors come from --tint-* variables set per palette.
+  Flatten the retired glass treatment.
+
+  The wizard still carries `shadow-glass`, `backdrop-blur-*` and translucent
+  `bg-white/NN` utilities across ~90 call sites. Rather than churn every one,
+  these rules resolve them to the flat surfaces the rest of the product uses,
+  so the advanced path matches without a risky sweep through 2,000 lines of
+  setup logic.
 */
-.tint-brand-tile,
-.tint-sky-tile,
-.tint-violet-tile,
-.tint-amber-tile,
-.tint-emerald-tile,
-.tint-rose-tile {
-  --tw-ring-opacity: 1;
-}
-.tint-brand-tile {
-  background-color: rgb(var(--tint-brand-bg));
-  color: rgb(var(--tint-brand-fg));
-  --tw-ring-color: rgb(var(--tint-brand-ring));
-}
-.tint-sky-tile {
-  background-color: rgb(var(--tint-sky-bg));
-  color: rgb(var(--tint-sky-fg));
-  --tw-ring-color: rgb(var(--tint-sky-ring));
-}
-.tint-violet-tile {
-  background-color: rgb(var(--tint-violet-bg));
-  color: rgb(var(--tint-violet-fg));
-  --tw-ring-color: rgb(var(--tint-violet-ring));
-}
-.tint-amber-tile {
-  background-color: rgb(var(--tint-amber-bg));
-  color: rgb(var(--tint-amber-fg));
-  --tw-ring-color: rgb(var(--tint-amber-ring));
-}
-.tint-emerald-tile {
-  background-color: rgb(var(--tint-emerald-bg));
-  color: rgb(var(--tint-emerald-fg));
-  --tw-ring-color: rgb(var(--tint-emerald-ring));
-}
-.tint-rose-tile {
-  background-color: rgb(var(--tint-rose-bg));
-  color: rgb(var(--tint-rose-fg));
-  --tw-ring-color: rgb(var(--tint-rose-ring));
-}
-.tint-brand-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-brand-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
-}
-.tint-sky-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-sky-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
-}
-.tint-violet-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-violet-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
-}
-.tint-amber-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-amber-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
-}
-.tint-emerald-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-emerald-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
-}
-.tint-rose-wash {
-  background-image: linear-gradient(
-    to bottom right,
-    rgb(var(--tint-rose-wash)),
-    rgba(255, 255, 255, 0.55)
-  );
+.shadow-glass {
+  box-shadow: 0 1px 2px rgba(28, 27, 23, 0.05) !important;
 }
 
-/* Subtle entrance used for page changes and panels. */
-@keyframes rise-fade {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+.backdrop-blur-xl,
+.backdrop-blur-lg,
+.backdrop-blur,
+.backdrop-blur-sm {
+  backdrop-filter: none !important;
 }
 
-.animate-rise {
-  animation: rise-fade var(--motion-base) cubic-bezier(0.2, 0.7, 0.3, 1) both;
-}
-
-/* Gentle pop used for success confirmations (badges, check icons). */
-@keyframes pop-in {
-  0% {
-    opacity: 0;
-    transform: scale(0.85);
-  }
-  70% {
-    transform: scale(1.04);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.animate-pop {
-  animation: pop-in var(--motion-base) cubic-bezier(0.2, 0.7, 0.3, 1) both;
-}
-
-/* Staggered card entrances: apply .stagger-children to a grid/list. */
-.stagger-children > * {
-  animation: rise-fade var(--motion-base) cubic-bezier(0.2, 0.7, 0.3, 1) both;
-}
-.stagger-children > *:nth-child(2) {
-  animation-delay: 40ms;
-}
-.stagger-children > *:nth-child(3) {
-  animation-delay: 80ms;
-}
-.stagger-children > *:nth-child(4) {
-  animation-delay: 120ms;
-}
-.stagger-children > *:nth-child(5) {
-  animation-delay: 160ms;
-}
-.stagger-children > *:nth-child(n + 6) {
-  animation-delay: 200ms;
-}
-
-/* Hover lift for large clickable cards. */
-.card-lift {
-  transition:
-    transform var(--motion-fast) ease-out,
-    box-shadow var(--motion-fast) ease-out;
-}
-.card-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.16);
-}
-.card-lift:active {
-  transform: translateY(0);
-}
-
-/* Status orbs: color is always paired with a text label nearby. */
-.status-orb {
-  display: inline-block;
-  width: 0.625rem;
-  height: 0.625rem;
-  border-radius: 9999px;
-  flex: none;
-}
-
-@keyframes orb-breathe {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgb(var(--orb-glow, 245 158 11) / 0.45);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgb(var(--orb-glow, 245 158 11) / 0);
-  }
-}
-
-.status-orb--pulse {
-  animation: orb-breathe 2.4s ease-in-out infinite;
-}
-
-/* Soft highlight for the recommended next destination. */
-@keyframes next-glow {
-  0%,
-  100% {
-    box-shadow:
-      0 18px 50px rgba(15, 23, 42, 0.12),
-      0 0 0 3px rgb(var(--brand-700) / 0.14);
-  }
-  50% {
-    box-shadow:
-      0 18px 50px rgba(15, 23, 42, 0.12),
-      0 0 0 6px rgb(var(--brand-700) / 0.07);
-  }
-}
-
-.next-highlight {
-  animation: next-glow 3s ease-in-out infinite;
+[class*="bg-white/"] {
+  background-color: #ffffff !important;
 }
 
 /* Branded watermark: decorative only, never blocks content. */
@@ -309,6 +109,21 @@ pre {
   opacity: var(--watermark-opacity);
 }
 
+@keyframes setup-check-settle {
+  from {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.setup-step-check {
+  animation: setup-check-settle 180ms ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -317,12 +132,4 @@ pre {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-@keyframes setup-check-settle {
-  from { opacity: 0; transform: scale(0.78); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.setup-step-check {
-  animation: setup-check-settle 180ms ease-out both;
 }

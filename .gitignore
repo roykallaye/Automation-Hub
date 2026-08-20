@@ -64,3 +64,6 @@ client_secret*.json
 # OS files
 Thumbs.db
 .DS_Store
+
+# Visual preview harness output
+preview-dist/

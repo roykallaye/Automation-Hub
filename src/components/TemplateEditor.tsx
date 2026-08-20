@@ -3,6 +3,7 @@ import { Eye, MailOpen, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { InfoHint } from "./InfoHint";
+import { Button, Card, Note } from "./ui";
 import { useI18n } from "../i18n";
 import {
   BODY_VARIABLES,
@@ -89,119 +90,104 @@ export function TemplateEditor({
   const isDirty = JSON.stringify(draft) !== JSON.stringify(saved);
 
   return (
-    <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-      <div className="flex items-center gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
-          <MailOpen className="h-5 w-5" aria-hidden="true" />
-        </div>
-        <h2 className="text-xl font-semibold text-slate-950">{t("templates.title")}</h2>
+    <Card pad>
+      <div style={{ alignItems: "center", display: "flex", gap: 9, marginBottom: 16 }}>
+        <MailOpen aria-hidden="true" size={17} style={{ color: "var(--ip-muted)" }} />
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 650, margin: 0 }}>{t("templates.title")}</h2>
         <InfoHint text={t("templates.hint")} />
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <div className="space-y-4">
+      <div className="ip-template-grid">
+        <div style={{ display: "grid", gap: 16 }}>
           <div>
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-800">
-                {t("templates.subject")}
-              </span>
+            <label className="ip-field">
+              <span className="ip-field__label">{t("templates.subject")}</span>
               <input
-                ref={subjectRef}
-                className="w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
-                value={draft.gmailDraftSubject}
+                className="ip-input"
                 onChange={(event) => update({ gmailDraftSubject: event.target.value })}
                 placeholder={DEFAULT_TEMPLATES.gmailDraftSubject}
+                ref={subjectRef}
+                value={draft.gmailDraftSubject}
               />
             </label>
             <VariableChips
-              variables={SUBJECT_VARIABLES}
               onInsert={(token) => insertVariable("gmailDraftSubject", token)}
+              variables={SUBJECT_VARIABLES}
             />
           </div>
 
           <div>
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-800">
-                {t("templates.body")}
-              </span>
+            <label className="ip-field">
+              <span className="ip-field__label">{t("templates.body")}</span>
               <textarea
+                className="ip-textarea"
+                onChange={(event) => update({ gmailDraftBody: event.target.value })}
                 ref={bodyRef}
                 rows={9}
-                className="w-full resize-y rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-medium leading-6 text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
                 value={draft.gmailDraftBody}
-                onChange={(event) => update({ gmailDraftBody: event.target.value })}
               />
             </label>
             <VariableChips
-              variables={BODY_VARIABLES}
               onInsert={(token) => insertVariable("gmailDraftBody", token)}
+              variables={BODY_VARIABLES}
             />
           </div>
 
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-800">
-              {t("templates.signature")} <span className="font-medium text-slate-500">({t("templates.optional")})</span>
+          <label className="ip-field">
+            <span className="ip-field__label">
+              {t("templates.signature")}{" "}
+              <span style={{ color: "var(--ip-faint)", fontWeight: 500 }}>
+                ({t("templates.optional")})
+              </span>
             </span>
             <input
-              className="w-full rounded-md border border-white/70 bg-white/80 px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
-              value={draft.emailSignature}
+              className="ip-input"
               onChange={(event) => update({ emailSignature: event.target.value })}
               placeholder={t("templates.signaturePlaceholder", { hotelName })}
+              value={draft.emailSignature}
             />
           </label>
         </div>
 
-        <div className="flex flex-col rounded-lg border border-white/70 bg-white/70 p-4">
-          <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <Eye className="h-4 w-4 text-brand-700" aria-hidden="true" />
+        <div className="ip-template-preview">
+          <p className="ip-field__label" style={{ alignItems: "center", display: "flex", gap: 7 }}>
+            <Eye aria-hidden="true" size={15} />
             {t("templates.preview")}
           </p>
-          <div className="mt-3 flex-1 rounded-md bg-white p-4 ring-1 ring-slate-900/5">
-            <p className="border-b border-slate-100 pb-2 text-sm font-semibold text-slate-950">
+          <div className="ip-template-preview__sheet">
+            <p className="ip-template-preview__subject">
               {previewSubject || t("templates.emptySubject")}
             </p>
-            <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm font-medium leading-6 text-slate-700">
+            <pre className="ip-template-preview__body">
               {previewBody || t("templates.emptyBody")}
             </pre>
           </div>
-          <p className="mt-2 text-xs font-semibold text-slate-500">
-            {t("templates.previewOnly")}
-          </p>
+          <p className="ip-field__hint">{t("templates.previewOnly")}</p>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button
-          className="inline-flex min-h-11 items-center justify-center rounded-md bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={saving || !isDirty}
-          onClick={() => void save()}
-        >
-          {saving ? t("common.saving") : t("templates.save")}
-        </button>
-        <button
-          className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/70 bg-white/65 px-4 text-sm font-semibold text-slate-700 transition hover:bg-white"
-          type="button"
+      <div className="ip-actions" style={{ marginTop: 18 }}>
+        <Button busy={saving} disabled={!isDirty} onClick={() => void save()} variant="primary">
+          {t("templates.save")}
+        </Button>
+        <Button
+          icon={RotateCcw}
           onClick={() => {
             setDraft(DEFAULT_TEMPLATES);
             setResult(null);
           }}
+          variant="secondary"
         >
-          <RotateCcw className="h-4 w-4" aria-hidden="true" />
           {t("templates.reset")}
-        </button>
-        {result && (
-          <p
-            role="status"
-            className={[
-              "animate-pop text-sm font-semibold",
-              result.kind === "success" ? "text-emerald-800" : "text-rose-800",
-            ].join(" ")}
-          >
-            {result.message}
-          </p>
-        )}
+        </Button>
       </div>
-    </section>
+
+      {result ? (
+        <div style={{ marginTop: 12 }}>
+          <Note tone={result.kind === "success" ? "ready" : "problem"}>{result.message}</Note>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -213,14 +199,14 @@ function VariableChips({
   onInsert: (token: string) => void;
 }) {
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
+    <div className="ip-chips">
       {variables.map((variable) => (
         <button
+          className="ip-chip"
           key={variable.token}
-          type="button"
-          className="rounded-full bg-brand-50 px-2.5 py-1 font-mono text-[11px] font-bold text-brand-800 ring-1 ring-brand-200 transition hover:bg-brand-100"
-          title={variable.description}
           onClick={() => onInsert(variable.token)}
+          title={variable.description}
+          type="button"
         >
           {variable.token}
         </button>

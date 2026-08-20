@@ -165,15 +165,11 @@ export function AssistantPage({
             {agent?.lastActivityAt ? (
               <Rows>
                 <Row
-                  meta={[
-                    formatWhen(agent.lastActivityAt, language, t("common.never")),
-                    agent.lastClientName,
-                  ]
+                  meta={[formatWhen(agent.lastActivityAt, language, t("common.never")), agent.lastClientName]
                     .filter(Boolean)
                     .join(" · ")}
-                  title={t("assistant.lastActive", {
-                    time: formatWhen(agent.lastActivityAt, language, t("common.never")),
-                  })}
+                  status={{ tone: "ready", label: t("status.ready") }}
+                  title={t("assistant.canCheckSetup")}
                 />
               </Rows>
             ) : (
