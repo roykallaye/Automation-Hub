@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
 import { TINT_TILE, type CardTint } from "../components/tints";
@@ -67,7 +67,9 @@ type DiscoveryManagerView = {
   };
   proposal: null | {
     proposalId: string;
+    revision: number;
     status: string;
+    targetConfigurationRevision: string;
     changedFields: string[];
     warnings: string[];
     unresolvedQuestions: string[];
@@ -79,6 +81,35 @@ type DiscoveryManagerView = {
     reviewOnly: boolean;
     mutationPerformed: boolean;
   };
+  review: null | {
+    fields: Array<{
+      field: string;
+      currentValue: string;
+      proposedValue: string;
+      evidence: string;
+      validation: string;
+    }>;
+    willNotChange: string[];
+    approvalEligible: boolean;
+  };
+  application: null | {
+    proposalId: string;
+    operationId: string;
+    status: string;
+    approvedAt: string;
+    completedAt: string | null;
+    deferredItems: string[];
+    blockerKeys: string[];
+    safeFailureCode: string | null;
+  };
+};
+
+type ProposalApplyResult = {
+  outcome: "ready" | "readyWithDeferredItems" | "rolledBack" | "failedRecoverable" | "replayed";
+  proposalId: string;
+  operationId: string;
+  deferredItems: string[];
+  blockerKeys: string[];
 };
 
 type FrequentRequest = {
@@ -377,6 +408,8 @@ function EnvironmentDiscoveryPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showProposal, setShowProposal] = useState(false);
+  const [applyResult, setApplyResult] = useState<ProposalApplyResult | null>(null);
+  const approvalRequestRef = useRef<{ proposalKey: string; requestId: string } | null>(null);
 
   async function refresh() {
     setBusy(true);
@@ -428,6 +461,58 @@ function EnvironmentDiscoveryPanel() {
       setView(await invoke<DiscoveryManagerView>("revoke_environment_discovery"));
     } catch (problem) {
       setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveAndFinish() {
+    const proposal = view?.proposal;
+    if (!proposal || !view?.review?.approvalEligible) return;
+    const proposalKey = `${proposal.proposalId}:${proposal.revision}:${proposal.proposalDigest}`;
+    if (approvalRequestRef.current?.proposalKey !== proposalKey) {
+      approvalRequestRef.current = {
+        proposalKey,
+        requestId: `phasef-ui-${crypto.randomUUID()}`,
+      };
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await invoke<ProposalApplyResult>("approve_and_apply_setup_proposal", {
+        request: {
+          proposalId: proposal.proposalId,
+          proposalRevision: proposal.revision,
+          proposalDigest: proposal.proposalDigest,
+          requestId: approvalRequestRef.current.requestId,
+          confirmed: true,
+        },
+      });
+      setApplyResult(result);
+      approvalRequestRef.current = null;
+      await refresh();
+    } catch (problem) {
+      const message = commandErrorMessage(problem, t("assistant.proposalApplyFailed"));
+      let authoritativeOutcomeLoaded = false;
+      try {
+        const authoritative = await invoke<DiscoveryManagerView>("get_environment_discovery_status");
+        setView(authoritative);
+        const application = authoritative.application;
+        if (application?.proposalId === proposal.proposalId) {
+          authoritativeOutcomeLoaded = [
+            "succeeded",
+            "rolled_back",
+            "failed_recoverable",
+          ].includes(application.status);
+        }
+        if (authoritativeOutcomeLoaded || application?.status === "invalidated") {
+          approvalRequestRef.current = null;
+        }
+      } catch {
+        // Keep the same request ID. A later click can safely ask the backend
+        // for the authoritative outcome without creating another operation.
+      }
+      setError(authoritativeOutcomeLoaded ? null : message);
     } finally {
       setBusy(false);
     }
@@ -543,14 +628,37 @@ function EnvironmentDiscoveryPanel() {
             </button>
           </div>
           {showProposal && (
-            <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm">
-              <p className="font-semibold text-slate-900">{view.proposal.status}</p>
-              {view.proposal.localPaths.map((path) => (
-                <div key={path.field} className="mt-3 border-t border-slate-200 pt-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{path.field}</p>
-                  <p className="mt-1 break-all font-medium text-slate-800">{path.localPath}</p>
-                </div>
-              ))}
+            <div className="mt-4 text-sm">
+              <h3 className="font-semibold text-slate-950">{t("assistant.whatFound")}</h3>
+              <p className="mt-1 text-slate-600">{t("assistant.proposalFoundSummary")}</p>
+              <h3 className="mt-5 border-t border-slate-200 pt-4 font-semibold text-slate-950">
+                {t("assistant.whatWillChange")}
+              </h3>
+              <div className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {view.review?.fields.map((field) => (
+                  <div key={field.field} className="grid gap-2 border-b border-slate-100 p-3 last:border-b-0 sm:grid-cols-[minmax(9rem,0.7fr)_1fr_1fr]">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{field.field}</p>
+                      <p className="mt-1 text-xs font-medium text-emerald-700">{field.validation}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("assistant.currentValue")}</p>
+                      <p className="mt-1 break-all font-medium text-slate-600">{field.currentValue}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("assistant.proposedValue")}</p>
+                      <p className="mt-1 break-all font-semibold text-slate-900">{field.proposedValue}</p>
+                      <p className="mt-1 text-xs text-slate-500">{field.evidence}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <h3 className="mt-5 font-semibold text-slate-950">{t("assistant.whatWillNotChange")}</h3>
+              <ul className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                {view.review?.willNotChange.map((item) => (
+                  <li key={item}>✓ {t(`assistant.${item}` as Parameters<typeof t>[0])}</li>
+                ))}
+              </ul>
               {view.proposal.unresolvedQuestions.length > 0 && (
                 <div className="mt-3 border-t border-slate-200 pt-3">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -564,8 +672,36 @@ function EnvironmentDiscoveryPanel() {
               <p className="mt-3 break-all text-[11px] font-medium text-slate-400">
                 {view.proposal.proposalDigest}
               </p>
+              <div className="mt-5 border-t border-slate-200 pt-4">
+                <p className="max-w-3xl text-sm font-medium leading-6 text-slate-600">
+                  {t("assistant.approvalExplanation")}
+                </p>
+                <button
+                  className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                  disabled={busy || !view.review?.approvalEligible}
+                  onClick={() => void approveAndFinish()}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {t("assistant.approveAndFinish")}
+                </button>
+              </div>
             </div>
           )}
+        </div>
+      )}
+
+      {(applyResult || view?.application) && (
+        <div className="mt-5 border-t border-slate-200 pt-4">
+          <p className="font-semibold text-slate-950">
+            {(applyResult?.outcome === "rolledBack" || view?.application?.status === "rolled_back")
+              ? t("assistant.setupRolledBack")
+              : (applyResult?.outcome === "failedRecoverable" || view?.application?.status === "failed_recoverable")
+                ? t("assistant.setupNeedsRecovery")
+                : t("assistant.setupReady")}
+          </p>
+          {(applyResult?.deferredItems.length || view?.application?.deferredItems.length) ? (
+            <p className="mt-1 text-sm text-slate-600">{t("assistant.optionalConnectionsLater")}</p>
+          ) : null}
         </div>
       )}
 
