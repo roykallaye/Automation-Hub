@@ -1,41 +1,48 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  automationActions,
-} from "./actions";
+import { automationActions } from "./actions";
 import { applyBrandingToDocument } from "./branding";
-import { OperatorShell } from "./components/OperatorShell";
-import { ConfirmationModal } from "./components/ConfirmationModal";
+import { AppFrame, type AssistantPresence } from "./components/AppFrame";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { SetupWizard } from "./components/SetupWizard/SetupWizard";
+import { Button } from "./components/ui";
 import { createTranslator, I18nProvider } from "./i18n";
 import { staffMessage } from "./messages";
 import { deriveModuleReadiness, moduleForCommand } from "./moduleReadiness";
-import { deriveNextAction } from "./nextAction";
 import {
   commandErrorMessage,
   getInitialOnboardingState,
-  initialPageForOnboarding,
+  isOnboardingReady,
   normalizeOnboardingError,
   type OnboardingSnapshot,
 } from "./onboarding";
+import { OnboardingJourney } from "./onboarding/OnboardingJourney";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AssistantPage } from "./routes/AssistantPage";
-import { OperatorAutomationsPage } from "./routes/OperatorAutomationsPage";
-import { OperatorHomePage } from "./routes/OperatorHomePage";
+import { AutomationsPage } from "./routes/AutomationsPage";
+import { GuidePage } from "./routes/GuidePage";
+import { HomePage } from "./routes/HomePage";
 import { SettingsPage } from "./routes/SettingsPage";
-import { SetupPage } from "./routes/SetupPage";
 import { SupportPage } from "./routes/SupportPage";
+import { SystemPage } from "./routes/SystemPage";
+import { attentionModules } from "./statusMapping";
 import type {
-  AppPage,
-  AppConfigStatus,
   ActivityRecord,
+  AppConfigStatus,
+  AppPage,
   AutomationAction,
+  DiscoveryManagerView,
   LatestLog,
+  LifeDeskConnectionStatus,
+  LocalAgentConnectionStatus,
   ManagedAutomationInstallResult,
   RunStatus,
   RunSummary,
 } from "./types";
+
+import "./design/system.css";
 
 function App() {
   const [configStatus, setConfigStatus] = useState<AppConfigStatus | null>(null);
@@ -48,13 +55,25 @@ function App() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [notice, setNotice] = useState<string>("");
   const [pendingAction, setPendingAction] = useState<AutomationAction | null>(null);
-  const [currentPage, setCurrentPage] = useState<AppPage | null>(null);
+  const [currentPage, setCurrentPage] = useState<AppPage>("home");
   const [onboarding, setOnboarding] = useState<OnboardingSnapshot | null>(null);
+  const [onboardingResolved, setOnboardingResolved] = useState(false);
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [agent, setAgent] = useState<LocalAgentConnectionStatus | null>(null);
+  const [discovery, setDiscovery] = useState<DiscoveryManagerView | null>(null);
+  const [lifedesk, setLifedesk] = useState<LifeDeskConnectionStatus | null>(null);
+  /** Set when the manager deliberately chooses the manual/advanced path. */
+  const [manualSetup, setManualSetup] = useState(false);
   const configRefreshId = useRef(0);
-  const initialRouteResolved = useRef(false);
+
   const browserPreview =
     typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
+
+  const t = useMemo(() => createTranslator(configStatus?.config.language), [
+    configStatus?.config.language,
+  ]);
+  const actions = useMemo(() => automationActions, []);
+  const modules = useMemo(() => deriveModuleReadiness(configStatus, t), [configStatus, t]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -80,33 +99,47 @@ function App() {
     };
   }, [branding]);
 
+  /** Connection-shaped state used by the shell, System, Assistant and Settings. */
+  const refreshConnections = useCallback(async () => {
+    if (browserPreview) return;
+    const [nextAgent, nextDiscovery, nextLifedesk] = await Promise.allSettled([
+      invoke<LocalAgentConnectionStatus>("get_local_agent_connection"),
+      invoke<DiscoveryManagerView>("get_environment_discovery_status"),
+      invoke<LifeDeskConnectionStatus>("get_lifedesk_connection"),
+    ]);
+    if (nextAgent.status === "fulfilled") setAgent(nextAgent.value);
+    if (nextDiscovery.status === "fulfilled") setDiscovery(nextDiscovery.value);
+    if (nextLifedesk.status === "fulfilled") setLifedesk(nextLifedesk.value);
+  }, [browserPreview]);
+
   useEffect(() => {
     if (browserPreview) {
-      resolveInitialRoute("home");
+      setOnboardingResolved(true);
     } else {
       void getInitialOnboardingState()
         .then((snapshot) => {
           setOnboarding(snapshot);
-          resolveInitialRoute(initialPageForOnboarding(snapshot));
+          setOnboardingResolved(true);
         })
         .catch((error) => {
           setNotice(normalizeOnboardingError(error).message);
           // Onboarding is the local authority. A corrupt/future record, or an
-          // unavailable authority, fails closed into Support rather than Home.
-          resolveInitialRoute("support");
+          // unavailable authority, fails closed into Help rather than Home.
+          setCurrentPage("support");
+          setOnboardingResolved(true);
         });
     }
 
     void refreshConfigStatus();
     void refreshLatestLogs();
     void refreshActivityHistory();
+    void refreshConnections();
     void invoke<RunSummary | null>("get_last_run_summary").then((summary) => {
       if (summary) {
         setLastSummary(summary);
         setStatus(summary.status);
       }
     });
-
 
     const unlistenFinished = listen<RunSummary>("command-finished", (event) => {
       setLastSummary(event.payload);
@@ -122,36 +155,6 @@ function App() {
     };
   }, []);
 
-  function resolveInitialRoute(page: AppPage) {
-    if (initialRouteResolved.current) return;
-    initialRouteResolved.current = true;
-    setCurrentPage(page);
-  }
-
-  const actions = useMemo(() => automationActions, []);
-  const t = useMemo(() => createTranslator(configStatus?.config.language), [configStatus?.config.language]);
-
-  const runningLabel = useMemo(() => {
-    if (!runningCommand) return null;
-    return actions.find((action) => action.commandName === runningCommand)?.label;
-  }, [actions, runningCommand]);
-
-  const displayName = configStatus?.config.client.displayName || "InnPilot";
-  const modules = useMemo(() => deriveModuleReadiness(configStatus, t), [configStatus, t]);
-  const nextAction = useMemo(
-    () =>
-      deriveNextAction({
-        loading: loadingConfig || checkingReadiness,
-        configStatus,
-        modules,
-        lastSummary,
-        activityHistory,
-        runningCommand,
-        t,
-      }),
-    [activityHistory, checkingReadiness, configStatus, lastSummary, loadingConfig, modules, runningCommand, t],
-  );
-
   async function refreshConfigStatus() {
     const requestId = ++configRefreshId.current;
     setCheckingReadiness(true);
@@ -159,12 +162,11 @@ function App() {
       const nextStatus = await invoke<AppConfigStatus>("get_config_status");
       if (requestId !== configRefreshId.current) return null;
       setConfigStatus(nextStatus);
-      setNotice(t("app.readinessChecking"));
       void refreshVerifiedConfigStatus(requestId);
       return nextStatus;
     } catch (error) {
       if (requestId === configRefreshId.current) {
-        setNotice(readError(error));
+        setNotice(commandErrorMessage(error));
         setCheckingReadiness(false);
       }
       return null;
@@ -180,7 +182,6 @@ function App() {
       const verifiedStatus = await invoke<AppConfigStatus>("refresh_config_status");
       if (requestId !== configRefreshId.current) return;
       setConfigStatus(verifiedStatus);
-      setNotice(t("app.ready"));
       setCheckingReadiness(false);
     } catch {
       if (requestId !== configRefreshId.current) return;
@@ -191,23 +192,17 @@ function App() {
 
   async function refreshLatestLogs() {
     try {
-      const logs = await invoke<LatestLog[]>("get_latest_logs");
-      setLatestLogs(logs);
-      return logs;
+      setLatestLogs(await invoke<LatestLog[]>("get_latest_logs"));
     } catch (error) {
-      setNotice(readError(error));
-      return [];
+      setNotice(commandErrorMessage(error));
     }
   }
 
   async function refreshActivityHistory() {
     try {
-      const history = await invoke<ActivityRecord[]>("get_activity_history");
-      setActivityHistory(history);
-      return history;
+      setActivityHistory(await invoke<ActivityRecord[]>("get_activity_history"));
     } catch (error) {
-      setNotice(readError(error));
-      return [];
+      setNotice(commandErrorMessage(error));
     }
   }
 
@@ -215,6 +210,7 @@ function App() {
     await refreshConfigStatus();
     await refreshLatestLogs();
     await refreshActivityHistory();
+    await refreshConnections();
   }
 
   async function openPath(path?: string | null) {
@@ -225,7 +221,7 @@ function App() {
     try {
       await invoke("open_path", { path });
     } catch (error) {
-      setNotice(readError(error));
+      setNotice(commandErrorMessage(error));
     }
   }
 
@@ -237,14 +233,15 @@ function App() {
     try {
       await invoke("open_activity_report", { path });
     } catch (error) {
-      setNotice(readError(error));
+      setNotice(commandErrorMessage(error));
     }
   }
 
   async function installManagedAutomationScripts() {
-    const result = await invoke<ManagedAutomationInstallResult>("install_managed_automation_scripts", {
-      confirmed: true,
-    });
+    const result = await invoke<ManagedAutomationInstallResult>(
+      "install_managed_automation_scripts",
+      { confirmed: true },
+    );
     await refreshAll();
     return result;
   }
@@ -255,9 +252,7 @@ function App() {
       setNotice(disabledReason);
       return;
     }
-
-    const shouldConfirm = action.requiresConfirmation;
-    if (shouldConfirm) {
+    if (action.requiresConfirmation) {
       setPendingAction(action);
       return;
     }
@@ -268,8 +263,6 @@ function App() {
     setPendingAction(null);
     setRunningCommand(action.commandName);
     setStatus("idle");
-    setNotice(t("app.runningAction", { action: action.label }));
-
     try {
       const summary = await invoke<RunSummary>("run_command", {
         commandName: action.commandName,
@@ -280,22 +273,20 @@ function App() {
       setNotice(summary.status === "error" ? t("app.runFinishedErrors") : t("app.runFinished"));
     } catch (error) {
       setStatus("error");
-      setNotice(readError(error));
+      setNotice(commandErrorMessage(error));
     } finally {
       setRunningCommand(null);
       void refreshAll();
     }
   }
 
-  function workflowFor(action: AutomationAction) {
-    return configStatus?.preflight.workflows.find((workflow) => workflow.key === action.workflowKey);
-  }
-
   function actionDisabledReason(action: AutomationAction) {
     if (loadingConfig) return t("app.setupLoading");
     if (checkingReadiness) return t("app.readinessChecking");
     if (!configStatus) return t("app.setupLoadFailed");
-    const workflow = workflowFor(action);
+    const workflow = configStatus.preflight.workflows.find(
+      (candidate) => candidate.key === action.workflowKey,
+    );
     if (!workflow) return t("app.workflowStatusMissing");
     if (!workflow.canRun) {
       const module = moduleForCommand(modules, action.commandName);
@@ -305,111 +296,189 @@ function App() {
     return null;
   }
 
-  if (currentPage === null) return null;
+  const hotelName = configStatus?.config.client.displayName || "InnPilot";
+  const runningLabel = runningCommand
+    ? (actions.find((action) => action.commandName === runningCommand)?.label ?? null)
+    : null;
+  const attentionCount = attentionModules(modules).length;
 
+  const presence: AssistantPresence = runningCommand
+    ? "working"
+    : status === "error" || attentionCount > 0
+      ? "attention"
+      : agent?.state === "connected"
+        ? "connected"
+        : "notConnected";
+
+  // Wait for the backend to say where this installation stands before painting.
+  if (!onboardingResolved) return null;
+
+  const onboardingComplete = onboarding === null ? browserPreview : isOnboardingReady(onboarding);
+
+  /* -------- Manual / advanced setup: preserved, deliberately opt-in -------- */
+  if (manualSetup && onboarding) {
+    return (
+      <I18nProvider language={configStatus?.config.language}>
+        <div className="ip-app">
+          <div className="ip-journey">
+            <div className="ip-journey__bar">
+              <span className="ip-journey__brand">{t("system.manualConfiguration")}</span>
+              <Button onClick={() => setManualSetup(false)} variant="ghost">
+                {t("common.close")}
+              </Button>
+            </div>
+            <div className="ip-journey__body">
+              <div className="ip-journey__panel ip-journey__panel--wide">
+                <SetupWizard
+                  config={configStatus?.config}
+                  onboarding={onboarding}
+                  onOnboardingChanged={setOnboarding}
+                  onClose={() => setManualSetup(false)}
+                  onSetupSaved={refreshAll}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </I18nProvider>
+    );
+  }
+
+  /* ---------------- Fresh install: the four-stage journey ---------------- */
+  if (!onboardingComplete && onboarding) {
+    return (
+      <I18nProvider language={configStatus?.config.language}>
+        <div className="ip-app">
+          <OnboardingJourney
+            onFinished={() => {
+              setCurrentPage("home");
+              void refreshAll();
+            }}
+            onManualSetup={() => setManualSetup(true)}
+            onOpenSupport={() => {
+              setCurrentPage("support");
+              setOnboarding((current) => current);
+            }}
+            onSnapshotChange={setOnboarding}
+            snapshot={onboarding}
+          />
+        </div>
+      </I18nProvider>
+    );
+  }
+
+  /* ------------------------- Normal application ------------------------- */
   return (
     <I18nProvider language={configStatus?.config.language}>
-      <OperatorShell
+      <AppFrame
+        attentionCount={attentionCount}
         browserPreview={browserPreview}
         currentPage={currentPage}
-        displayName={displayName}
+        hotelName={hotelName}
         logoDataUrl={logoDataUrl}
-        status={runningCommand ? "warning" : status}
-        statusLabel={
-          browserPreview
-            ? t("app.browserPreview")
-            : runningLabel ?? (notice || t("app.loadingSetup"))
-        }
         onPageChange={setCurrentPage}
+        presence={presence}
       >
-      {currentPage === "home" && (
-        <OperatorHomePage
-          configStatus={configStatus}
-          modules={modules}
-          loading={loadingConfig}
-          lastSummary={lastSummary}
-          activityHistory={activityHistory}
-          nextAction={nextAction}
-          onNavigate={setCurrentPage}
-        />
-      )}
+        {currentPage === "home" && (
+          <HomePage
+            activityHistory={activityHistory}
+            configStatus={configStatus}
+            hotelName={hotelName}
+            loading={loadingConfig}
+            modules={modules}
+            onNavigate={setCurrentPage}
+            runningLabel={runningLabel}
+          />
+        )}
 
-      {currentPage === "automations" && (
-        <OperatorAutomationsPage
-          configStatus={configStatus}
-          modules={modules}
-          activityHistory={activityHistory}
-          runningCommand={runningCommand}
-          actionDisabledReason={actionDisabledReason}
-          onRun={startAction}
-          onOpenPath={openPath}
-          onNavigate={setCurrentPage}
-        />
-      )}
+        {currentPage === "automations" && (
+          <AutomationsPage
+            actionDisabledReason={actionDisabledReason}
+            activityHistory={activityHistory}
+            configStatus={configStatus}
+            modules={modules}
+            onNavigate={setCurrentPage}
+            onOpenPath={openPath}
+            onRun={startAction}
+            runningCommand={runningCommand}
+          />
+        )}
 
-      {currentPage === "setup" && (
-        <SetupPage
-          configStatus={configStatus}
-          modules={modules}
-          loading={loadingConfig}
-          onboarding={onboarding}
-          onOnboardingChanged={setOnboarding}
-          onRefresh={refreshAll}
-          onGoToAutomations={() => setCurrentPage("automations")}
-          onGoToSupport={() => setCurrentPage("support")}
-        />
-      )}
+        {currentPage === "activity" && (
+          <ActivityPage
+            activityHistory={activityHistory}
+            configStatus={configStatus}
+            latestLogs={latestLogs}
+            onOpenActivityReport={openActivityReport}
+            onOpenPath={openPath}
+            onRefresh={refreshAll}
+          />
+        )}
 
-      {currentPage === "activity" && (
-        <ActivityPage
-          configStatus={configStatus}
-          latestLogs={latestLogs}
-          activityHistory={activityHistory}
-          lastSummary={lastSummary}
-          onOpenPath={openPath}
-          onOpenActivityReport={openActivityReport}
-          onRefresh={refreshAll}
-          onNavigate={setCurrentPage}
-        />
-      )}
+        {currentPage === "assistant" && (
+          <AssistantPage
+            agent={agent}
+            discovery={discovery}
+            onAgentChange={setAgent}
+            onNavigate={setCurrentPage}
+            onRefresh={refreshConnections}
+          />
+        )}
 
-      {currentPage === "settings" && (
-        <SettingsPage
-          configStatus={configStatus}
-          onRefresh={refreshAll}
-          onNavigate={setCurrentPage}
-        />
-      )}
+        {currentPage === "system" && (
+          <SystemPage
+            agent={agent}
+            configStatus={configStatus}
+            lifedesk={lifedesk}
+            loading={checkingReadiness}
+            modules={modules}
+            onboarding={onboarding}
+            onNavigate={setCurrentPage}
+            onOpenManualSetup={() => setManualSetup(true)}
+            onRefresh={refreshAll}
+          />
+        )}
 
-      {currentPage === "assistant" && <AssistantPage />}
+        {currentPage === "settings" && (
+          <SettingsPage
+            agent={agent}
+            configStatus={configStatus}
+            onNavigate={setCurrentPage}
+            onRefresh={refreshAll}
+          />
+        )}
 
-      {currentPage === "support" && (
-        <SupportPage
-          configStatus={configStatus}
-          onOpenPath={openPath}
-          onRefresh={refreshAll}
-          onInstallAutomation={installManagedAutomationScripts}
-          onNavigate={setCurrentPage}
-        />
-      )}
+        {currentPage === "support" && (
+          <SupportPage
+            configStatus={configStatus}
+            onInstallAutomation={installManagedAutomationScripts}
+            onNavigate={setCurrentPage}
+            onOpenPath={openPath}
+            onRefresh={refreshAll}
+          />
+        )}
 
-      {pendingAction && (
-        <ConfirmationModal
-          action={pendingAction}
-          deliveryMode={configStatus?.config.invoiceDeliveryMode}
-          fileSelectionMode={configStatus?.config.invoiceFileSelectionMode}
-          safeModeOn={configStatus?.config.safety.dryRunDefault}
-          onCancel={() => setPendingAction(null)}
-          onConfirm={() => runAction(pendingAction, true)}
-        />
-      )}
-      </OperatorShell>
+        {currentPage === "guide" && <GuidePage lifedesk={lifedesk} />}
+
+        {pendingAction && (
+          <ConfirmDialog
+            cancelLabel={t("common.cancel")}
+            confirmLabel={t("common.confirm")}
+            message={pendingAction.confirmationMessage}
+            onCancel={() => setPendingAction(null)}
+            onConfirm={() => void runAction(pendingAction, true)}
+            title={pendingAction.confirmationTitle}
+          />
+        )}
+
+        {notice && currentPage === "support" ? (
+          <p className="ip-visually-hidden" role="status">
+            {notice}
+          </p>
+        ) : null}
+      </AppFrame>
     </I18nProvider>
   );
-}
-
-function readError(error: unknown) {
-  return commandErrorMessage(error);
 }
 
 export default App;

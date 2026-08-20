@@ -1,4 +1,23 @@
-import { Bot, Send } from "lucide-react";
+/*
+  Automations — business workflows, not Python scripts.
+
+  The list shows icon, name, one-line purpose and a simple status. Opening a
+  workflow gives what it does, its recent result, the run action when it is
+  actually runnable, and its essential setting. Scripts, folders and paths live
+  under "Advanced configuration".
+*/
+
+import {
+  FileSignature,
+  FileText,
+  FolderOpen,
+  KeyRound,
+  Play,
+  ScanText,
+  Workflow as WorkflowIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { useState } from "react";
 
 import {
   contractAction,
@@ -6,19 +25,22 @@ import {
   invoiceAction,
   maintenanceActions,
 } from "../actions";
-import { PageHeader } from "../components/PageHeader";
 import {
-  FutureWorkflowCard,
-  WorkflowGalleryCard,
-} from "../components/WorkflowGalleryCard";
-import type { CardTint } from "../components/tints";
-import {
-  deliveryModeLabel,
-  deliveryModePromise,
-  deliveryModeReassurance,
-} from "../messages";
-import { useI18n } from "../i18n";
+  Button,
+  Card,
+  DetailList,
+  EmptyState,
+  Note,
+  PageHead,
+  Row,
+  Rows,
+  Status,
+  TechnicalDetails,
+} from "../components/ui";
+import { useI18n, type TranslationKey, type Translate } from "../i18n";
+import { deliveryModeLabel } from "../messages";
 import { moduleForCommand } from "../moduleReadiness";
+import { activityTone, formatWhen, moduleStatusLabel, moduleTone } from "../statusMapping";
 import type {
   ActivityRecord,
   AppConfigStatus,
@@ -27,211 +49,322 @@ import type {
   ModuleReadiness,
 } from "../types";
 
-/*
-  Automations is a workflow gallery: each hotel task is one card with a
-  consistent shape — what it does, whether it is ready, what happened last,
-  one button, and a plain safety statement. The pre-run "what will happen"
-  panel opens before anything starts (ConfirmationModal).
-*/
+type WorkflowEntry = {
+  action: AutomationAction;
+  icon: LucideIcon;
+  nameKey: TranslationKey;
+  purposeKey: TranslationKey;
+  /** The folder a manager would actually want to open for this workflow. */
+  folderKey?: keyof AppConfigStatus["config"]["folders"];
+};
+
+const [scanAction, ocrAction] = maintenanceActions;
+
+const WORKFLOWS: WorkflowEntry[] = [
+  {
+    action: invoiceAction,
+    icon: FileText,
+    nameKey: "workflow.invoices",
+    purposeKey: "workflow.invoicesPurpose",
+    folderKey: "invoiceInputFolder",
+  },
+  {
+    action: contractAction,
+    icon: FileSignature,
+    nameKey: "workflow.contracts",
+    purposeKey: "workflow.contractsPurpose",
+    folderKey: "contractsOutputFolder",
+  },
+  {
+    action: scanAction,
+    icon: FolderOpen,
+    nameKey: "workflow.scans",
+    purposeKey: "workflow.scansPurpose",
+    folderKey: "scansioniNetworkShare",
+  },
+  {
+    action: ocrAction,
+    icon: ScanText,
+    nameKey: "workflow.ocr",
+    purposeKey: "workflow.ocrPurpose",
+    folderKey: "ocrTextOutputFolder",
+  },
+  {
+    action: gmailReconnectAction,
+    icon: KeyRound,
+    nameKey: "workflow.gmail",
+    purposeKey: "workflow.gmailPurpose",
+  },
+];
+
 export function AutomationsPage({
+  actionDisabledReason,
+  activityHistory,
   configStatus,
   modules,
-  activityHistory,
-  runningCommand,
-  actionDisabledReason,
-  onRun,
-  onOpenPath,
   onNavigate,
+  onOpenPath,
+  onRun,
+  runningCommand,
 }: {
+  actionDisabledReason: (action: AutomationAction) => string | null;
+  activityHistory: ActivityRecord[];
   configStatus: AppConfigStatus | null;
   modules: ModuleReadiness[];
-  activityHistory: ActivityRecord[];
-  runningCommand: string | null;
-  actionDisabledReason: (action: AutomationAction) => string | null;
-  onRun: (action: AutomationAction) => void;
-  onOpenPath: (path?: string | null) => void;
   onNavigate: (page: AppPage) => void;
+  onOpenPath: (path?: string | null) => void;
+  onRun: (action: AutomationAction) => void;
+  runningCommand: string | null;
 }) {
   const { t } = useI18n();
-  const folders = configStatus?.config.folders;
-  const deliveryMode = configStatus?.config.invoiceDeliveryMode;
-  const invoiceSelectionMode = configStatus?.config.invoiceFileSelectionMode;
-  const anyRunning = Boolean(runningCommand);
-  const [copyScansAction, ocrAction] = maintenanceActions;
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
-  function lastRunLabelFor(commandName: string) {
-    const record = [...activityHistory]
-      .reverse()
-      .find((entry) => entry.workflowCommandName === commandName);
-    if (!record) return null;
-    return t("automations.lastRun", {
-      time: formatDate(record.finishedAt),
-      status: shortStatus(record, t),
-    });
-  }
+  // Gmail only belongs in the list when the hotel actually uses it.
+  const visible = WORKFLOWS.filter(
+    (entry) =>
+      entry.action !== gmailReconnectAction ||
+      configStatus?.config.invoiceDeliveryMode !== "prepareOnly",
+  );
 
-  function fixFor(action: AutomationAction) {
-    const module = moduleForCommand(modules, action.commandName);
-    const needsSupport = module?.blockingProblems.some((problem) =>
-      /python|support|script|tool/i.test(problem),
-    );
-    return {
-      label: needsSupport ? t("workflow.blockedOpenSupport") : t("workflow.blockedFixSetup"),
-      onClick: () => onNavigate(needsSupport ? "support" : "setup"),
-    };
-  }
+  const opened = visible.find((entry) => entry.action.commandName === openKey) ?? null;
 
-  function galleryCard(options: {
-    action: AutomationAction;
-    title: string;
-    whatItDoes: string;
-    tint?: CardTint;
-    primaryLabel: string;
-    safety: string;
-    modeChip?: string;
-    links?: { label: string; path?: string | null }[];
-  }) {
-    const { action } = options;
-    const fix = fixFor(action);
+  if (opened) {
     return (
-      <WorkflowGalleryCard
-        icon={action.icon}
-        title={options.title}
-        whatItDoes={options.whatItDoes}
-        tint={options.tint}
-        modeChip={options.modeChip}
-        safety={options.safety}
-        module={moduleForCommand(modules, action.commandName)}
-        lastRunLabel={lastRunLabelFor(action.commandName)}
-        isRunning={runningCommand === action.commandName}
-        anyRunning={anyRunning}
-        disabledReason={actionDisabledReason(action)}
-        primaryLabel={options.primaryLabel}
-        onRun={() => onRun(action)}
-        fixLabel={fix.label}
-        onFix={fix.onClick}
-        links={options.links}
+      <WorkflowDetail
+        activityHistory={activityHistory}
+        configStatus={configStatus}
+        disabledReason={actionDisabledReason(opened.action)}
+        entry={opened}
+        modules={modules}
+        onBack={() => setOpenKey(null)}
+        onFixSetup={() => onNavigate("system")}
         onOpenPath={onOpenPath}
+        onRun={() => onRun(opened.action)}
+        running={runningCommand === opened.action.commandName}
       />
     );
   }
 
   return (
-    <div className="space-y-5">
-      <PageHeader title={t("automations.title")} eyebrow={t("automations.eyebrow")} />
+    <>
+      <PageHead description={t("automations.description")} title={t("automations.title")} />
 
-      <div className="stagger-children grid gap-5 xl:grid-cols-2">
-        {galleryCard({
-          action: invoiceAction,
-          title: t("automations.invoiceTitle"),
-          whatItDoes: invoiceWorkflowPromise(deliveryModePromise(deliveryMode, t), invoiceSelectionMode, t),
-          tint: "sky",
-          modeChip: deliveryModeLabel(deliveryMode, t),
-          primaryLabel: t("automations.invoicePrimary"),
-          safety: deliveryModeReassurance(deliveryMode, t),
-          links: [
-            { label: t("automations.folderInput"), path: folders?.invoiceInputFolder },
-            { label: t("automations.folderReadyInvoices"), path: folders?.invoiceOutputFolder },
-          ],
-        })}
-
-        {galleryCard({
-          action: contractAction,
-          title: t("automations.contractsTitle"),
-          whatItDoes: t("automations.contractsDescription"),
-          tint: "violet",
-          primaryLabel: t("automations.contractsPrimary"),
-          safety: t("automations.contractsSafety"),
-          links: [
-            { label: t("automations.folderSharedScans"), path: folders?.scansioniNetworkShare },
-            { label: t("automations.folderSignedContracts"), path: folders?.contractsOutputFolder },
-          ],
-        })}
-
-        {galleryCard({
-          action: copyScansAction,
-          title: t("automations.scansTitle"),
-          whatItDoes: t("automations.scansDescription"),
-          tint: "amber",
-          primaryLabel: t("automations.scansPrimary"),
-          safety: t("automations.scansSafety"),
-          links: [
-            { label: t("automations.folderSharedScans"), path: folders?.scansioniNetworkShare },
-            { label: t("automations.folderLocalScans"), path: folders?.scansioniLocalCacheFolder },
-          ],
-        })}
-
-        {galleryCard({
-          action: ocrAction,
-          title: t("automations.ocrTitle"),
-          whatItDoes: t("automations.ocrDescription"),
-          tint: "emerald",
-          primaryLabel: t("automations.ocrPrimary"),
-          safety: t("automations.ocrSafety"),
-          links: [
-            { label: t("automations.folderLocalScans"), path: folders?.scansioniLocalCacheFolder },
-            { label: t("automations.folderTextOutput"), path: folders?.ocrTextOutputFolder },
-          ],
-        })}
-
-        {deliveryMode !== "prepareOnly" &&
-          galleryCard({
-            action: gmailReconnectAction,
-            title: t("automations.gmailTitle"),
-            whatItDoes: t("automations.gmailDescription"),
-            tint: "rose",
-            primaryLabel: t("automations.gmailPrimary"),
-            safety: t("confirm.reconnectWont"),
-          })}
-
-        <FutureWorkflowCard
-          icon={Bot}
-          title={t("automations.futureAiTitle")}
-          whatItWillDo={t("automations.futureAiDescription")}
-          tint="violet"
-          chip={t("common.comingSoon")}
-          actionLabel={t("automations.futureAiAction")}
-          onAction={() => onNavigate("assistant")}
-        />
-
-        <FutureWorkflowCard
-          icon={Send}
-          title={t("automations.futureSendTitle")}
-          whatItWillDo={t("automations.futureSendDescription")}
-          tint="sky"
-          chip={t("common.locked")}
-          footnote={t("automations.futureSendFootnote")}
-        />
-      </div>
-    </div>
+      {visible.length === 0 ? (
+        <Card>
+          <EmptyState
+            action={
+              <Button onClick={() => onNavigate("system")} variant="primary">
+                {t("automations.fixSetup")}
+              </Button>
+            }
+            icon={WorkflowIcon}
+            message={t("automations.noneText")}
+            title={t("automations.noneTitle")}
+          />
+        </Card>
+      ) : (
+        <Card>
+          <Rows>
+            {visible.map((entry) => {
+              const module = moduleForCommand(modules, entry.action.commandName);
+              const running = runningCommand === entry.action.commandName;
+              return (
+                <Row
+                  icon={entry.icon}
+                  key={entry.action.commandName}
+                  meta={t(entry.purposeKey)}
+                  onOpen={() => setOpenKey(entry.action.commandName)}
+                  openLabel={`${t(entry.nameKey)} — ${t("automations.open")}`}
+                  status={
+                    running
+                      ? { tone: "running", label: t("automations.running") }
+                      : module
+                        ? {
+                            tone: moduleTone(module.status),
+                            label: moduleStatusLabel(module.status, t),
+                          }
+                        : { tone: "idle", label: t("status.checking") }
+                  }
+                  title={t(entry.nameKey)}
+                />
+              );
+            })}
+          </Rows>
+        </Card>
+      )}
+    </>
   );
 }
 
-function invoiceWorkflowPromise(
-  deliveryPromise: string,
-  selectionMode: string | null | undefined,
-  t: ReturnType<typeof useI18n>["t"],
-) {
-  const selection =
-    selectionMode === "filenamePatterns"
-      ? ` ${t("invoiceSelection.filenamePatternsFact")}`
-      : ` ${t("invoiceSelection.allPdfsFact")}`;
-  return `${deliveryPromise}${selection}`;
+function WorkflowDetail({
+  activityHistory,
+  configStatus,
+  disabledReason,
+  entry,
+  modules,
+  onBack,
+  onFixSetup,
+  onOpenPath,
+  onRun,
+  running,
+}: {
+  activityHistory: ActivityRecord[];
+  configStatus: AppConfigStatus | null;
+  disabledReason: string | null;
+  entry: WorkflowEntry;
+  modules: ModuleReadiness[];
+  onBack: () => void;
+  onFixSetup: () => void;
+  onOpenPath: (path?: string | null) => void;
+  onRun: () => void;
+  running: boolean;
+}) {
+  const { language, t } = useI18n();
+  const module = moduleForCommand(modules, entry.action.commandName);
+  const last = [...activityHistory]
+    .reverse()
+    .find((record) => record.workflowCommandName === entry.action.commandName);
+  const folders = configStatus?.config.folders;
+  const folderPath = entry.folderKey ? folders?.[entry.folderKey] : undefined;
+
+  return (
+    <>
+      <div style={{ marginBottom: 8 }}>
+        <Button onClick={onBack} variant="ghost">
+          {t("automations.back")}
+        </Button>
+      </div>
+
+      <PageHead
+        actions={
+          module?.status === "ready" && !disabledReason ? (
+            <Button busy={running} icon={Play} onClick={onRun} variant="primary">
+              {t("automations.runSafe")}
+            </Button>
+          ) : (
+            <Button onClick={onFixSetup} variant="secondary">
+              {t("automations.fixSetup")}
+            </Button>
+          )
+        }
+        description={t(entry.purposeKey)}
+        title={t(entry.nameKey)}
+      />
+
+      <div className="ip-stack">
+        <Card>
+          <Rows>
+            <Row
+              title={t("automations.whatItDoes")}
+              meta={t(entry.purposeKey)}
+              aside={
+                <Status
+                  label={
+                    running
+                      ? t("automations.running")
+                      : module
+                        ? moduleStatusLabel(module.status, t)
+                        : t("status.checking")
+                  }
+                  tone={running ? "running" : module ? moduleTone(module.status) : "idle"}
+                />
+              }
+            />
+            <Row
+              title={t("automations.recentResult")}
+              meta={
+                last
+                  ? `${formatWhen(last.finishedAt, language, t("common.never"))} · ${itemsHandled(last, t)}`
+                  : t("automations.neverRun")
+              }
+              aside={
+                last ? (
+                  <Status label={activityLabel(last, t)} tone={activityTone(last.status)} />
+                ) : undefined
+              }
+            />
+            {entry.action === invoiceAction ? (
+              <Row
+                title={t("field.invoiceDelivery")}
+                meta={deliveryModeLabel(configStatus?.config.invoiceDeliveryMode, t)}
+              />
+            ) : null}
+            {folderPath ? (
+              <Row
+                title={t("common.folder")}
+                meta={entry.folderKey ? folderMeaning(entry.folderKey, t) : ""}
+                aside={
+                  <Button icon={FolderOpen} onClick={() => onOpenPath(folderPath)} variant="ghost">
+                    {t("automations.openFolder")}
+                  </Button>
+                }
+              />
+            ) : null}
+          </Rows>
+        </Card>
+
+        {disabledReason ? <Note tone="attention">{disabledReason}</Note> : null}
+
+        <TechnicalDetails label={t("automations.advanced")}>
+          <DetailList
+            items={[
+              { label: "Command", value: entry.action.commandName, mono: true },
+              { label: "Workflow key", value: entry.action.workflowKey, mono: true },
+              ...(folderPath ? [{ label: "Folder", value: folderPath, mono: true }] : []),
+              ...(module
+                ? [
+                    { label: "Readiness", value: module.status },
+                    ...(module.blockingProblems.length > 0
+                      ? [{ label: "Blocking", value: module.blockingProblems.join(" · ") }]
+                      : []),
+                    ...(module.warnings.length > 0
+                      ? [{ label: "Warnings", value: module.warnings.join(" · ") }]
+                      : []),
+                  ]
+                : []),
+            ]}
+          />
+        </TechnicalDetails>
+      </div>
+    </>
+  );
 }
 
-function shortStatus(record: ActivityRecord, t: ReturnType<typeof useI18n>["t"]) {
-  if (record.status === "success") return t("status.completed").toLowerCase();
-  if (record.status === "needs_attention") return t("status.needsReview").toLowerCase();
-  if (record.status === "failed") return t("status.needsAttention").toLowerCase();
-  return record.status;
+function itemsHandled(record: ActivityRecord, t: Translate) {
+  const count =
+    record.summary.processed ??
+    record.summary.created ??
+    record.summary.moved ??
+    record.summary.found ??
+    0;
+  return count > 0 ? t("activity.itemsHandled", { count }) : t("activity.noItems");
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
+function activityLabel(record: ActivityRecord, t: Translate) {
+  switch (record.status) {
+    case "success":
+      return t("status.ready");
+    case "needs_attention":
+      return t("status.attention");
+    case "failed":
+      return t("status.problem");
+    default:
+      return t("status.checking");
+  }
 }
 
+function folderMeaning(key: keyof AppConfigStatus["config"]["folders"], t: Translate) {
+  const map: Partial<Record<typeof key, TranslationKey>> = {
+    invoiceInputFolder: "field.invoiceInputMeaning",
+    invoiceOutputFolder: "field.invoiceOutputMeaning",
+    invoiceArchiveFolder: "field.invoiceArchiveMeaning",
+    invoiceLogFolder: "field.invoiceLogMeaning",
+    scansioniNetworkShare: "field.sharedScansMeaning",
+    scansioniLocalCacheFolder: "field.scanCacheMeaning",
+    ocrTextOutputFolder: "field.ocrOutputMeaning",
+    contractsOutputFolder: "field.signedContractsMeaning",
+    contractLogFolder: "field.contractLogMeaning",
+  };
+  const translationKey = map[key];
+  return translationKey ? t(translationKey) : "";
+}

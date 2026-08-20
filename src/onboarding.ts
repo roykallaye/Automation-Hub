@@ -260,7 +260,7 @@ export function recoverOnboardingState() {
 }
 
 export function initialPageForOnboarding(snapshot: OnboardingSnapshot): AppPage {
-  return isOnboardingReady(snapshot) ? "home" : "setup";
+  return isOnboardingReady(snapshot) ? "home" : "system";
 }
 
 export function isOnboardingReady(snapshot: OnboardingSnapshot) {

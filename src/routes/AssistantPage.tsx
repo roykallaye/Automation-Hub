@@ -1,967 +1,246 @@
-import {
-  ClipboardList,
-  Check,
-  Cable,
-  Copy,
-  FileSignature,
-  FileText,
-  Lightbulb,
-  ListChecks,
-  Mail,
-  MessageCircleQuestion,
-  Repeat,
-  RefreshCw,
-  FolderSearch,
-  ShieldCheck,
-  Eye,
-  ScanText,
-  Send,
-  Sparkles,
-  Wand2,
-  Unplug,
-} from "lucide-react";
+/*
+  The local assistant.
+
+  This page answers: is an assistant connected, what can it do, what can it
+  *not* do, what has it been doing, and how do I stop it. The capability lists
+  are short and concrete rather than a wall of security prose, and the "cannot"
+  list is shown with equal weight because that is the reassuring half.
+
+  It is not a chat surface. InnPilot does not need to become another chat app.
+*/
+
+import { Bot, Check, Minus, RefreshCw, Unplug } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { TINT_TILE, type CardTint } from "../components/tints";
-import { useI18n, type TranslationKey } from "../i18n";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  Button,
+  Card,
+  DetailList,
+  EmptyState,
+  IconButton,
+  Note,
+  PageHead,
+  Row,
+  Rows,
+  Section,
+  Status,
+  TechnicalDetails,
+} from "../components/ui";
+import { useI18n } from "../i18n";
 import { commandErrorMessage } from "../onboarding";
-import type { DiscoveryRequest } from "../types";
+import { formatWhen } from "../statusMapping";
+import type { AppPage, DiscoveryManagerView, LocalAgentConnectionStatus } from "../types";
 
-type LocalAgentConnectionStatus = {
-  state: "notConnected" | "connected" | "expired";
-  profileId: string | null;
-  scopes: string[];
-  createdAt: string | null;
-  expiresAt: string | null;
-  lastActivityAt: string | null;
-  lastTool: string | null;
-  lastClientName: string | null;
-  lastProtocolVersion: string | null;
-  helperAvailable: boolean;
-  codexAddCommand: string | null;
-  codexConfigToml: string | null;
-  connectionIsReadOnly: boolean;
-};
-
-type DiscoveryManagerView = {
-  discovery: {
-    scope: null | {
-      scopeId: string;
-      revision: number;
-      state: "active" | "revoked" | "expired";
-      createdAt: string;
-      expiresAt: string;
-      roots: Array<{ rootId: string; displayLabel: string; localPath: string }>;
-    };
-    lastSnapshot: null | {
-      snapshotId: string;
-      createdAt: string;
-      expiresAt: string;
-      digest: string;
-      truncated: boolean;
-    };
-    privacySummary: string;
-  };
-  proposal: null | {
-    proposalId: string;
-    revision: number;
-    status: string;
-    targetConfigurationRevision: string;
-    changedFields: string[];
-    warnings: string[];
-    unresolvedQuestions: string[];
-    agentConfidence: number | null;
-    proposalDigest: string;
-    createdAt: string;
-    invalidationReason: string | null;
-    localPaths: Array<{ field: string; localPath: string; evidenceRef: string }>;
-    reviewOnly: boolean;
-    mutationPerformed: boolean;
-  };
-  review: null | {
-    fields: Array<{
-      field: string;
-      currentValue: string;
-      proposedValue: string;
-      evidence: string;
-      validation: string;
-    }>;
-    willNotChange: string[];
-    approvalEligible: boolean;
-  };
-  application: null | {
-    proposalId: string;
-    operationId: string;
-    status: string;
-    approvedAt: string;
-    completedAt: string | null;
-    deferredItems: string[];
-    blockerKeys: string[];
-    safeFailureCode: string | null;
-  };
-};
-
-type ProposalApplyResult = {
-  outcome: "ready" | "readyWithDeferredItems" | "rolledBack" | "failedRecoverable" | "replayed";
-  proposalId: string;
-  operationId: string;
-  deferredItems: string[];
-  blockerKeys: string[];
-};
-
-type FrequentRequest = {
-  icon: typeof Mail;
-  tint: CardTint;
-  titleKey: TranslationKey;
-  promptKey: TranslationKey;
-  planStepKeys: TranslationKey[];
-};
-
-const FREQUENT_REQUESTS: FrequentRequest[] = [
-  {
-    icon: FileText,
-    tint: "sky",
-    titleKey: "assistant.requestInvoices",
-    promptKey: "assistant.promptInvoices",
-    planStepKeys: [
-      "assistant.invoiceStep1",
-      "assistant.invoiceStep2",
-      "assistant.invoiceStep3",
-      "assistant.invoiceStep4",
-    ],
-  },
-  {
-    icon: FileSignature,
-    tint: "violet",
-    titleKey: "assistant.requestContracts",
-    promptKey: "assistant.promptContracts",
-    planStepKeys: [
-      "assistant.contractStep1",
-      "assistant.contractStep2",
-      "assistant.contractStep3",
-      "assistant.contractStep4",
-    ],
-  },
-  {
-    icon: ScanText,
-    tint: "amber",
-    titleKey: "assistant.requestScans",
-    promptKey: "assistant.promptScans",
-    planStepKeys: [
-      "assistant.scansStep1",
-      "assistant.scansStep2",
-      "assistant.scansStep3",
-      "assistant.scansStep4",
-    ],
-  },
-  {
-    icon: Mail,
-    tint: "rose",
-    titleKey: "assistant.requestGuestEmails",
-    promptKey: "assistant.promptGuestEmails",
-    planStepKeys: [
-      "assistant.guestStep1",
-      "assistant.guestStep2",
-      "assistant.guestStep3",
-      "assistant.guestStep4",
-    ],
-  },
-  {
-    icon: ClipboardList,
-    tint: "emerald",
-    titleKey: "assistant.requestSummary",
-    promptKey: "assistant.promptSummary",
-    planStepKeys: [
-      "assistant.summaryStep1",
-      "assistant.summaryStep2",
-      "assistant.summaryStep3",
-      "assistant.summaryStep4",
-    ],
-  },
-  {
-    icon: Repeat,
-    tint: "brand",
-    titleKey: "assistant.requestIdeas",
-    promptKey: "assistant.promptIdeas",
-    planStepKeys: [
-      "assistant.ideasStep1",
-      "assistant.ideasStep2",
-      "assistant.ideasStep3",
-      "assistant.ideasStep4",
-    ],
-  },
-];
-
-const SUGGESTED_QUESTION_KEYS: TranslationKey[] = [
-  "assistant.question1",
-  "assistant.question2",
-  "assistant.question3",
-  "assistant.question4",
-];
-
-const HOW_STEP_KEYS: TranslationKey[] = [
-  "assistant.howStep1",
-  "assistant.howStep2",
-  "assistant.howStep3",
-  "assistant.howStep4",
-];
-
-const GENERIC_PLAN_STEP_KEYS: TranslationKey[] = [
-  "assistant.genericStep1",
-  "assistant.genericStep2",
-  "assistant.genericStep3",
-  "assistant.genericStep4",
-];
-
-function LocalAgentConnectionPanel() {
-  const { t } = useI18n();
-  const [status, setStatus] = useState<LocalAgentConnectionStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function refresh() {
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await invoke<LocalAgentConnectionStatus>("get_local_agent_connection"));
-    } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  async function createConnection() {
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await invoke<LocalAgentConnectionStatus>("create_local_agent_connection"));
-    } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function revokeConnection() {
-    setBusy(true);
-    setError(null);
-    try {
-      setStatus(await invoke<LocalAgentConnectionStatus>("revoke_local_agent_connection"));
-    } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function copyCommand() {
-    if (!status?.codexAddCommand) return;
-    try {
-      await navigator.clipboard.writeText(status.codexAddCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setError(t("assistant.copyFailed"));
-    }
-  }
-
-  const connected = status?.state === "connected";
-  const date = (value: string | null | undefined) =>
-    value
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-          new Date(value),
-        )
-      : t("assistant.neverUsed");
-
-  return (
-    <section className="rounded-xl border border-white/70 bg-white/70 p-5 shadow-glass backdrop-blur-xl">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-white">
-            <Cable className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-slate-950">
-                {t("assistant.localConnectionTitle")}
-              </h2>
-              <span
-                className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                  connected
-                    ? "bg-emerald-100 text-emerald-900"
-                    : "bg-slate-100 text-slate-700"
-                }`}
-              >
-                {connected
-                  ? t("assistant.connected")
-                  : status?.state === "expired"
-                    ? t("assistant.expired")
-                    : t("assistant.notConnected")}
-              </span>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-              {t("assistant.localConnectionText")}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:opacity-50"
-            disabled={busy}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
-            {t("assistant.checkConnection")}
-          </button>
-          {connected ? (
-            <button
-              className="inline-flex min-h-10 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-50 disabled:opacity-50"
-              disabled={busy}
-              onClick={() => void revokeConnection()}
-            >
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-              {t("assistant.revokeConnection")}
-            </button>
-          ) : (
-            <button
-              className="inline-flex min-h-10 items-center gap-2 rounded-md bg-cta px-4 text-sm font-semibold text-white transition hover:bg-cta-soft disabled:opacity-50"
-              disabled={busy}
-              onClick={() => void createConnection()}
-            >
-              <Cable className="h-4 w-4" aria-hidden="true" />
-              {t("assistant.createConnection")}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {connected && status && (
-        <div className="mt-5 border-t border-slate-200 pt-4">
-          <div className="grid gap-4 text-sm sm:grid-cols-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                {t("assistant.access")}
-              </p>
-              <p className="mt-1 font-semibold text-slate-900">
-                {t("assistant.readOnlyAccess")}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                {t("assistant.expires")}
-              </p>
-              <p className="mt-1 font-semibold text-slate-900">{date(status.expiresAt)}</p>
-            </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                {t("assistant.lastActivity")}
-              </p>
-              <p className="mt-1 font-semibold text-slate-900">{date(status.lastActivityAt)}</p>
-              {status.lastClientName && (
-                <p className="mt-0.5 text-xs font-medium text-slate-500">
-                  {status.lastClientName}
-                  {status.lastProtocolVersion ? ` · MCP ${status.lastProtocolVersion}` : ""}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button
-              className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
-              disabled={!status.helperAvailable || !status.codexAddCommand}
-              onClick={() => void copyCommand()}
-            >
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied ? t("assistant.copied") : t("assistant.copyCodexSetup")}
-            </button>
-            <p className="text-xs font-medium leading-5 text-slate-500">
-              {status.helperAvailable
-                ? t("assistant.codexSetupHint")
-                : t("assistant.helperUnavailable")}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">
-          {error}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function EnvironmentDiscoveryPanel() {
-  const { t } = useI18n();
-  const [view, setView] = useState<DiscoveryManagerView | null>(null);
-  const [selectedRoots, setSelectedRoots] = useState<string[]>([]);
+export function AssistantPage({
+  agent,
+  discovery,
+  onAgentChange,
+  onNavigate,
+  onRefresh,
+}: {
+  agent: LocalAgentConnectionStatus | null;
+  discovery: DiscoveryManagerView | null;
+  onAgentChange: (status: LocalAgentConnectionStatus) => void;
+  onNavigate: (page: AppPage) => void;
+  onRefresh: () => void;
+}) {
+  const { language, t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showProposal, setShowProposal] = useState(false);
-  const [applyResult, setApplyResult] = useState<ProposalApplyResult | null>(null);
-  const approvalRequestRef = useRef<{ proposalKey: string; requestId: string } | null>(null);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
 
-  async function refresh() {
+  const connected = agent?.state === "connected";
+  const expired = agent?.state === "expired";
+
+  async function disconnect() {
+    setConfirmingDisconnect(false);
     setBusy(true);
     setError(null);
     try {
-      setView(await invoke<DiscoveryManagerView>("get_environment_discovery_status"));
+      onAgentChange(await invoke<LocalAgentConnectionStatus>("revoke_local_agent_connection"));
     } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
     } finally {
       setBusy(false);
     }
   }
 
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  async function chooseRoots() {
-    const selected = await open({ directory: true, multiple: true, title: t("assistant.chooseFolders") });
-    if (!selected) return;
-    const roots = (Array.isArray(selected) ? selected : [selected]).filter(
-      (value): value is string => typeof value === "string" && Boolean(value.trim()),
-    );
-    setSelectedRoots(Array.from(new Set(roots)).slice(0, 3));
-  }
-
-  async function approve() {
-    if (!selectedRoots.length) return;
+  async function connect() {
     setBusy(true);
     setError(null);
     try {
-      setView(
-        await invoke<DiscoveryManagerView>("approve_environment_discovery", {
-          request: { roots: selectedRoots, confirmed: true },
-        }),
-      );
-      setSelectedRoots([]);
+      onAgentChange(await invoke<LocalAgentConnectionStatus>("create_local_agent_connection"));
     } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
+      setError(commandErrorMessage(problem, t("assistant.connectionUnavailable")));
     } finally {
       setBusy(false);
     }
   }
-
-  async function revoke() {
-    setBusy(true);
-    setError(null);
-    try {
-      setView(await invoke<DiscoveryManagerView>("revoke_environment_discovery"));
-    } catch (problem) {
-      setError(commandErrorMessage(problem, t("assistant.discoveryUnavailable")));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approveAndFinish() {
-    const proposal = view?.proposal;
-    if (!proposal || !view?.review?.approvalEligible) return;
-    const proposalKey = `${proposal.proposalId}:${proposal.revision}:${proposal.proposalDigest}`;
-    if (approvalRequestRef.current?.proposalKey !== proposalKey) {
-      approvalRequestRef.current = {
-        proposalKey,
-        requestId: `phasef-ui-${crypto.randomUUID()}`,
-      };
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await invoke<ProposalApplyResult>("approve_and_apply_setup_proposal", {
-        request: {
-          proposalId: proposal.proposalId,
-          proposalRevision: proposal.revision,
-          proposalDigest: proposal.proposalDigest,
-          requestId: approvalRequestRef.current.requestId,
-          confirmed: true,
-        },
-      });
-      setApplyResult(result);
-      approvalRequestRef.current = null;
-      await refresh();
-    } catch (problem) {
-      const message = commandErrorMessage(problem, t("assistant.proposalApplyFailed"));
-      let authoritativeOutcomeLoaded = false;
-      try {
-        const authoritative = await invoke<DiscoveryManagerView>("get_environment_discovery_status");
-        setView(authoritative);
-        const application = authoritative.application;
-        if (application?.proposalId === proposal.proposalId) {
-          authoritativeOutcomeLoaded = [
-            "succeeded",
-            "rolled_back",
-            "failed_recoverable",
-          ].includes(application.status);
-        }
-        if (authoritativeOutcomeLoaded || application?.status === "invalidated") {
-          approvalRequestRef.current = null;
-        }
-      } catch {
-        // Keep the same request ID. A later click can safely ask the backend
-        // for the authoritative outcome without creating another operation.
-      }
-      setError(authoritativeOutcomeLoaded ? null : message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const scope = view?.discovery.scope;
-  const active = scope?.state === "active";
-  const formatDate = (value?: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-          new Date(value),
-        )
-      : t("assistant.neverUsed");
 
   return (
-    <section className="rounded-xl border border-white/70 bg-white/70 p-5 shadow-glass backdrop-blur-xl">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-white">
-            <FolderSearch className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold text-slate-950">
-                {t("assistant.discoveryAccessTitle")}
-              </h2>
-              <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                active ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-700"
-              }`}>
-                {active ? t("assistant.discoveryActive") : t("assistant.discoveryInactive")}
-              </span>
-            </div>
-            <p className="mt-1 max-w-3xl text-sm font-medium leading-6 text-slate-600">
-              {t("assistant.discoveryPrivacy")}
-            </p>
-          </div>
-        </div>
-        <button
-          aria-label={t("assistant.checkConnection")}
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-          disabled={busy}
-          onClick={() => void refresh()}
-        >
-          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-        </button>
-      </div>
+    <>
+      <PageHead
+        actions={<IconButton busy={busy} icon={RefreshCw} label={t("assistant.check")} onClick={onRefresh} />}
+        description={t("assistant.description")}
+        title={t("assistant.title")}
+      />
 
-      {active && scope ? (
-        <div className="mt-5 border-t border-slate-200 pt-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {scope.roots.map((root) => (
-              <div key={root.rootId} className="min-w-0 rounded-lg bg-slate-50 px-3 py-2.5">
-                <p className="truncate text-sm font-semibold text-slate-900">{root.displayLabel}</p>
-                <p className="mt-0.5 truncate text-xs font-medium text-slate-500">{root.localPath}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs font-medium text-slate-500">
-            <span>{t("assistant.lastDiscovery")}: {formatDate(view?.discovery.lastSnapshot?.createdAt)}</span>
-            <button
-              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 font-semibold text-rose-800 transition hover:bg-rose-50 disabled:opacity-50"
-              disabled={busy}
-              onClick={() => void revoke()}
-            >
-              <Unplug className="h-4 w-4" />
-              {t("assistant.revokeDiscovery")}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-5 border-t border-slate-200 pt-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
-              disabled={busy}
-              onClick={() => void chooseRoots()}
-            >
-              <FolderSearch className="h-4 w-4" />
-              {t("assistant.chooseFolders")}
-            </button>
-            <button
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
-              disabled={busy || !selectedRoots.length}
-              onClick={() => void approve()}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {t("assistant.allowInspection")}
-            </button>
-            <p className="text-xs font-medium text-slate-500">
-              {selectedRoots.length
-                ? t("assistant.foldersSelected", { count: selectedRoots.length })
-                : t("assistant.selectUpToThree")}
-            </p>
-          </div>
-        </div>
-      )}
+      <div className="ip-stack">
+        {error ? <Note tone="problem">{error}</Note> : null}
 
-      {view?.proposal && (
-        <div className="mt-5 border-t border-slate-200 pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-950">{t("assistant.proposalReady")}</p>
-              <p className="mt-0.5 text-xs font-medium text-slate-500">
-                {t("assistant.reviewOnly")} · {formatDate(view.proposal.createdAt)}
-              </p>
-            </div>
-            <button
-              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              onClick={() => setShowProposal((current) => !current)}
-            >
-              <Eye className="h-4 w-4" />
-              {showProposal ? t("assistant.closeProposal") : t("assistant.openProposal")}
-            </button>
-          </div>
-          {showProposal && (
-            <div className="mt-4 text-sm">
-              <h3 className="font-semibold text-slate-950">{t("assistant.whatFound")}</h3>
-              <p className="mt-1 text-slate-600">{t("assistant.proposalFoundSummary")}</p>
-              <h3 className="mt-5 border-t border-slate-200 pt-4 font-semibold text-slate-950">
-                {t("assistant.whatWillChange")}
-              </h3>
-              <div className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                {view.review?.fields.map((field) => (
-                  <div key={field.field} className="grid gap-2 border-b border-slate-100 p-3 last:border-b-0 sm:grid-cols-[minmax(9rem,0.7fr)_1fr_1fr]">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{field.field}</p>
-                      <p className="mt-1 text-xs font-medium text-emerald-700">{field.validation}</p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("assistant.currentValue")}</p>
-                      <p className="mt-1 break-all font-medium text-slate-600">{field.currentValue}</p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("assistant.proposedValue")}</p>
-                      <p className="mt-1 break-all font-semibold text-slate-900">{field.proposedValue}</p>
-                      <p className="mt-1 text-xs text-slate-500">{field.evidence}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <h3 className="mt-5 font-semibold text-slate-950">{t("assistant.whatWillNotChange")}</h3>
-              <ul className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                {view.review?.willNotChange.map((item) => (
-                  <li key={item}>✓ {t(`assistant.${item}` as Parameters<typeof t>[0])}</li>
-                ))}
-              </ul>
-              {view.proposal.unresolvedQuestions.length > 0 && (
-                <div className="mt-3 border-t border-slate-200 pt-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                    {t("assistant.needsClarification")}
-                  </p>
-                  <ul className="mt-1 space-y-1 text-slate-700">
-                    {view.proposal.unresolvedQuestions.map((question) => <li key={question}>• {question}</li>)}
-                  </ul>
-                </div>
-              )}
-              <p className="mt-3 break-all text-[11px] font-medium text-slate-400">
-                {view.proposal.proposalDigest}
-              </p>
-              <div className="mt-5 border-t border-slate-200 pt-4">
-                <p className="max-w-3xl text-sm font-medium leading-6 text-slate-600">
-                  {t("assistant.approvalExplanation")}
-                </p>
-                <button
-                  className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
-                  disabled={busy || !view.review?.approvalEligible}
-                  onClick={() => void approveAndFinish()}
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  {t("assistant.approveAndFinish")}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {(applyResult || view?.application) && (
-        <div className="mt-5 border-t border-slate-200 pt-4">
-          <p className="font-semibold text-slate-950">
-            {(applyResult?.outcome === "rolledBack" || view?.application?.status === "rolled_back")
-              ? t("assistant.setupRolledBack")
-              : (applyResult?.outcome === "failedRecoverable" || view?.application?.status === "failed_recoverable")
-                ? t("assistant.setupNeedsRecovery")
-                : t("assistant.setupReady")}
-          </p>
-          {(applyResult?.deferredItems.length || view?.application?.deferredItems.length) ? (
-            <p className="mt-1 text-sm text-slate-600">{t("assistant.optionalConnectionsLater")}</p>
-          ) : null}
-        </div>
-      )}
-
-      {error && <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">{error}</p>}
-    </section>
-  );
-}
-
-export function AssistantPage() {
-  const { t } = useI18n();
-  const [request, setRequest] = useState("");
-  const [selected, setSelected] = useState<FrequentRequest | null>(null);
-  const [customPreview, setCustomPreview] = useState<string | null>(null);
-  const [savingBrief, setSavingBrief] = useState(false);
-  const [savedBrief, setSavedBrief] = useState<DiscoveryRequest | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  function choose(card: FrequentRequest) {
-    setSelected(card);
-    setCustomPreview(null);
-    setRequest(t(card.promptKey));
-    setSavedBrief(null);
-    setSaveError(null);
-  }
-
-  function previewCustom() {
-    if (!request.trim()) return;
-    setSelected(null);
-    setCustomPreview(request.trim());
-    setSavedBrief(null);
-    setSaveError(null);
-  }
-
-  async function saveDiscoveryBrief() {
-    if (!request.trim()) return;
-    setSavingBrief(true);
-    setSaveError(null);
-    try {
-      const stepKeys = selected?.planStepKeys ?? GENERIC_PLAN_STEP_KEYS;
-      const result = await invoke<DiscoveryRequest>("create_discovery_request", {
-        draft: {
-          description: request.trim(),
-          suggestedSteps: stepKeys.map((stepKey) => t(stepKey)),
-        },
-      });
-      setSavedBrief(result);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSavingBrief(false);
-    }
-  }
-
-  const showingPlan = selected || customPreview;
-
-  return (
-    <div className="space-y-5">
-      <PageHeader title={t("assistant.title")} eyebrow={t("assistant.eyebrow")} />
-
-      <LocalAgentConnectionPanel />
-      <EnvironmentDiscoveryPanel />
-
-      <section className="overflow-hidden rounded-xl border border-brand-100 bg-white/55 shadow-glass backdrop-blur-xl">
-        <div className="bg-[linear-gradient(120deg,rgb(var(--brand-50))_0%,transparent_60%)] p-6 sm:p-7">
-          <div className="flex items-start gap-4">
-            <div
-              aria-hidden="true"
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-brand-800 text-white shadow-sm"
-            >
-              <Wand2 className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                  {t("assistant.heroTitle")}
-                </h2>
-                <span className="inline-flex rounded-full bg-brand-800 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-                  {t("assistant.badge")}
-                </span>
-              </div>
-              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-                {t("assistant.heroText")}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-800">
-                {t("assistant.question")}
-              </span>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  className="w-full rounded-md border border-white/70 bg-white/85 px-4 py-3 text-sm font-medium text-slate-900 outline-none ring-1 ring-transparent transition placeholder:text-slate-400 focus:border-brand-200 focus:ring-brand-200"
-                  value={request}
-                  onChange={(event) => setRequest(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") previewCustom();
-                  }}
-                  placeholder={t("assistant.placeholder")}
-                />
-                <button
-                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-cta px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!request.trim()}
-                  onClick={previewCustom}
-                >
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  {t("assistant.previewPlan")}
-                </button>
-              </div>
-            </label>
-            <p className="mt-2 text-xs font-semibold text-slate-500">
-              {t("assistant.previewOnly")}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {showingPlan && (
-        <section className="animate-rise rounded-xl border border-brand-100 bg-brand-50/70 p-5 shadow-glass">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white/80 text-brand-800 ring-1 ring-brand-100">
-              <ListChecks className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-wide text-brand-800">
-                {t("assistant.planPreview")}
-              </p>
-              <h3 className="mt-0.5 text-lg font-semibold text-slate-950">
-                {selected ? t(selected.titleKey) : `"${customPreview}"`}
-              </h3>
-            </div>
-          </div>
-          <ol className="mt-4 space-y-2">
-            {(selected?.planStepKeys ?? GENERIC_PLAN_STEP_KEYS).map((stepKey, index) => (
-              <li
-                key={stepKey}
-                className="flex items-start gap-3 rounded-md bg-white/70 px-3 py-2.5 text-sm font-medium leading-6 text-slate-800"
-              >
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-800 text-[11px] font-bold text-white">
-                  {index + 1}
-                </span>
-                {t(stepKey)}
-              </li>
-            ))}
-          </ol>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-cta px-5 text-sm font-semibold text-white transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={savingBrief || Boolean(savedBrief)}
-              onClick={saveDiscoveryBrief}
-            >
-              <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />
-              {savingBrief
-                ? t("assistant.savingBrief")
-                : savedBrief
-                  ? t("assistant.briefSaved")
-                  : t("assistant.saveBrief")}
-            </button>
-            <span className="text-xs font-semibold text-slate-500">
-              {savedBrief ? t("assistant.briefSavedNote") : t("assistant.localBriefNote")}
+        <Card pad>
+          <div style={{ alignItems: "center", display: "flex", gap: 11, marginBottom: 6 }}>
+            <span aria-hidden="true" className={`ip-headline__mark is-${connected ? "ready" : "attention"}`}>
+              <Bot size={15} />
             </span>
+            <h2 style={{ fontSize: "1.05rem", fontWeight: 650, margin: 0 }}>
+              {connected
+                ? t("assistant.connectedHeading")
+                : expired
+                  ? t("assistant.expiredHeading")
+                  : t("assistant.notConnectedHeading")}
+            </h2>
+            <Status
+              label={connected ? t("status.connected") : t("status.notConnected")}
+              tone={connected ? "ready" : "idle"}
+            />
           </div>
-          {saveError && (
-            <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900">
-              {saveError}
-            </p>
-          )}
-        </section>
-      )}
+          <p style={{ color: "var(--ip-muted)", fontSize: "0.9rem", margin: 0, maxWidth: "58ch" }}>
+            {connected
+              ? t("assistant.connectedText")
+              : expired
+                ? t("assistant.expiredText")
+                : t("assistant.notConnectedText")}
+          </p>
 
-      <section>
-        <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">
-          {t("assistant.frequent")}
-        </h3>
-        <div className="stagger-children grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {FREQUENT_REQUESTS.map((card) => {
-            const Icon = card.icon;
-            const active = selected?.titleKey === card.titleKey;
-            return (
-              <button
-                key={card.titleKey}
-                className={[
-                  "card-lift rounded-xl border p-4 text-left shadow-glass backdrop-blur-xl",
-                  active
-                    ? "border-brand-300 bg-brand-50/80 ring-2 ring-brand-200"
-                    : "border-white/65 bg-white/55 hover:bg-white/75",
-                ].join(" ")}
-                onClick={() => choose(card)}
+          <div className="ip-actions" style={{ marginTop: 16 }}>
+            {connected ? (
+              <Button
+                busy={busy}
+                icon={Unplug}
+                onClick={() => setConfirmingDisconnect(true)}
+                variant="danger"
               >
-                <div
-                  aria-hidden="true"
-                  className={`grid h-10 w-10 place-items-center rounded-lg ring-1 ${TINT_TILE[card.tint]}`}
-                >
-                  <Icon className="h-5 w-5" />
-                </div>
-                <p className="mt-3 text-sm font-semibold text-slate-950">{t(card.titleKey)}</p>
-                <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
-                  "{t(card.promptKey)}"
-                </p>
-              </button>
-            );
-          })}
+                {t("assistant.disconnect")}
+              </Button>
+            ) : (
+              <Button busy={busy} icon={Bot} onClick={connect} variant="primary">
+                {expired ? t("assistant.reconnect") : t("assistant.connect")}
+              </Button>
+            )}
+            <Button onClick={() => onNavigate("guide")} variant="ghost">
+              {t("home.howItWorks")}
+            </Button>
+          </div>
+        </Card>
+
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+          <Section title={t("assistant.canDo")}>
+            <Card>
+              <Rows>
+                <Capability allowed label={t("assistant.canCheckSetup")} />
+                <Capability allowed label={t("assistant.canPrepare")} />
+                <Capability allowed label={t("assistant.canDiagnose")} />
+              </Rows>
+            </Card>
+          </Section>
+
+          <Section title={t("assistant.cannotDo")}>
+            <Card>
+              <Rows>
+                <Capability label={t("assistant.cannotApprove")} />
+                <Capability label={t("assistant.cannotRun")} />
+                <Capability label={t("assistant.cannotRead")} />
+              </Rows>
+            </Card>
+          </Section>
         </div>
-      </section>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-amber-tile ring-1">
-              <Lightbulb className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-slate-950">
-                {t("assistant.questionsTitle")}
-              </h3>
-              <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
-                {t("assistant.questionsText")}
-              </p>
-            </div>
-          </div>
-          <ul className="mt-4 space-y-2">
-            {SUGGESTED_QUESTION_KEYS.map((questionKey) => (
-              <li
-                key={questionKey}
-                className="rounded-md bg-white/60 px-3 py-2.5 text-sm font-medium leading-6 text-slate-700"
-              >
-                "{t(questionKey)}"
-              </li>
-            ))}
-          </ul>
-        </section>
+        <Note tone="quiet">{t("assistant.approvalStays")}</Note>
 
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
-              <Send className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-slate-950">{t("assistant.howTitle")}</h3>
-              <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
-                {t("assistant.howText")}
-              </p>
-            </div>
-          </div>
-          <ol className="mt-4 space-y-2">
-            {HOW_STEP_KEYS.map((stepKey, index) => (
-              <li
-                key={stepKey}
-                className="flex items-start gap-3 rounded-md bg-white/60 px-3 py-2.5 text-sm font-medium leading-6 text-slate-700"
-              >
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-100 text-[11px] font-bold text-brand-900">
-                  {index + 1}
-                </span>
-                {t(stepKey)}
-              </li>
-            ))}
-          </ol>
-        </section>
+        <Section title={t("assistant.recentActivity")}>
+          <Card>
+            {agent?.lastActivityAt ? (
+              <Rows>
+                <Row
+                  meta={[
+                    formatWhen(agent.lastActivityAt, language, t("common.never")),
+                    agent.lastClientName,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  title={t("assistant.lastActive", {
+                    time: formatWhen(agent.lastActivityAt, language, t("common.never")),
+                  })}
+                />
+              </Rows>
+            ) : (
+              <EmptyState
+                icon={Bot}
+                message={t("assistant.noActivityText")}
+                title={t("assistant.noActivityTitle")}
+              />
+            )}
+          </Card>
+        </Section>
+
+        <TechnicalDetails label={t("assistant.technical")}>
+          <DetailList
+            items={[
+              { label: "State", value: agent?.state ?? "—" },
+              { label: "Profile", value: agent?.profileId ?? "—", mono: true },
+              { label: "Scopes", value: agent?.scopes.join(", ") || "—" },
+              {
+                label: "Access",
+                value: agent?.connectionIsReadOnly === false ? "read/write" : "read-only",
+              },
+              { label: "Created", value: agent?.createdAt ?? "—" },
+              { label: "Expires", value: agent?.expiresAt ?? "—" },
+              { label: "MCP client", value: agent?.lastClientName ?? "—" },
+              { label: "MCP protocol", value: agent?.lastProtocolVersion ?? "—" },
+              { label: "Last tool", value: agent?.lastTool ?? "—", mono: true },
+              { label: "Helper available", value: String(agent?.helperAvailable ?? false) },
+              {
+                label: "Discovery scope",
+                value: discovery?.discovery.scope
+                  ? `${discovery.discovery.scope.scopeId} · ${discovery.discovery.scope.state}`
+                  : "—",
+                mono: true,
+              },
+              { label: "Privacy", value: discovery?.discovery.privacySummary ?? "—" },
+            ]}
+          />
+        </TechnicalDetails>
       </div>
+
+      {confirmingDisconnect ? (
+        <ConfirmDialog
+          cancelLabel={t("common.cancel")}
+          confirmLabel={t("assistant.disconnect")}
+          message={t("assistant.disconnectText")}
+          onCancel={() => setConfirmingDisconnect(false)}
+          onConfirm={() => void disconnect()}
+          title={t("assistant.disconnectTitle")}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** A capability line. The dash for "cannot" keeps meaning off colour alone. */
+function Capability({ allowed = false, label }: { allowed?: boolean; label: string }) {
+  return (
+    <div className="ip-row" style={{ minHeight: 44 }}>
+      <span className="ip-row__icon" style={{ color: allowed ? "var(--ip-ready)" : "var(--ip-faint)" }}>
+        {allowed ? <Check aria-hidden="true" size={16} /> : <Minus aria-hidden="true" size={16} />}
+      </span>
+      <span className="ip-row__body">
+        <span className="ip-row__title" style={{ fontWeight: 550 }}>
+          {label}
+        </span>
+      </span>
     </div>
   );
 }

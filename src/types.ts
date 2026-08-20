@@ -12,11 +12,14 @@ export type ActivityMode = "dry_run" | "execute" | "unknown";
 export type AppPage =
   | "home"
   | "automations"
-  | "setup"
   | "activity"
-  | "settings"
   | "assistant"
-  | "support";
+  /** Formerly "Setup". After onboarding its job is reporting status, not configuring. */
+  | "system"
+  | "settings"
+  | "support"
+  /** "How InnPilot works" — the plain-language explanation of the whole flow. */
+  | "guide";
 
 export type ReadinessStatus =
   | "ready"
@@ -354,4 +357,127 @@ export type DesktopServiceStatus = {
   launchAtSignIn: boolean;
   keepsRunningWhenClosed: boolean;
   changesAvailable: boolean;
+};
+
+/* ---------------------------------------------------------------------------
+   Local agent (MCP) and bounded discovery.
+
+   These mirror the Rust views returned by get_local_agent_connection and
+   get_environment_discovery_status. They are backend truth: the UI renders
+   them and never recomputes eligibility, validity or readiness from them.
+   --------------------------------------------------------------------------- */
+
+export type LocalAgentConnectionState = "notConnected" | "connected" | "expired";
+
+export type LocalAgentConnectionStatus = {
+  state: LocalAgentConnectionState;
+  profileId: string | null;
+  scopes: string[];
+  createdAt: string | null;
+  expiresAt: string | null;
+  lastActivityAt: string | null;
+  lastTool: string | null;
+  lastClientName: string | null;
+  lastProtocolVersion: string | null;
+  helperAvailable: boolean;
+  codexAddCommand: string | null;
+  codexConfigToml: string | null;
+  connectionIsReadOnly: boolean;
+};
+
+export type DiscoveryScopeRoot = {
+  rootId: string;
+  displayLabel: string;
+  localPath: string;
+};
+
+export type DiscoveryScope = {
+  scopeId: string;
+  revision: number;
+  state: "active" | "revoked" | "expired";
+  createdAt: string;
+  expiresAt: string;
+  roots: DiscoveryScopeRoot[];
+};
+
+export type DiscoverySnapshotInfo = {
+  snapshotId: string;
+  createdAt: string;
+  expiresAt: string;
+  digest: string;
+  truncated: boolean;
+};
+
+export type ManagerSetupProposal = {
+  proposalId: string;
+  revision: number;
+  status: string;
+  targetConfigurationRevision: string;
+  changedFields: string[];
+  warnings: string[];
+  unresolvedQuestions: string[];
+  agentConfidence: number | null;
+  proposalDigest: string;
+  createdAt: string;
+  invalidationReason: string | null;
+  localPaths: Array<{ field: string; localPath: string; evidenceRef: string }>;
+  reviewOnly: boolean;
+  mutationPerformed: boolean;
+};
+
+export type ManagerProposalReviewField = {
+  field: string;
+  currentValue: string;
+  proposedValue: string;
+  evidence: string;
+  validation: string;
+};
+
+export type ManagerProposalReview = {
+  fields: ManagerProposalReviewField[];
+  willNotChange: string[];
+  /** Authoritative. The approve button is enabled only when the backend says so. */
+  approvalEligible: boolean;
+};
+
+export type ManagerProposalApplySummary = {
+  proposalId: string;
+  operationId: string;
+  status: string;
+  approvedAt: string;
+  completedAt: string | null;
+  deferredItems: string[];
+  blockerKeys: string[];
+  safeFailureCode: string | null;
+};
+
+export type DiscoveryManagerView = {
+  discovery: {
+    scope: DiscoveryScope | null;
+    lastSnapshot: DiscoverySnapshotInfo | null;
+    privacySummary: string;
+  };
+  proposal: ManagerSetupProposal | null;
+  review: ManagerProposalReview | null;
+  application: ManagerProposalApplySummary | null;
+};
+
+export type ProposalApplyResult = {
+  outcome: "ready" | "readyWithDeferredItems" | "rolledBack" | "failedRecoverable" | "replayed";
+  proposalId: string;
+  operationId: string;
+  deferredItems: string[];
+  blockerKeys: string[];
+};
+
+export type LifeDeskConnectionState = "notConnected" | "pairingIncomplete" | "connected";
+
+export type LifeDeskConnectionStatus = {
+  state: LifeDeskConnectionState;
+  installationLabel?: string | null;
+  keyFingerprintShort?: string | null;
+  pairedAt?: string | null;
+  lastSyncAt?: string | null;
+  protocolVersion: number;
+  privateKeyProtection: "windowsCurrentUser";
 };

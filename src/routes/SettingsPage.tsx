@@ -1,245 +1,197 @@
+/*
+  Hotel settings — only what a manager actually owns.
+
+  Identity, language, appearance and connections. Anything that is really
+  automation plumbing (delivery mode, safety switches, storage location, email
+  templates) sits under "Advanced", so hotel name and theme are not filed next
+  to implementation internals.
+*/
+
 import { invoke } from "@tauri-apps/api/core";
+import { Building2, CloudCog, Bot, Languages } from "lucide-react";
 import { useState } from "react";
-import {
-  Building2,
-  Cable,
-  Laptop,
-  Mail,
-  MonitorSmartphone,
-  ShieldCheck,
-} from "lucide-react";
 
 import { BrandingPanel } from "../components/BrandingPanel";
 import { DesktopServicePanel } from "../components/DesktopServicePanel";
 import { LifeDeskConnectionPanel } from "../components/LifeDeskConnectionPanel";
-import { PageHeader } from "../components/PageHeader";
 import { TemplateEditor } from "../components/TemplateEditor";
+import {
+  Card,
+  Note,
+  PageHead,
+  Row,
+  Rows,
+  Section,
+  Status,
+  TechnicalDetails,
+} from "../components/ui";
 import { useI18n, type Language } from "../i18n";
 import { deliveryModeLabel } from "../messages";
-import type { AppConfigStatus, AppPage } from "../types";
-
-type SettingsSection = "general" | "connection" | "email" | "safety";
+import type { AppConfigStatus, AppPage, LocalAgentConnectionStatus } from "../types";
 
 export function SettingsPage({
+  agent,
   configStatus,
-  onRefresh,
   onNavigate,
+  onRefresh,
 }: {
+  agent: LocalAgentConnectionStatus | null;
   configStatus: AppConfigStatus | null;
-  onRefresh: () => void | Promise<void>;
   onNavigate: (page: AppPage) => void;
+  onRefresh: () => void | Promise<void>;
 }) {
-  const { t, language } = useI18n();
-  const [section, setSection] = useState<SettingsSection>("general");
-  const [languageNotice, setLanguageNotice] = useState<string | null>(null);
+  const { language, t } = useI18n();
   const [savingLanguage, setSavingLanguage] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const config = configStatus?.config;
 
-  async function saveLanguage(nextLanguage: Language) {
-    if (nextLanguage === language || savingLanguage) return;
+  async function saveLanguage(next: Language) {
+    if (next === language || savingLanguage) return;
     setSavingLanguage(true);
-    setLanguageNotice(null);
+    setNotice(null);
     try {
-      await invoke("save_app_language", { language: nextLanguage });
+      await invoke("save_app_language", { language: next });
       await onRefresh();
-      setLanguageNotice(t("settings.languageSaved"));
+      setNotice(t("settings.saved"));
     } catch {
-      setLanguageNotice(t("settings.languageSaveFailed"));
+      setNotice(t("settings.languageSaveFailed"));
     } finally {
       setSavingLanguage(false);
     }
   }
 
-  const sections = [
-    { id: "general", label: t("settings.generalTab"), icon: Building2 },
-    { id: "connection", label: t("settings.connectionTab"), icon: Cable },
-    { id: "email", label: t("settings.emailTab"), icon: Mail },
-    { id: "safety", label: t("settings.safetyTab"), icon: ShieldCheck },
-  ] as const;
-
   return (
-    <div className="space-y-5">
-      <PageHeader title={t("settings.title")} />
+    <>
+      <PageHead description={t("settings.description")} title={t("settings.title")} />
 
-      <nav
-        aria-label={t("settings.title")}
-        className="grid gap-1 rounded-xl border border-white/70 bg-white/55 p-1.5 shadow-glass backdrop-blur-xl sm:grid-cols-4"
-      >
-        {sections.map(({ id, label, icon: Icon }) => {
-          const active = section === id;
-          return (
-            <button
-              key={id}
-              aria-current={active ? "page" : undefined}
-              className={[
-                "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition",
-                active
-                  ? "bg-ink text-white shadow-sm"
-                  : "text-slate-600 hover:bg-white/75 hover:text-slate-950",
-              ].join(" ")}
-              onClick={() => setSection(id)}
-              type="button"
-            >
-              <Icon className="h-4 w-4" aria-hidden="true" />
-              {label}
-            </button>
-          );
-        })}
-      </nav>
+      <div className="ip-stack">
+        {notice ? <Note tone="ready">{notice}</Note> : null}
 
-      {section === "general" && (
-        <div className="space-y-5">
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-100 text-brand-700 ring-1 ring-brand-200">
-                  <MonitorSmartphone className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  {t("settings.languageTitle")}
-                </h2>
-              </div>
-              <div className="inline-grid rounded-lg border border-white/70 bg-white/55 p-1 sm:grid-cols-2">
-                {([
-                  ["en", t("settings.english")],
-                  ["it", t("settings.italian")],
-                ] as const).map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={[
-                      "min-h-10 rounded-md px-5 text-sm font-semibold transition",
-                      language === value
-                        ? "bg-ink text-white shadow-sm"
-                        : "text-slate-700 hover:bg-white/80",
-                    ].join(" ")}
-                    disabled={savingLanguage}
-                    onClick={() => saveLanguage(value)}
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {languageNotice && (
-              <p className="mt-3 text-sm font-semibold text-brand-800">{languageNotice}</p>
-            )}
-          </section>
+        <Section title={t("settings.hotel")}>
+          <Card>
+            <Rows>
+              <Row
+                icon={Building2}
+                meta={t("settings.hotelNameHint")}
+                title={config?.client.displayName || "InnPilot"}
+              />
+              <Row
+                icon={Languages}
+                meta={t("settings.languageHint")}
+                title={t("settings.language")}
+                aside={
+                  <div className="ip-actions">
+                    {(
+                      [
+                        ["en", "English"],
+                        ["it", "Italiano"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        aria-pressed={language === value}
+                        className={`ip-btn ${
+                          language === value ? "ip-btn--primary" : "ip-btn--secondary"
+                        }`}
+                        disabled={savingLanguage}
+                        key={value}
+                        onClick={() => void saveLanguage(value)}
+                        type="button"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
+            </Rows>
+          </Card>
+        </Section>
 
+        <Section title={t("settings.appearance")}>
           <BrandingPanel configStatus={configStatus} onSaved={onRefresh} />
-        </div>
-      )}
+        </Section>
 
-      {section === "connection" && (
-        <div className="space-y-5">
-          <LifeDeskConnectionPanel />
-          <DesktopServicePanel />
-        </div>
-      )}
+        <Section title={t("settings.connections")}>
+          <Card>
+            <Rows>
+              <Row
+                icon={Bot}
+                meta={
+                  agent?.state === "connected"
+                    ? t("assistant.connectedText")
+                    : t("assistant.notConnectedText")
+                }
+                onOpen={() => onNavigate("assistant")}
+                openLabel={t("assistant.title")}
+                status={
+                  agent?.state === "connected"
+                    ? { tone: "ready", label: t("status.connected") }
+                    : { tone: "idle", label: t("status.notConnected") }
+                }
+                title={t("assistant.title")}
+              />
+            </Rows>
+          </Card>
+          <div style={{ marginTop: 12 }}>
+            <LifeDeskConnectionPanel />
+          </div>
+        </Section>
 
-      {section === "email" && (
-        <div className="space-y-5">
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-sky-tile ring-1">
-                  <Mail className="h-5 w-5" aria-hidden="true" />
+        {/* Automation plumbing lives here, not beside the hotel's name. */}
+        <Section description={t("settings.advancedHint")} title={t("settings.advanced")}>
+          <div className="ip-stack ip-stack--tight">
+            <Card>
+              <Rows>
+                <Row
+                  icon={CloudCog}
+                  meta={deliveryModeLabel(config?.invoiceDeliveryMode, t)}
+                  onOpen={() => onNavigate("system")}
+                  openLabel={t("field.invoiceDelivery")}
+                  title={t("field.invoiceDelivery")}
+                />
+                <Row
+                  title={t("field.safeMode")}
+                  meta={t("field.safeModeMeaning")}
+                  aside={
+                    <Status
+                      label={config?.safety.dryRunDefault ? t("common.on") : t("common.off")}
+                      tone={config?.safety.dryRunDefault ? "ready" : "idle"}
+                    />
+                  }
+                />
+                <Row
+                  title={t("field.redactLogs")}
+                  meta={t("field.redactLogsMeaning")}
+                  aside={
+                    <Status
+                      label={config?.safety.redactLogs ? t("common.on") : t("common.off")}
+                      tone={config?.safety.redactLogs ? "ready" : "idle"}
+                    />
+                  }
+                />
+              </Rows>
+            </Card>
+
+            <DesktopServicePanel />
+            <TemplateEditor configStatus={configStatus} onSaved={onRefresh} />
+
+            <TechnicalDetails label={t("common.technicalDetails")}>
+              <dl className="ip-detail-list">
+                <div>
+                  <dt>{t("settings.storageLocation")}</dt>
+                  <dd className="ip-mono">
+                    {configStatus?.configPath ?? t("settings.locationUnavailable")}
+                  </dd>
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">
-                    {t("settings.invoiceDeliveryTitle")}
-                  </h2>
-                  <p className="mt-0.5 text-sm font-medium text-slate-600">
-                    {deliveryModeLabel(config?.invoiceDeliveryMode, t)}
-                  </p>
+                  <dt>{t("settings.localDataTitle")}</dt>
+                  <dd>{t("settings.localDataText")}</dd>
                 </div>
-              </div>
-              <button
-                className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/70 bg-white/70 px-4 text-sm font-semibold text-slate-800 transition hover:bg-white"
-                onClick={() => onNavigate("setup")}
-                type="button"
-              >
-                {t("settings.changeInSetup")}
-              </button>
-            </div>
-          </section>
-
-          <TemplateEditor configStatus={configStatus} onSaved={onRefresh} />
-        </div>
-      )}
-
-      {section === "safety" && (
-        <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
-          <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-emerald-tile ring-1">
-                <ShieldCheck className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <h2 className="text-lg font-semibold text-slate-950">
-                {t("settings.safetyTitle")}
-              </h2>
-            </div>
-            <div className="mt-4 space-y-2">
-              <SafetyLine label={t("settings.safeModeLabel")} value={config?.safety.dryRunDefault} />
-              <SafetyLine
-                label={t("settings.confirmMovesLabel")}
-                value={config?.safety.requireConfirmationForFileMoves}
-              />
-              <SafetyLine label={t("settings.redactLogsLabel")} value={config?.safety.redactLogs} />
-            </div>
-            <button
-              className="mt-4 inline-flex min-h-10 items-center rounded-lg border border-white/70 bg-white/70 px-4 text-sm font-semibold text-slate-800 transition hover:bg-white"
-              onClick={() => onNavigate("setup")}
-              type="button"
-            >
-              {t("settings.changeInSetup")}
-            </button>
-          </section>
-
-          <section className="h-fit rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-            <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
-                <Laptop className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  {t("settings.localDataTitle")}
-                </h2>
-                <p className="mt-1 text-sm font-medium leading-6 text-slate-600">
-                  {t("settings.localDataText")}
-                </p>
-              </div>
-            </div>
-            <details className="mt-4 rounded-lg bg-white/60 px-3 py-2.5">
-              <summary className="cursor-pointer text-xs font-semibold text-slate-600">
-                {t("settings.storageLocation")}
-              </summary>
-              <p className="mt-2 break-words font-mono text-xs leading-5 text-slate-600">
-                {configStatus?.configPath ?? t("settings.locationUnavailable")}
-              </p>
-            </details>
-          </section>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SafetyLine({ label, value }: { label: string; value?: boolean }) {
-  const { t } = useI18n();
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg bg-white/60 px-3 py-3">
-      <p className="text-sm font-semibold text-slate-900">{label}</p>
-      <span
-        className={[
-          "shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ring-1",
-          value
-            ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-            : "bg-slate-50 text-slate-700 ring-slate-200",
-        ].join(" ")}
-      >
-        {typeof value === "boolean" ? (value ? t("common.on") : t("common.off")) : t("common.unknown")}
-      </span>
-    </div>
+              </dl>
+            </TechnicalDetails>
+          </div>
+        </Section>
+      </div>
+    </>
   );
 }

@@ -1,56 +1,75 @@
+/*
+  Help — calm and diagnostic.
+
+  It opens with the one question a worried manager is asking ("Is InnPilot
+  working?"), then offers the repair actions that are actually available, then
+  recovery. Every developer-facing artefact — python command, script install
+  detail, folder paths, preflight items, the support bundle — is preserved but
+  moved behind "Technical details".
+
+  The support bundle still contains no path, filename, address, credential or
+  raw log, and is still copied only on an explicit click.
+*/
+
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Check,
+  CircleHelp,
   Clipboard,
-  Cpu,
   FolderOpen,
   HeartPulse,
   PackageCheck,
+  RefreshCw,
   RotateCcw,
   Save,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { InfoHint } from "../components/InfoHint";
-import { PageHeader } from "../components/PageHeader";
-import { RefreshButton } from "../components/RefreshButton";
-import { ReadinessBadge } from "../components/StatusBadges";
-import { StatusHint, type StatusTone } from "../components/StatusOrb";
-import { useI18n } from "../i18n";
+import {
+  Button,
+  Card,
+  DetailList,
+  EmptyState,
+  IconButton,
+  Note,
+  PageHead,
+  Row,
+  Rows,
+  Section,
+  TechnicalDetails,
+} from "../components/ui";
+import { useI18n, type Translate } from "../i18n";
 import { commandErrorMessage } from "../onboarding";
+import { readinessTone } from "../statusMapping";
 import type {
   AppConfigStatus,
   AppPage,
+  HubConfig,
   ManagedAutomationInstallResult,
   PreflightItem,
   RecoveryActionResult,
   RecoveryStatus,
 } from "../types";
 
-/*
-  Support is a calm diagnostic center: a health summary first, then guided
-  fixes with in-app buttons. Private support information is copied only after
-  the user explicitly enables Support mode.
-*/
 export function SupportPage({
   configStatus,
-  onOpenPath,
-  onRefresh,
   onInstallAutomation,
   onNavigate,
+  onOpenPath,
+  onRefresh,
 }: {
   configStatus: AppConfigStatus | null;
-  onOpenPath: (path?: string | null) => void;
-  onRefresh: () => void;
   onInstallAutomation: () => Promise<ManagedAutomationInstallResult>;
   onNavigate: (page: AppPage) => void;
+  onOpenPath: (path?: string | null) => void;
+  onRefresh: () => void;
 }) {
   const { t } = useI18n();
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState<ManagedAutomationInstallResult | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [copiedPythonCommand, setCopiedPythonCommand] = useState(false);
-  const [copiedSupportBundle, setCopiedSupportBundle] = useState(false);
-  const [supportMode, setSupportMode] = useState(false);
+  const [copiedBundle, setCopiedBundle] = useState(false);
+  const [copiedPython, setCopiedPython] = useState(false);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<"create" | "restore" | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState("");
@@ -72,50 +91,38 @@ export function SupportPage({
 
   const config = configStatus?.config;
   const items = configStatus?.preflight.items ?? [];
-  const automationRoot = config?.automation.automationRootFolder;
+  const problems = items.filter(
+    (item) => item.status !== "ready" && item.status !== "notChecked",
+  );
+  const workflowsBlocked =
+    configStatus?.preflight.workflows.filter(
+      (workflow) => workflow.commandName && !workflow.canRun,
+    ) ?? [];
+  const healthy = Boolean(configStatus) && problems.length === 0 && workflowsBlocked.length === 0;
+
+  const scriptsNeedInstall = items.some(
+    (item) =>
+      ["invoiceWorkflowScript", "gmailDraftScript", "contractProcessingScript"].includes(item.key) &&
+      item.status !== "ready",
+  );
   const pythonItem = items.find((item) => item.key === "pythonExecutable");
   const pythonPackagesItem = items.find((item) => item.key === "pythonPackages");
-  const pythonPackageItems =
-    configStatus?.preflight.dependencies.filter((item) => item.key.startsWith("pythonPackage")) ??
-    [];
   const pythonInstallCommand = config ? buildPythonInstallCommand(config) : "";
-  const packagedWorker =
-    config?.automation.pythonExecutable.toLowerCase().includes("innpilot-worker") ?? false;
-
-  const scriptItems = items.filter((item) => item.itemType === "script");
-  const folderItems = items.filter((item) => item.itemType === "folder");
-  const gmailRelevant = config?.invoiceDeliveryMode !== "prepareOnly";
-  const gmailItems = gmailRelevant
-    ? items.filter((item) =>
-        ["gmailCredentialsFile", "gmailTokenPath", "gmailTokenFolder"].includes(item.key),
-      )
-    : [];
-
-  const canonicalScriptItems = items.filter((item) =>
-    ["invoiceWorkflowScript", "gmailDraftScript", "contractProcessingScript"].includes(item.key),
-  );
-  const canonicalScriptsReady =
-    canonicalScriptItems.length > 0 &&
-    canonicalScriptItems.every((item) => item.status === "ready");
-
-  const healthAreas: { label: string; tone: StatusTone; note: string }[] = configStatus
-    ? [
-        healthArea(t("support.python"), [pythonItem, pythonPackagesItem], t),
-        healthArea(t("support.automationScripts"), scriptItems, t),
-        healthArea(t("support.foldersPermissions"), folderItems, t),
-        ...(gmailRelevant ? [healthArea(t("support.gmailSignin"), gmailItems, t)] : []),
-      ]
-    : [];
-
-
   const latestRecovery =
     recoveryStatus?.points.find((point) => point.integrity === "ready") ??
-    recoveryStatus?.points[0] ?? null;
+    recoveryStatus?.points[0] ??
+    null;
 
-  async function refreshRecoveryStatus() {
-    const status = await invoke<RecoveryStatus>("get_recovery_status");
-    setRecoveryStatus(status);
-    return status;
+  async function installScripts() {
+    setInstalling(true);
+    setInstallError(null);
+    try {
+      setInstallResult(await onInstallAutomation());
+    } catch (error) {
+      setInstallError(commandErrorMessage(error));
+    } finally {
+      setInstalling(false);
+    }
   }
 
   async function createRecoveryPoint() {
@@ -123,13 +130,9 @@ export function SupportPage({
     setRecoveryError("");
     setRecoveryNotice("");
     try {
-      const result = await invoke<RecoveryActionResult>("create_recovery_point");
-      await refreshRecoveryStatus();
-      setRecoveryNotice(
-        t("support.recoveryCreated", {
-          date: formatRecoveryDate(result.point.createdAt, config?.language),
-        }),
-      );
+      await invoke<RecoveryActionResult>("create_recovery_point");
+      setRecoveryStatus(await invoke<RecoveryStatus>("get_recovery_status"));
+      setRecoveryNotice(t("settings.saved"));
     } catch (error) {
       setRecoveryError(commandErrorMessage(error));
     } finally {
@@ -138,8 +141,7 @@ export function SupportPage({
   }
 
   async function restoreRecoveryPoint(pointId: string) {
-    const confirmed = window.confirm(t("support.recoveryRestoreConfirm"));
-    if (!confirmed) return;
+    if (!window.confirm(t("support.recoveryRestoreConfirm"))) return;
     setRecoveryBusy("restore");
     setRecoveryError("");
     setRecoveryNotice("");
@@ -149,7 +151,7 @@ export function SupportPage({
         confirmed: true,
       });
       await onRefresh();
-      await refreshRecoveryStatus();
+      setRecoveryStatus(await invoke<RecoveryStatus>("get_recovery_status"));
       setRecoveryNotice(t("support.recoveryRestored"));
     } catch (error) {
       setRecoveryError(commandErrorMessage(error));
@@ -169,10 +171,7 @@ export function SupportPage({
         invoiceDeliveryMode: configStatus.config.invoiceDeliveryMode,
         safeMode: configStatus.config.safety.dryRunDefault,
       },
-      items: configStatus.preflight.items.map((item) => ({
-        key: item.key,
-        status: item.status,
-      })),
+      items: configStatus.preflight.items.map((item) => ({ key: item.key, status: item.status })),
       workflows: configStatus.preflight.workflows.map((workflow) => ({
         key: workflow.key,
         status: workflow.status,
@@ -183,419 +182,211 @@ export function SupportPage({
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
-      setCopiedSupportBundle(true);
+      setCopiedBundle(true);
     } catch {
-      setCopiedSupportBundle(false);
+      setCopiedBundle(false);
     }
   }
 
   return (
-    <div className="space-y-5">
-      <PageHeader title={t("support.title")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <label
-            className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-white/70 bg-white/65 px-3 text-xs font-semibold text-slate-700 hover:bg-white"
-            title={t("support.modeHint")}
-          >
-            <input
-              checked={supportMode}
-              className="h-4 w-4 accent-brand-700"
-              onChange={(event) => setSupportMode(event.target.checked)}
-              type="checkbox"
-            />
-            {t("support.mode")}
-          </label>
-          <RefreshButton label={t("support.checkAgain")} onClick={onRefresh} />
-        </div>
-      </PageHeader>
+    <>
+      <PageHead
+        actions={<IconButton icon={RefreshCw} label={t("common.refresh")} onClick={onRefresh} />}
+        description={t("support.description")}
+        title={t("support.title")}
+      />
 
-      <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg tint-rose-tile ring-1">
-            <HeartPulse className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <h2 className="text-xl font-semibold text-slate-950">{t("support.health")}</h2>
-          <InfoHint text={t("support.healthHint")} />
-        </div>
-        <div className="stagger-children mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {healthAreas.map((area) => (
-            <div key={area.label} className="rounded-lg border border-white/70 bg-white/60 p-3.5">
-              <p className="text-sm font-semibold text-slate-900">{area.label}</p>
-              <div className="mt-2">
-              <StatusHint tone={area.tone} label={toneLabel(area.tone, t)} />
-              </div>
-              <p className="mt-1.5 text-xs font-medium leading-5 text-slate-600">{area.note}</p>
-            </div>
-          ))}
-          {!configStatus && (
-            <p className="text-sm font-medium text-slate-700">
-              {t("support.setupUnavailable")}
-            </p>
-          )}
-        </div>
-      </section>
-
-      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          {t("support.repairTools")}
-        </summary>
-        <div className="mt-4 grid gap-5 xl:grid-cols-2">
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-violet-tile ring-1">
-              <PackageCheck className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <h2 className="text-xl font-semibold text-slate-950">{t("support.automationScripts")}</h2>
-            <InfoHint text={t("support.scriptsHint")} />
-          </div>
-          <div className="mt-4">
-            <StatusHint
-              tone={canonicalScriptsReady ? "ready" : "attention"}
-              label={canonicalScriptsReady ? t("support.scriptsFound") : t("support.scriptsNeedAttention")}
-            />
-          </div>
-          <button
-            className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-cta px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-cta-soft disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={installing}
-            onClick={async () => {
-              const confirmed = window.confirm(
-                t("support.confirmInstallScripts"),
-              );
-              if (!confirmed) return;
-              setInstalling(true);
-              setInstallResult(null);
-              setInstallError(null);
-              try {
-                const result = await onInstallAutomation();
-                setInstallResult(result);
-              } catch (error) {
-                setInstallError(commandErrorMessage(error));
-              } finally {
-                setInstalling(false);
-              }
-            }}
-          >
-            {installing ? t("support.installing") : t("support.installRefresh")}
-          </button>
-          {installResult && (
-            <div className="animate-pop mt-4 rounded-md bg-white/65 p-3 text-sm font-medium leading-6 text-slate-700">
-              <p className="font-semibold text-slate-950">{t("support.scriptsRefreshed")}</p>
-              <p>
-                {t("support.installCounts", {
-                  copied: installResult.copied.length,
-                  backedUp: installResult.backedUp.length,
-                  skipped: installResult.skipped.length,
-                })}
-              </p>
-              {installResult.errors.length > 0 && (
-                <p className="font-semibold text-rose-800">
-                  Needs attention: {installResult.errors.length}
-                </p>
-              )}
-            </div>
-          )}
-          {installError && (
-            <div className="mt-4 rounded-md bg-rose-50 p-3 text-sm font-semibold leading-6 text-rose-800">
-              {installError}
-            </div>
-          )}
-          <p className="mt-3 break-words font-mono text-xs leading-5 text-slate-500">
-            {automationRoot || t("support.automationFolderMissing")}
-          </p>
-        </section>
-
-        <section className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg tint-emerald-tile ring-1">
-              <Cpu className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <h2 className="text-xl font-semibold text-slate-950">{t("support.pythonEnvironment")}</h2>
-            <InfoHint text={t("support.pythonHint")} />
-          </div>
-          <div className="mt-4 rounded-md bg-white/60 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-slate-800">
-                {pythonItem?.status === "ready" ? t("support.pythonFound") : t("support.pythonMissing")}
-              </span>
-              {pythonItem && <ReadinessBadge status={pythonItem.status} />}
-            </div>
-            <p className="mt-2 break-words font-mono text-xs leading-5 text-slate-600">
-              {config?.automation.pythonExecutable || t("support.notConfigured")}
-            </p>
-            {pythonItem?.message && pythonItem.status !== "ready" && (
-              <p className="mt-2 text-sm font-medium leading-6 text-slate-600">
-                {pythonItem.message}
-              </p>
-            )}
-          </div>
-
-          <div className="mt-3 space-y-2">
-            {pythonPackageItems.map((item) => (
-              <div
-                key={item.key}
-                className="flex items-center justify-between gap-3 rounded-md bg-white/55 px-3 py-2"
-              >
-                <span className="text-xs font-semibold text-slate-800">{item.label}</span>
-                <ReadinessBadge status={item.status} />
-              </div>
-            ))}
-          </div>
-
-          {!packagedWorker && pythonPackagesItem?.status !== "ready" && pythonInstallCommand && (
-            <div className="mt-4 rounded-md border border-amber-100 bg-amber-50/80 p-3">
-              <p className="text-sm font-semibold text-amber-950">{t("support.installPackages")}</p>
-              <p className="mt-1 text-sm font-medium leading-6 text-amber-800">
-                {t("support.installPackagesHint")}
-              </p>
-              <pre className="mt-3 whitespace-pre-wrap break-words rounded-md bg-white/75 p-3 font-mono text-xs leading-5 text-slate-800">
-                {pythonInstallCommand}
-              </pre>
-              <button
-                className="mt-3 inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/70 bg-white/75 px-3 text-xs font-semibold text-slate-800 hover:bg-white"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(pythonInstallCommand);
-                    setCopiedPythonCommand(true);
-                  } catch {
-                    setCopiedPythonCommand(false);
-                  }
-                }}
-              >
-                <Clipboard className="h-4 w-4 text-brand-700" aria-hidden="true" />
-                {copiedPythonCommand ? t("common.copied") : t("support.copyCommand")}
-              </button>
-            </div>
-          )}
-        </section>
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-          {t("support.foldersShortcuts")}
-        </summary>
-        <section className="mt-4 rounded-xl border border-white/65 bg-white/55 p-5 shadow-glass backdrop-blur-xl">
-          <div className="mt-4 grid gap-2">
-            {[
-              [t("support.openInvoiceInput"), config?.folders.invoiceInputFolder],
-              [t("support.openReadyInvoices"), config?.folders.invoiceOutputFolder],
-              [t("support.openContracts"), config?.folders.contractsOutputFolder],
-              [t("support.openSupportLogs"), config?.folders.invoiceLogFolder],
-            ].map(([label, path]) => (
-              <button
-                key={label}
-                className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md border border-white/70 bg-white/65 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!path}
-                onClick={() => onOpenPath(path)}
-              >
-                <FolderOpen className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
-                {label}
-              </button>
-            ))}
-            <button
-              className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md border border-white/70 bg-white/65 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white"
-              onClick={() => onNavigate("setup")}
-            >
-              <FolderOpen className="h-4 w-4 shrink-0 text-brand-700" aria-hidden="true" />
-              {t("support.fixFolders")}
-            </button>
-
-          </div>
-        </section>
-      </details>
-
-      <details className="overflow-hidden rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/90 via-white/70 to-sky-50/80 shadow-glass backdrop-blur-xl">
-        <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-900">
-          <span className="inline-flex items-center gap-2">
-            <Save className="h-4 w-4 text-emerald-800" aria-hidden="true" />
-            {t("support.recoveryTitle")}
+      <div className="ip-headline" style={{ paddingTop: 0 }}>
+        <div className="ip-headline__state">
+          <span aria-hidden="true" className={`ip-headline__mark is-${healthy ? "ready" : "attention"}`}>
+            {healthy ? <Check size={16} /> : <HeartPulse size={16} />}
           </span>
-        </summary>
-        <div className="grid gap-5 px-5 pb-5 lg:grid-cols-[1.2fr_0.8fr]">
-          <div>
-            <p className="max-w-2xl text-sm font-medium leading-6 text-slate-700">
-              {t("support.recoveryText", { count: recoveryStatus?.retentionLimit ?? 10 })}
-            </p>
-
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              <button
-                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-emerald-800 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-55"
-                disabled={recoveryBusy !== null}
-                onClick={() => void createRecoveryPoint()}
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {recoveryBusy === "create"
-                  ? t("support.recoveryCreating")
-                  : t("support.recoveryCreate")}
-              </button>
-              <button
-                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-white/80 bg-white/75 px-4 text-sm font-semibold text-slate-800 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={
-                  recoveryBusy !== null ||
-                  !latestRecovery ||
-                  latestRecovery.integrity !== "ready"
-                }
-                onClick={() =>
-                  latestRecovery && void restoreRecoveryPoint(latestRecovery.id)
-                }
-              >
-                <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                {recoveryBusy === "restore"
-                  ? t("support.recoveryRestoring")
-                  : t("support.recoveryRestore")}
-              </button>
-            </div>
-            {recoveryNotice && (
-              <p className="mt-3 rounded-md bg-emerald-100/70 px-3 py-2 text-sm font-semibold text-emerald-900">
-                {recoveryNotice}
-              </p>
-            )}
-            {recoveryError && (
-              <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">
-                {recoveryError}
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-white/80 bg-white/65 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-slate-950">
-                {t("support.recoveryLatest")}
-              </p>
-              <StatusHint
-                tone={
-                  latestRecovery
-                    ? latestRecovery.integrity === "ready"
-                      ? "ready"
-                      : "attention"
-                    : "neutral"
-                }
-                label={
-                  latestRecovery
-                    ? latestRecovery.integrity === "ready"
-                      ? t("support.recoveryVerified")
-                      : t("support.recoveryDamaged")
-                    : t("support.recoveryNone")
-                }
-              />
-            </div>
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              {latestRecovery
-                ? formatRecoveryDate(latestRecovery.createdAt, config?.language)
-                : t("support.recoveryFirst")}
-            </p>
-            {latestRecovery && (
-              <p className="mt-1 text-xs font-semibold text-slate-500">
-                InnPilot {latestRecovery.appVersion} ? {recoveryStatus?.points.length ?? 0}/
-                {recoveryStatus?.retentionLimit ?? 10}
-              </p>
-            )}
-            <div className="mt-4 rounded-md bg-emerald-50/75 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
-                {t("support.recoveryPrivacy")}
-              </p>
-              <p className="mt-1 text-xs font-medium leading-5 text-slate-600">
-                {t("support.recoveryPrivacyText")}
-              </p>
-            </div>
-          </div>
+          <h1 style={{ fontSize: "1.25rem" }}>
+            {configStatus
+              ? healthy
+                ? t("home.allNormal")
+                : t("support.isWorking")
+              : t("home.unavailable")}
+          </h1>
         </div>
-      </details>
+        <p>{healthy ? t("home.allNormalText") : t("support.description")}</p>
+      </div>
 
-      {supportMode && (
-        <section className="flex flex-col gap-3 rounded-xl border border-brand-100 bg-brand-50/75 p-4 shadow-glass sm:flex-row sm:items-center sm:justify-between">
-          <div className="group relative w-fit">
-            <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Clipboard className="h-4 w-4 text-brand-700" aria-hidden="true" />
-              {t("support.supportInfo")}
-            </span>
-            <span
-              className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 w-72 rounded-lg bg-ink px-3 py-2 text-xs font-medium leading-5 text-white opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100"
-              role="tooltip"
+      <div className="ip-stack">
+        <div className="ip-actions">
+          <Button icon={RefreshCw} onClick={onRefresh} variant="primary">
+            {t("support.runCheck")}
+          </Button>
+          <Button icon={CircleHelp} onClick={() => onNavigate("guide")} variant="ghost">
+            {t("support.howItWorks")}
+          </Button>
+        </div>
+
+        {/* Only real, current problems are listed — never a generic checklist. */}
+        {problems.length > 0 ? (
+          <Section title={t("support.commonIssues")}>
+            <Card>
+              <Rows>
+                {problems.slice(0, 8).map((item) => (
+                  <Row
+                    key={item.key}
+                    meta={item.message}
+                    status={{ tone: readinessTone(item.status), label: statusWord(item, t) }}
+                    title={item.label}
+                  />
+                ))}
+              </Rows>
+            </Card>
+            {scriptsNeedInstall ? (
+              <div className="ip-actions" style={{ marginTop: 12 }}>
+                <Button
+                  busy={installing}
+                  icon={PackageCheck}
+                  onClick={() => void installScripts()}
+                  variant="secondary"
+                >
+                  {t("support.installRefresh")}
+                </Button>
+                <Button onClick={() => onNavigate("system")} variant="ghost">
+                  {t("system.checkSetup")}
+                </Button>
+              </div>
+            ) : null}
+            {installError ? <Note tone="problem">{installError}</Note> : null}
+            {installResult ? <Note tone="ready">{t("support.scriptsRefreshed")}</Note> : null}
+          </Section>
+        ) : null}
+
+        <Section title={t("support.recovery")}>
+          <Card>
+            {recoveryStatus && recoveryStatus.points.length > 0 ? (
+              <Rows>
+                <Row
+                  icon={Save}
+                  meta={t("support.recoveryText")}
+                  status={{
+                    tone: latestRecovery?.integrity === "ready" ? "ready" : "attention",
+                    label:
+                      recoveryStatus.points.length === 1
+                        ? t("support.recoveryAvailable", { count: 1 })
+                        : t("support.recoveryAvailablePlural", {
+                            count: recoveryStatus.points.length,
+                          }),
+                  }}
+                  title={t("support.recovery")}
+                />
+              </Rows>
+            ) : (
+              <EmptyState
+                icon={Save}
+                message={t("support.recoveryText")}
+                title={t("support.recoveryNone")}
+              />
+            )}
+          </Card>
+
+          <div className="ip-actions" style={{ marginTop: 12 }}>
+            <Button
+              busy={recoveryBusy === "create"}
+              icon={Save}
+              onClick={() => void createRecoveryPoint()}
+              variant="secondary"
             >
-              {t("support.modeHint")}
-            </span>
+              {t("support.recoveryCreate")}
+            </Button>
+            {latestRecovery ? (
+              <Button
+                busy={recoveryBusy === "restore"}
+                icon={RotateCcw}
+                onClick={() => void restoreRecoveryPoint(latestRecovery.id)}
+                variant="secondary"
+              >
+                {t("support.recoveryRestore")}
+              </Button>
+            ) : null}
           </div>
-          <button
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cta px-4 text-sm font-semibold text-white hover:bg-cta-soft disabled:opacity-50"
-            disabled={!configStatus}
-            onClick={() => void copySupportBundle()}
-            type="button"
-          >
-            <Clipboard className="h-4 w-4" aria-hidden="true" />
-            {copiedSupportBundle ? t("support.supportCopied") : t("support.copySupportInfo")}
-          </button>
-        </section>
-      )}
-    </div>
+          {recoveryNotice ? <Note tone="ready">{recoveryNotice}</Note> : null}
+          {recoveryError ? <Note tone="problem">{recoveryError}</Note> : null}
+        </Section>
+
+        <TechnicalDetails label={t("support.logs")}>
+          <DetailList
+            items={[
+              { label: "Configuration", value: configStatus?.configPath ?? "—", mono: true },
+              { label: "Checked at", value: configStatus?.preflight.checkedAt ?? "—", mono: true },
+              {
+                label: "Python",
+                value: config?.automation.pythonExecutable || "—",
+                mono: true,
+              },
+              { label: "Python status", value: pythonItem?.status ?? "—" },
+              { label: "Python packages", value: pythonPackagesItem?.status ?? "—" },
+              {
+                label: "Automation root",
+                value: config?.automation.automationRootFolder || "—",
+                mono: true,
+              },
+              ...items.map((item) => ({
+                label: item.label,
+                value: `${item.status} · ${item.path ?? "—"}`,
+                mono: true,
+              })),
+            ]}
+          />
+
+          <div className="ip-actions" style={{ marginTop: 14 }}>
+            {pythonInstallCommand ? (
+              <Button
+                icon={copiedPython ? Check : Clipboard}
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(pythonInstallCommand)
+                    .then(() => setCopiedPython(true))
+                    .catch(() => setCopiedPython(false));
+                }}
+                variant="secondary"
+              >
+                {copiedPython ? t("common.copied") : t("support.copyCommand")}
+              </Button>
+            ) : null}
+            <Button
+              icon={copiedBundle ? Check : Clipboard}
+              onClick={() => void copySupportBundle()}
+              variant="secondary"
+            >
+              {copiedBundle ? t("common.copied") : t("support.contact")}
+            </Button>
+            {config?.folders.invoiceLogFolder ? (
+              <Button
+                icon={FolderOpen}
+                onClick={() => onOpenPath(config.folders.invoiceLogFolder)}
+                variant="secondary"
+              >
+                {t("support.openSupportLogs")}
+              </Button>
+            ) : null}
+          </div>
+        </TechnicalDetails>
+      </div>
+    </>
   );
 }
 
-function healthArea(
-  label: string,
-  items: (PreflightItem | undefined)[],
-  t: ReturnType<typeof useI18n>["t"],
-): { label: string; tone: StatusTone; note: string } {
-  const present = items.filter((item): item is PreflightItem => Boolean(item));
-  if (!present.length) {
-    return { label, tone: "neutral", note: t("support.notCheckedYet") };
+function statusWord(item: PreflightItem, t: Translate) {
+  switch (item.status) {
+    case "ready":
+      return t("status.ready");
+    case "warning":
+      return t("status.attention");
+    case "notChecked":
+      return t("status.checking");
+    default:
+      return t("status.problem");
   }
-  const blocking = present.find((item) =>
-    ["missingConfiguration", "missingScript", "missingFolder", "permissionProblem"].includes(
-      item.status,
-    ),
-  );
-  if (blocking) {
-    return { label, tone: "attention", note: friendlyHealthNote(blocking, t) };
-  }
-  if (present.some((item) => item.status === "warning")) {
-    return { label, tone: "attention", note: t("support.reviewConvenient") };
-  }
-  if (present.some((item) => item.status === "notChecked")) {
-    return { label, tone: "neutral", note: t("support.notCheckedYet") };
-  }
-  return { label, tone: "ready", note: t("support.everythingGood") };
 }
 
-function friendlyHealthNote(item: PreflightItem, t: ReturnType<typeof useI18n>["t"]) {
-  if (item.key === "pythonExecutable") return t("support.pythonNotFound");
-  if (item.key === "pythonPackages") return t("support.packagesInstall");
-  if (item.itemType === "script") return t("support.installScriptsBelow");
-  if (item.itemType === "folder") return t("support.fixFoldersGuided");
-  if (item.key === "gmailCredentialsFile")
-    return t("support.chooseGmailOrPrepare");
-  if (item.key.startsWith("gmail")) return t("support.finishGmail");
-  return t("support.needsOneStep");
-}
-
-function toneLabel(tone: StatusTone, t: ReturnType<typeof useI18n>["t"]) {
-  if (tone === "ready") return t("support.good");
-  if (tone === "attention") return t("common.needsAttention");
-  if (tone === "blocked") return t("common.cannotRunYet");
-  if (tone === "future") return t("support.future");
-  return t("support.notChecked");
-}
-
-function buildPythonInstallCommand(config: AppConfigStatus["config"]) {
-  const python = config.automation.pythonExecutable?.trim() || "python";
-  const requirements = joinWindowsPath(config.automation.automationRootFolder, "requirements.txt");
-  const pythonCommand =
-    python.includes("\\") || python.includes("/") || python.includes(":")
-      ? `& "${python}"`
-      : python;
-  return `${pythonCommand} -m pip install -r "${requirements}"`;
-}
-
-function joinWindowsPath(root: string, child: string) {
-  const cleanRoot = root.trim().replace(/[\\/]$/, "");
-  return cleanRoot ? `${cleanRoot}\\${child}` : child;
-}
-
-function formatRecoveryDate(value: string, language?: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "?";
-  return date.toLocaleString(language === "it" ? "it-IT" : "en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+function buildPythonInstallCommand(config: HubConfig) {
+  const executable = config.automation.pythonExecutable || "python";
+  const quoted = executable.includes(" ") ? `"${executable}"` : executable;
+  return `${quoted} -m pip install -r requirements.txt`;
 }
