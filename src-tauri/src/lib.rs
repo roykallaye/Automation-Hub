@@ -27,6 +27,7 @@ mod runner_protocol;
 mod runner_service;
 mod setup;
 mod templates;
+mod work_area;
 mod worker_runtime;
 mod workflows;
 
