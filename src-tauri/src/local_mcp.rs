@@ -1364,6 +1364,8 @@ impl LocalMcpFacade {
             .create(true)
             .read(true)
             .write(true)
+            // Lock file only: never truncate, the contents are never used.
+            .truncate(false)
             .open(self.lock_path())
             .map_err(|_| persistence_error())?;
         FileExt::lock_exclusive(&lock).map_err(|_| persistence_busy())?;

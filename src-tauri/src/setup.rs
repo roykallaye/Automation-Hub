@@ -211,6 +211,7 @@ impl SetupSnapshot {
         self.draft.clone()
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn revision(&self) -> &str {
         &self.revision
     }
@@ -344,6 +345,7 @@ pub(crate) struct ValidatedSetupCandidate {
 }
 
 impl ValidatedSetupCandidate {
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn base_revision(&self) -> &str {
         &self.pair.revision
     }
@@ -458,6 +460,7 @@ impl ConfigurationService {
             .map(|candidate| candidate.preview())
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn assert_revision(&self, expected_revision: &str) -> Result<(), String> {
         self.repository.with_lock(|config_path| {
             let pair = load_configuration_pair(config_path)?;
@@ -471,6 +474,7 @@ impl ConfigurationService {
         })
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn commit_candidate(
         &self,
         candidate: ValidatedSetupCandidate,
@@ -672,6 +676,10 @@ struct SetupJournalApprovedProposal {
     workspace_prepared: bool,
 }
 
+// Test-only entry point; production previews come from preview_setup.
+#[cfg(test)]
+// Test-only entry point; production previews come from preview_setup.
+#[cfg(test)]
 fn preview_setup_patch(
     pair: &ConfigurationPair,
     patch: &SetupPatch,
@@ -925,6 +933,10 @@ fn apply_setup_patch_locked(
     })
 }
 
+// Reached only via apply_setup_patch_locked, which is itself test-only.
+#[cfg(test)]
+// Reached only via apply_setup_patch_locked, which is itself test-only.
+#[cfg(test)]
 fn apply_setup_patch_core<F>(
     app_config_path: &Path,
     patch: SetupPatch,
@@ -1017,9 +1029,11 @@ fn build_validated_candidate(
         return Err("The proposed automation setup path already contains another file. InnPilot left both files unchanged.".to_string());
     }
 
-    if !automation_parent.is_dir()
-        && !(pair.automation_bytes.is_none() && automation_path == pair.automation_config_path)
-    {
+    // The automation folder may legitimately be absent only when nothing is
+    // being written there and the path is unchanged.
+    let automation_target_untouched =
+        pair.automation_bytes.is_none() && automation_path == pair.automation_config_path;
+    if !(automation_parent.is_dir() || automation_target_untouched) {
         return Err(
             "Automation setup folder is missing. Create the workspace folders before saving setup."
                 .to_string(),
@@ -1126,11 +1140,7 @@ where
     }
 
     if automation_changed {
-        if let Err(error) =
-            config::atomic_replace_configuration_bytes(&automation_path, &next_automation_bytes)
-        {
-            return Err(error);
-        }
+        config::atomic_replace_configuration_bytes(&automation_path, &next_automation_bytes)?;
     }
     if app_changed {
         if let Err(error) =
@@ -1465,6 +1475,7 @@ impl GeneratedSetup {
 }
 
 impl SetupPatch {
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     fn is_empty(&self) -> bool {
         self.setup_mode.is_none()
             && self.hotel_display_name.is_none()
@@ -1643,7 +1654,7 @@ fn read_setup_transaction_journal(
     let journal: SetupTransactionJournal = serde_json::from_slice(&bytes)
         .map_err(|_| "The setup transaction journal is damaged.".to_string())?;
     if journal.schema_version != SETUP_TRANSACTION_SCHEMA
-        || PathBuf::from(&journal.app_config_path) != app_config_path
+        || &journal.app_config_path != app_config_path
     {
         return Err(
             "The setup transaction journal is not valid for this InnPilot installation."
@@ -1715,7 +1726,7 @@ fn restore_recovery_bytes(
     target: &Path,
     expected_sha256: &str,
 ) -> Result<(), String> {
-    if sha256_bytes(&bytes) != expected_sha256 {
+    if sha256_bytes(bytes) != expected_sha256 {
         return Err("The setup recovery point failed its integrity check.".to_string());
     }
     config::atomic_replace_configuration_bytes(target, bytes)
@@ -1764,7 +1775,7 @@ fn reconcile_incomplete_setup_at(
     recovery_service: &recovery::RecoveryService,
     runner_root: &Path,
 ) -> Result<(), String> {
-    let journal_path = setup_transaction_path(&app_config_path)?;
+    let journal_path = setup_transaction_path(app_config_path)?;
     if !journal_path.exists() {
         return Ok(());
     }
@@ -1776,8 +1787,8 @@ fn reconcile_incomplete_setup_at(
     .ok_or_else(|| {
         "InnPilot cannot recover an incomplete setup while an automation is running.".to_string()
     })?;
-    config::with_configuration_lock(&app_config_path, || {
-        let journal = read_setup_transaction_journal(&app_config_path)?.ok_or_else(|| {
+    config::with_configuration_lock(app_config_path, || {
+        let journal = read_setup_transaction_journal(app_config_path)?.ok_or_else(|| {
             "The setup transaction journal disappeared during recovery.".to_string()
         })?;
 
@@ -1788,7 +1799,7 @@ fn reconcile_incomplete_setup_at(
         let recovery_app_text = std::str::from_utf8(&recovery_app)
             .map_err(|_| "The setup recovery settings are not valid UTF-8.".to_string())?;
         let (recovery_config, _) =
-            config::parse_config_with_migration_at_path(recovery_app_text, &app_config_path)?;
+            config::parse_config_with_migration_at_path(recovery_app_text, app_config_path)?;
         let expected_automation_path =
             PathBuf::from(recovery_config.automation.automation_config_path);
         if old_automation_path != expected_automation_path
@@ -1799,14 +1810,14 @@ fn reconcile_incomplete_setup_at(
                     .to_string(),
             );
         }
-        match classify_setup_transaction_state(&app_config_path, &journal)? {
+        match classify_setup_transaction_state(app_config_path, &journal)? {
             SetupTransactionState::Committed | SetupTransactionState::Unchanged => {
-                return clear_setup_transaction_journal(&app_config_path);
+                return clear_setup_transaction_journal(app_config_path);
             }
             SetupTransactionState::NeedsRollback => {}
         }
 
-        restore_recovery_bytes(&recovery_app, &app_config_path, &journal.old_app_sha256)?;
+        restore_recovery_bytes(&recovery_app, app_config_path, &journal.old_app_sha256)?;
         if journal.old_automation_existed {
             let expected = journal.old_automation_sha256.as_deref().ok_or_else(|| {
                 "The setup transaction is missing its automation recovery digest.".to_string()
@@ -1824,7 +1835,7 @@ fn reconcile_incomplete_setup_at(
         } else if !journal.old_automation_existed {
             let _ = fs::remove_file(&new_automation_path);
         }
-        clear_setup_transaction_journal(&app_config_path)
+        clear_setup_transaction_journal(app_config_path)
     })
 }
 

@@ -472,6 +472,12 @@ pub(crate) fn write_current_config_unlocked(
     write_config_with_primary_activation(config_path, config, atomic_activate_file)
 }
 
+// Only the tests drive configuration updates through this helper; production
+// writes go through write_config_with_primary_activation.
+#[cfg(test)]
+// Only the tests drive configuration updates through this helper; production
+// writes go through write_config_with_primary_activation.
+#[cfg(test)]
 fn update_config_at_path(
     config_path: &Path,
     default: HubConfig,

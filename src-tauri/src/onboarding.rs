@@ -386,6 +386,7 @@ impl OnboardingService {
         record_progress_with_service(self, checkpoint, expected_revision, request_id)
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn prepare_apply(
         &self,
         expected_revision: u64,
@@ -513,6 +514,9 @@ impl OnboardingService {
         })
     }
 
+    // Each parameter is a separate piece of apply-intent identity that must be
+    // supplied explicitly; grouping them would blur that contract.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_apply_with_intent(
         &self,
         expected_revision: u64,
@@ -756,6 +760,7 @@ fn service_for_app(app: &AppHandle) -> OnboardingResult<OnboardingService> {
     OnboardingService::new(config_path, runner_root)
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn reconcile_startup(
     app: &AppHandle,
     config_preexisted: bool,
@@ -1143,6 +1148,7 @@ fn record_progress_with_service(
     )
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn prepare_apply(
     app: &AppHandle,
     expected_revision: u64,
@@ -1158,6 +1164,7 @@ pub(crate) fn prepare_apply(
     )
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 fn prepare_apply_with_service(
     service: &OnboardingService,
     expected_revision: u64,
@@ -1250,6 +1257,7 @@ fn prepare_apply_with_service(
 
 /// Records evidence produced after the Phase A setup save. This is deliberately
 /// backend-only: renderer claims are not sufficient to enter `verifying`.
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn record_setup_saved(
     app: &AppHandle,
     expected_revision: u64,
@@ -1347,6 +1355,7 @@ fn record_setup_saved_with_service(
     )
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn complete(
     app: &AppHandle,
     expected_revision: u64,
@@ -1800,6 +1809,7 @@ fn apply_legacy_import(
     )
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn initialize_workspace(
     app: &AppHandle,
     draft: setup::SetupDraft,
@@ -1945,6 +1955,7 @@ fn initialize_workspace_with_service(
     })
 }
 
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn cleanup_created_folders(
     app: &AppHandle,
     expected_revision: u64,

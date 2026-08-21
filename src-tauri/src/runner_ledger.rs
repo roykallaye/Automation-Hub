@@ -414,6 +414,7 @@ impl Drop for ProcessLock {
         let _ = self.file.unlock();
     }
 }
+#[allow(dead_code)] // Typed domain surface; no caller today.
 pub(crate) fn backup_database(app: &AppHandle, destination: &Path) -> Result<(), String> {
     let paths = InstallationPaths::resolve(app).map_err(|error| error.to_string())?;
     backup_database_at(&paths.runner_db, destination).map_err(|error| error.to_string())

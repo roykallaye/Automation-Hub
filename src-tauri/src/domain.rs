@@ -154,6 +154,7 @@ impl WorkspaceError {
         self
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn with_refresh_required(mut self, required: bool) -> Self {
         self.envelope.refresh_required = required;
         self
@@ -172,6 +173,7 @@ impl WorkspaceError {
         self.envelope.code
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn category(&self) -> WorkspaceErrorCategory {
         self.envelope.category
     }
@@ -184,10 +186,14 @@ impl WorkspaceError {
         self.envelope.refresh_required
     }
 
+    #[allow(dead_code)] // Typed domain surface; no caller today.
     pub(crate) fn into_envelope(self) -> WorkspaceErrorEnvelope {
         self.envelope
     }
 
+    // Read back only by this module's redaction tests; the diagnostic is
+    // deliberately withheld from the serialized envelope.
+    #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }

@@ -834,6 +834,8 @@ impl DiscoveryService {
             .create(true)
             .read(true)
             .write(true)
+            // Lock file only: never truncate, the contents are never used.
+            .truncate(false)
             .open(self.environment.discovery_root.join(".scan.lock"))
             .map_err(io_error)?;
         file.try_lock_exclusive().map_err(|_| {
@@ -1825,7 +1827,7 @@ fn scan_scope(
                     let extension = canonical_child
                         .extension()
                         .and_then(|value| value.to_str())
-                        .map(|value| sanitize_extension(value))
+                        .map(sanitize_extension)
                         .unwrap_or_else(|| "no_extension".to_string());
                     if node.extensions.contains_key(&extension)
                         || node.extensions.len() < MAX_EXTENSIONS_PER_NODE
@@ -2150,6 +2152,8 @@ fn with_shared_lock<T>(
         .create(true)
         .read(true)
         .write(true)
+        // Lock file only: never truncate, the contents are never used.
+        .truncate(false)
         .open(root.join(".environment-discovery.lock"))
         .map_err(io_error)?;
     FileExt::lock_exclusive(&file).map_err(|_| {

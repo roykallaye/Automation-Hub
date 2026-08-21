@@ -214,15 +214,27 @@ try {
   if ($actualDigest -ne $declaredDigest) {
     throw "The clean-install worker failed its checksum."
   }
-  # Tauri stamps bundle metadata into the copied external binary, so the
-  # installed helper must match the final release-sidecar artifact rather than
-  # the pre-stamped input under src-tauri/binaries.
+  # The MCP sidecar has exactly one canonical source: the innpilot-mcp cargo
+  # bin produced by the same `cargo build` as the application, packaged once by
+  # tauri-bundler. The installed copy must therefore be byte-identical to that
+  # artifact; a mismatch means the bundle picked up a different build than the
+  # one this release was verified against.
   $releaseMcpSidecar = Join-Path $root "src-tauri\target\release\innpilot-mcp.exe"
+  if (-not (Test-Path -LiteralPath $releaseMcpSidecar -PathType Leaf)) {
+    throw "The canonical MCP sidecar artifact is missing: $releaseMcpSidecar"
+  }
   $expectedMcpDigest = (Get-FileHash -LiteralPath $releaseMcpSidecar -Algorithm SHA256).Hash.ToLowerInvariant()
   $actualMcpDigest = (Get-FileHash -LiteralPath $mcpSidecar -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actualMcpDigest -ne $expectedMcpDigest) {
-    throw "The clean-install MCP sidecar does not match the prepared release helper."
+    throw (
+      "The installed MCP sidecar does not match its canonical build artifact.`n" +
+      "  installed : $mcpSidecar`n" +
+      "              $actualMcpDigest`n" +
+      "  canonical : $releaseMcpSidecar`n" +
+      "              $expectedMcpDigest"
+    )
   }
+  Write-Output "MCP sidecar verified against canonical artifact: $actualMcpDigest"
 
   $payloadPolicyPath = Join-Path $root "release\installed-payload-policy.json"
   $payloadPolicy = Get-Content -LiteralPath $payloadPolicyPath -Raw | ConvertFrom-Json

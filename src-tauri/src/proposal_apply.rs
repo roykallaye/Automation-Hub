@@ -990,6 +990,8 @@ impl ProposalApplyService {
             .create(true)
             .read(true)
             .write(true)
+            // Lock file only: never truncate, the contents are never used.
+            .truncate(false)
             .open(lock_path)
             .map_err(store_error)?;
         lock.try_lock_exclusive().map_err(|_| {
@@ -1571,17 +1573,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(summary.status, "succeeded");
-        assert!(
-            fixture
-                .service
-                .setup
-                .recovery()
-                .status()
-                .unwrap()
-                .points
-                .len()
-                >= 1
-        );
+        assert!(!fixture
+            .service
+            .setup
+            .recovery()
+            .status()
+            .unwrap()
+            .points
+            .is_empty());
         fs::remove_dir_all(fixture.root).unwrap();
     }
 
