@@ -23,7 +23,7 @@ export type JourneyView =
   | { kind: "connectIntro" }
   | { kind: "connectAssistant" }
   /* 2 — Let it check: "What may InnPilot check?" */
-  | { kind: "chooseScope" }
+  | { kind: "chooseScope"; reason: "missing" | "revoked" }
   | { kind: "checking" }
   | { kind: "question" }
   /* 3 — Review: "Do I approve these changes?" */
@@ -63,6 +63,14 @@ const STAGE_BY_STATE: Record<OnboardingState, JourneyStage> = {
 
 export const JOURNEY_STAGES: JourneyStage[] = ["connect", "check", "review", "ready"];
 
+/** A grant is prepared locally before a real assistant has reached InnPilot. */
+export function assistantHasReachedInnPilot(agent: LocalAgentConnectionStatus | null) {
+  return (
+    agent?.state === "connected" &&
+    Boolean(agent.lastActivityAt || agent.lastClientName || agent.lastProtocolVersion)
+  );
+}
+
 /**
  * Projects backend state into the stage the manager is standing in.
  *
@@ -76,7 +84,6 @@ export function projectJourney(
   discovery: DiscoveryManagerView | null,
 ): JourneyProjection {
   const state = snapshot.state;
-  const stage = STAGE_BY_STATE[state] ?? "connect";
 
   // Terminal failure states are read straight from the backend. They must never
   // be inferred from a failed command call in the UI.
@@ -87,47 +94,70 @@ export function projectJourney(
     return { stage: "review", view: { kind: "failedRecoverable" }, complete: false };
   }
 
-  if (stage === "ready") {
+  if (STAGE_BY_STATE[state] === "ready") {
     const deferred = snapshot.activeSession?.deferredItems ?? [];
     return {
       stage: "ready",
       view: { kind: "ready", deferredItems: deferred },
-      complete: snapshot.activeSession === null,
+      complete: true,
     };
   }
 
-  if (stage === "review") {
-    if (state === "applying" || state === "verifying") {
-      return { stage: "review", view: { kind: "applying" }, complete: false };
-    }
-    return { stage: "review", view: { kind: "review" }, complete: false };
+  if (state === "applying" || state === "verifying") {
+    return { stage: "review", view: { kind: "applying" }, complete: false };
   }
 
-  if (stage === "check") {
-    if (state === "needsUserInput") {
-      return { stage: "check", view: { kind: "question" }, complete: false };
-    }
-    if (state === "discoveryRunning") {
-      return { stage: "check", view: { kind: "checking" }, complete: false };
-    }
-    // agentConnected / scopeApprovalRequired: the manager still has to say what
-    // InnPilot may look at, unless an active scope already exists.
-    const scopeActive = discovery?.discovery.scope?.state === "active";
+  /*
+   * Before apply, three independent backend records are authoritative:
+   * onboarding, the DPAPI-bound assistant grant/audit, and the Phase E
+   * discovery/proposal stores. The durable proposal is intentionally bound to
+   * an onboarding revision, so React must not manufacture lifecycle writes just
+   * to move the rail. It may, however, choose a screen from those exact backend
+   * facts. The ordering below is fail-closed: lost/revoked authority sends the
+   * manager backwards before any proposal can be reviewed or approved.
+   */
+  const assistantReachedInnPilot = assistantHasReachedInnPilot(agent);
+  if (!assistantReachedInnPilot) {
+    const sessionStarted = snapshot.activeSession?.mode === "agentAssisted";
     return {
-      stage: "check",
-      view: { kind: scopeActive ? "checking" : "chooseScope" },
+      stage: "connect",
+      view: {
+        kind:
+          sessionStarted || Boolean(agent?.profileId)
+            ? "connectAssistant"
+            : "connectIntro",
+      },
       complete: false,
     };
   }
 
-  // Connect. Once the backend reports a live connection we show the confirmed
-  // step rather than the intro, so a returning manager is not sent backwards.
-  const connected = agent?.state === "connected";
-  return {
-    stage: "connect",
-    view: { kind: connected ? "connectAssistant" : "connectIntro" },
-    complete: false,
-  };
+  const scopeState = discovery?.discovery.scope?.state;
+  if (scopeState !== "active") {
+    return {
+      stage: "check",
+      view: { kind: "chooseScope", reason: scopeState ? "revoked" : "missing" },
+      complete: false,
+    };
+  }
+
+  const proposal = discovery?.proposal;
+  if (
+    state === "needsUserInput" ||
+    proposal?.status === "needs_user_input" ||
+    (proposal?.unresolvedQuestions.length ?? 0) > 0
+  ) {
+    return { stage: "check", view: { kind: "question" }, complete: false };
+  }
+
+  if (
+    proposal ||
+    state === "proposalReady" ||
+    state === "waitingForApproval"
+  ) {
+    return { stage: "review", view: { kind: "review" }, complete: false };
+  }
+
+  return { stage: "check", view: { kind: "checking" }, complete: false };
 }
 
 /** Rail state for the four-stage indicator. */

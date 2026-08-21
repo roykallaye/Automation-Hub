@@ -58,6 +58,7 @@ export function DesktopServicePanel() {
         <Row
           icon={Power}
           meta={t("settings.desktopServiceText")}
+          stackAsideOnMobile
           status={
             status
               ? status.launchAtSignIn

@@ -1,6 +1,7 @@
 {
   "productName": "InnPilot Validation",
   "identifier": "com.innpilot.validation",
+  "mainBinaryName": "innpilot-validation",
   "bundle": {
     "externalBin": ["binaries/innpilot-mcp"],
     "resources": {

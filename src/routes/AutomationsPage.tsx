@@ -293,6 +293,7 @@ function WorkflowDetail({
               <Row
                 title={t("common.folder")}
                 meta={entry.folderKey ? folderMeaning(entry.folderKey, t) : ""}
+                stackAsideOnMobile
                 aside={
                   <Button icon={FolderOpen} onClick={() => onOpenPath(folderPath)} variant="ghost">
                     {t("automations.openFolder")}

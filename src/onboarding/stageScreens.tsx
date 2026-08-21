@@ -46,6 +46,7 @@ import type { OnboardingState } from "../onboarding";
 import type {
   DiscoveryManagerView,
   LocalAgentConnectionStatus,
+  ManagerProposalApplySummary,
   ManagerProposalReviewField,
 } from "../types";
 
@@ -100,7 +101,10 @@ export function ConnectAssistantStage({
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
-  const connected = agent?.state === "connected";
+  const reachedInnPilot =
+    agent?.state === "connected" &&
+    Boolean(agent.lastActivityAt || agent.lastClientName || agent.lastProtocolVersion);
+  const needsFreshProfile = !agent?.profileId || agent.state === "expired";
 
   async function copyCommand() {
     if (!agent?.codexAddCommand) return;
@@ -113,7 +117,7 @@ export function ConnectAssistantStage({
     }
   }
 
-  if (connected) {
+  if (reachedInnPilot) {
     return (
       <>
         <div className="ip-stage-head">
@@ -152,7 +156,7 @@ export function ConnectAssistantStage({
             <div className="ip-steps__body">
               <span className="ip-steps__title">{t("connect.stepCreate")}</span>
               <span className="ip-steps__hint">{t("connect.stepCreateHint")}</span>
-              {!agent?.profileId ? (
+              {needsFreshProfile ? (
                 <div>
                   <Button busy={busy} onClick={onCreate} variant="primary">
                     {t("connect.create")}
@@ -241,19 +245,21 @@ export function ChooseScopeStage({
   busy,
   onApprove,
   onChoose,
+  reason,
   selectedRoots,
 }: {
   busy: boolean;
   onApprove: () => void;
   onChoose: () => void;
+  reason: "missing" | "revoked";
   selectedRoots: string[];
 }) {
   const { t } = useI18n();
   return (
     <>
       <div className="ip-stage-head">
-        <h1>{t("scope.title")}</h1>
-        <p>{t("scope.text")}</p>
+        <h1>{reason === "revoked" ? t("scope.revoked") : t("scope.title")}</h1>
+        <p>{reason === "revoked" ? t("scope.revokedText") : t("scope.text")}</p>
       </div>
 
       {selectedRoots.length > 0 ? (
@@ -460,10 +466,12 @@ export function ReviewStage({
   busy,
   discovery,
   onApprove,
+  onRefresh,
 }: {
   busy: boolean;
   discovery: DiscoveryManagerView | null;
   onApprove: () => void;
+  onRefresh: () => void;
 }) {
   const { t } = useI18n();
   const proposal = discovery?.proposal;
@@ -475,6 +483,11 @@ export function ReviewStage({
         <div className="ip-stage-head">
           <h1>{t("review.noProposalTitle")}</h1>
           <p>{t("review.noProposalText")}</p>
+        </div>
+        <div className="ip-stage-foot">
+          <Button busy={busy} icon={RefreshCw} onClick={onRefresh} variant="secondary">
+            {t("common.refresh")}
+          </Button>
         </div>
       </>
     );
@@ -577,6 +590,11 @@ export function ReviewStage({
           >
             {t("review.approve")}
           </Button>
+          {stale ? (
+            <Button busy={busy} icon={RefreshCw} onClick={onRefresh} variant="secondary">
+              {t("common.refresh")}
+            </Button>
+          ) : null}
         </div>
         <p className="ip-fineprint">
           <ShieldCheck aria-hidden="true" size={13} />
@@ -768,11 +786,13 @@ function deferredLabel(item: string, t: Translate) {
 
 export function RolledBackStage({
   busy,
+  issue,
   onManual,
   onRetry,
   onSupport,
 }: {
   busy: boolean;
+  issue: ManagerProposalApplySummary | null;
   onManual: () => void;
   onRetry: () => void;
   onSupport: () => void;
@@ -786,6 +806,21 @@ export function RolledBackStage({
       </div>
 
       <Note tone="ready">{t("preserve.unrelatedConfigurationPreserved")}</Note>
+
+      {issue?.safeFailureCode || issue?.blockerKeys.length ? (
+        <TechnicalDetails label={t("rolledBack.reviewIssue")}>
+          <DetailList
+            items={[
+              ...(issue.safeFailureCode
+                ? [{ label: "Failure code", value: issue.safeFailureCode, mono: true }]
+                : []),
+              ...(issue.blockerKeys.length
+                ? [{ label: "Checks", value: issue.blockerKeys.join(", "), mono: true }]
+                : []),
+            ]}
+          />
+        </TechnicalDetails>
+      ) : null}
 
       <div className="ip-stage-foot">
         <Button busy={busy} icon={RefreshCw} onClick={onRetry} size="lg" variant="primary">
@@ -804,9 +839,11 @@ export function RolledBackStage({
 
 export function FailedStage({
   failureCode,
+  issue,
   onSupport,
 }: {
   failureCode: string | null;
+  issue: ManagerProposalApplySummary | null;
   onSupport: () => void;
 }) {
   const { t } = useI18n();
@@ -824,10 +861,22 @@ export function FailedStage({
       </div>
 
       {/* The raw code is available, but it is never the first thing shown. */}
-      {failureCode ? (
+      {failureCode || issue?.safeFailureCode || issue?.blockerKeys.length ? (
         <div style={{ marginTop: 18 }}>
           <TechnicalDetails label={t("failed.technical")}>
-            <DetailList items={[{ label: "Failure code", value: failureCode, mono: true }]} />
+            <DetailList
+              items={[
+                ...(failureCode
+                  ? [{ label: "Failure code", value: failureCode, mono: true }]
+                  : []),
+                ...(!failureCode && issue?.safeFailureCode
+                  ? [{ label: "Failure code", value: issue.safeFailureCode, mono: true }]
+                  : []),
+                ...(issue?.blockerKeys.length
+                  ? [{ label: "Checks", value: issue.blockerKeys.join(", "), mono: true }]
+                  : []),
+              ]}
+            />
           </TechnicalDetails>
         </div>
       ) : null}

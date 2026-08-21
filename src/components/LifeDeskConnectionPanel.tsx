@@ -87,6 +87,7 @@ export function LifeDeskConnectionPanel() {
         <Row
           icon={CloudCog}
           meta={connected ? t("pair.lifedeskText") : t("pair.notConnectedText")}
+          stackAsideOnMobile
           status={
             connected
               ? { tone: "ready", label: t("status.connected") }

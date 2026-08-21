@@ -229,6 +229,14 @@ export const agentNotConnected: LocalAgentConnectionStatus = {
   codexAddCommand: null,
 };
 
+export const agentPrepared: LocalAgentConnectionStatus = {
+  ...agentConnected,
+  lastActivityAt: null,
+  lastTool: null,
+  lastClientName: null,
+  lastProtocolVersion: null,
+};
+
 export const lifedeskConnected: LifeDeskConnectionStatus = {
   state: "connected",
   installationLabel: "Reception PC",

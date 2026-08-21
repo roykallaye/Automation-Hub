@@ -15,12 +15,13 @@ import {
   commandErrorMessage,
   getInitialOnboardingState,
   getOnboardingState,
-  isOnboardingReady,
   isOnboardingStateReady,
   normalizeOnboardingError,
+  shouldShowOnboardingJourney,
   type OnboardingSnapshot,
 } from "./onboarding";
 import { OnboardingJourney } from "./onboarding/OnboardingJourney";
+import { assistantHasReachedInnPilot } from "./onboarding/stages";
 import { ActivityPage } from "./routes/ActivityPage";
 import { AssistantPage } from "./routes/AssistantPage";
 import { AutomationsPage } from "./routes/AutomationsPage";
@@ -66,6 +67,8 @@ function App() {
   const [lifedesk, setLifedesk] = useState<LifeDeskConnectionStatus | null>(null);
   /** Set when the manager deliberately chooses the manual/advanced path. */
   const [manualSetup, setManualSetup] = useState(false);
+  const [journeySupport, setJourneySupport] = useState(false);
+  const [journeyEntered, setJourneyEntered] = useState(false);
   /**
    * Set when the manager leaves the journey from the Ready screen. Only ever
    * honoured while the backend itself reports a ready state — it decides which
@@ -86,6 +89,12 @@ function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [currentPage]);
+
+  useEffect(() => {
+    if (onboarding && !isOnboardingStateReady(onboarding)) {
+      setJourneyEntered(true);
+    }
+  }, [onboarding]);
 
   const branding = configStatus?.config.client.branding;
   useEffect(() => {
@@ -142,12 +151,14 @@ function App() {
     void refreshLatestLogs();
     void refreshActivityHistory();
     void refreshConnections();
-    void invoke<RunSummary | null>("get_last_run_summary").then((summary) => {
-      if (summary) {
-        setLastSummary(summary);
-        setStatus(summary.status);
-      }
-    });
+    void invoke<RunSummary | null>("get_last_run_summary")
+      .then((summary) => {
+        if (summary) {
+          setLastSummary(summary);
+          setStatus(summary.status);
+        }
+      })
+      .catch(() => undefined);
 
     const unlistenFinished = listen<RunSummary>("command-finished", (event) => {
       setLastSummary(event.payload);
@@ -314,20 +325,16 @@ function App() {
     ? "working"
     : status === "error" || attentionCount > 0
       ? "attention"
-      : agent?.state === "connected"
+      : assistantHasReachedInnPilot(agent)
         ? "connected"
         : "notConnected";
 
   // Wait for the backend to say where this installation stands before painting.
   if (!onboardingResolved) return null;
 
-  const onboardingComplete = onboarding === null ? browserPreview : isOnboardingReady(onboarding);
-  // The session record can outlive a successful apply, so honour the manager's
-  // exit once the backend state says ready rather than trapping them on Ready.
   const showJourney =
     onboarding !== null &&
-    !onboardingComplete &&
-    !(leftJourney && isOnboardingStateReady(onboarding));
+    shouldShowOnboardingJourney(onboarding, journeyEntered, leftJourney);
 
   /* -------- Manual / advanced setup: preserved, deliberately opt-in -------- */
   if (manualSetup && onboarding) {
@@ -358,6 +365,34 @@ function App() {
     );
   }
 
+  if (journeySupport) {
+    return (
+      <I18nProvider language={configStatus?.config.language}>
+        <div className="ip-app">
+          <div className="ip-journey">
+            <div className="ip-journey__bar">
+              <span className="ip-journey__brand">{t("nav.support")}</span>
+              <Button onClick={() => setJourneySupport(false)} variant="ghost">
+                {t("common.back")}
+              </Button>
+            </div>
+            <div className="ip-journey__body">
+              <div className="ip-journey__panel ip-journey__panel--wide">
+                <SupportPage
+                  configStatus={configStatus}
+                  onInstallAutomation={installManagedAutomationScripts}
+                  onNavigate={setCurrentPage}
+                  onOpenPath={openPath}
+                  onRefresh={refreshAll}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </I18nProvider>
+    );
+  }
+
   /* ---------------- Fresh install: the four-stage journey ---------------- */
   if (showJourney && onboarding) {
     return (
@@ -366,14 +401,14 @@ function App() {
           <OnboardingJourney
             onFinished={() => {
               setLeftJourney(true);
+              setJourneySupport(false);
               setCurrentPage("home");
               void refreshAll();
               void getOnboardingState().then(setOnboarding).catch(() => undefined);
             }}
             onManualSetup={() => setManualSetup(true)}
             onOpenSupport={() => {
-              setCurrentPage("support");
-              setOnboarding((current) => current);
+              setJourneySupport(true);
             }}
             onSnapshotChange={setOnboarding}
             snapshot={onboarding}
@@ -392,6 +427,8 @@ function App() {
         currentPage={currentPage}
         hotelName={hotelName}
         logoDataUrl={logoDataUrl}
+        notice={notice}
+        onDismissNotice={() => setNotice("")}
         onPageChange={setCurrentPage}
         presence={presence}
       >
@@ -487,11 +524,6 @@ function App() {
           />
         )}
 
-        {notice && currentPage === "support" ? (
-          <p className="ip-visually-hidden" role="status">
-            {notice}
-          </p>
-        ) : null}
       </AppFrame>
     </I18nProvider>
   );

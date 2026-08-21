@@ -121,6 +121,7 @@ export function Row({
   aside,
   onOpen,
   openLabel,
+  stackAsideOnMobile = false,
 }: {
   icon?: LucideIcon;
   title: string;
@@ -129,7 +130,9 @@ export function Row({
   aside?: ReactNode;
   onOpen?: () => void;
   openLabel?: string;
+  stackAsideOnMobile?: boolean;
 }) {
+  const className = `ip-row${stackAsideOnMobile ? " ip-row--stack-aside-mobile" : ""}`;
   const body = (
     <>
       {Icon ? (
@@ -151,12 +154,12 @@ export function Row({
 
   if (onOpen) {
     return (
-      <button aria-label={openLabel} className="ip-row" onClick={onOpen} type="button">
+      <button aria-label={openLabel} className={className} onClick={onOpen} type="button">
         {body}
       </button>
     );
   }
-  return <div className="ip-row">{body}</div>;
+  return <div className={className}>{body}</div>;
 }
 
 export function Rows({ children }: { children: ReactNode }) {

@@ -263,6 +263,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow-x: clip;
 }
 
 .ip-topbar {
@@ -278,6 +279,43 @@
   position: sticky;
   top: 0;
   z-index: 20;
+}
+
+.ip-topbar__notice {
+  align-items: center;
+  color: var(--ip-ink-soft);
+  display: flex;
+  font-size: 0.8rem;
+  gap: 7px;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.ip-topbar__notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ip-topbar__notice button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ip-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.ip-topbar__notice button:hover,
+.ip-topbar__notice button:focus-visible {
+  background: var(--ip-surface-sunk);
+  color: var(--ip-ink);
 }
 
 .ip-content {
@@ -430,6 +468,7 @@
   border: 1px solid var(--ip-line);
   border-radius: var(--ip-radius);
   box-shadow: var(--ip-shadow-sm);
+  min-width: 0;
 }
 
 .ip-card--pad {
@@ -1397,6 +1436,7 @@ button.ip-row:hover {
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Menlo, monospace;
   font-size: 0.78rem;
   line-height: 1.6;
+  max-width: 100%;
   overflow-x: auto;
   padding: 10px 12px;
   white-space: pre;
@@ -1651,6 +1691,18 @@ button.ip-row:hover {
 
   .ip-review-item {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ip-row--stack-aside-mobile {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ip-row--stack-aside-mobile .ip-row__aside {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    margin-left: 34px;
+    min-width: 0;
   }
 
   .ip-page-head {

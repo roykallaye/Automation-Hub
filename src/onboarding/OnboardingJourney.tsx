@@ -24,6 +24,7 @@ import {
   beginOrResumeOnboarding,
   commandErrorMessage,
   getOnboardingState,
+  restartOnboarding,
   type OnboardingSnapshot,
 } from "../onboarding";
 import type {
@@ -93,7 +94,8 @@ export function OnboardingJourney({
     view.kind === "checking" ||
     view.kind === "question" ||
     view.kind === "applying" ||
-    (view.kind === "connectAssistant" && agent?.state !== "connected");
+    (view.kind === "connectAssistant" &&
+      !Boolean(agent?.lastActivityAt || agent?.lastClientName || agent?.lastProtocolVersion));
 
   useEffect(() => {
     if (!shouldPoll) return;
@@ -211,6 +213,17 @@ export function OnboardingJourney({
     }
   }
 
+  async function retryAfterRollback() {
+    await run(async () => {
+      const restarted = await restartOnboarding(
+        "agentAssisted",
+        snapshot.revision,
+      );
+      onSnapshotChange(restarted);
+      await readBackendState();
+    }, t("review.applyFailed"));
+  }
+
   return (
     <div className="ip-journey">
       <div className="ip-journey__bar">
@@ -249,6 +262,7 @@ export function OnboardingJourney({
               busy={busy}
               onApprove={approveScope}
               onChoose={chooseFolders}
+              reason={view.reason}
               selectedRoots={selectedRoots}
             />
           ) : null}
@@ -276,6 +290,7 @@ export function OnboardingJourney({
               busy={busy}
               discovery={discovery}
               onApprove={approveAndFinish}
+              onRefresh={readBackendState}
             />
           ) : null}
 
@@ -288,8 +303,9 @@ export function OnboardingJourney({
           {view.kind === "rolledBack" ? (
             <RolledBackStage
               busy={busy}
+              issue={discovery?.application ?? null}
               onManual={onManualSetup}
-              onRetry={readBackendState}
+              onRetry={retryAfterRollback}
               onSupport={onOpenSupport}
             />
           ) : null}
@@ -297,6 +313,7 @@ export function OnboardingJourney({
           {view.kind === "failedRecoverable" ? (
             <FailedStage
               failureCode={snapshot.activeSession?.failureCode ?? null}
+              issue={discovery?.application ?? null}
               onSupport={onOpenSupport}
             />
           ) : null}

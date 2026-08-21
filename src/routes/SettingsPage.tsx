@@ -27,6 +27,7 @@ import {
 } from "../components/ui";
 import { useI18n, type Language } from "../i18n";
 import { deliveryModeLabel } from "../messages";
+import { assistantHasReachedInnPilot } from "../onboarding/stages";
 import type { AppConfigStatus, AppPage, LocalAgentConnectionStatus } from "../types";
 
 export function SettingsPage({
@@ -44,6 +45,7 @@ export function SettingsPage({
   const [savingLanguage, setSavingLanguage] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const config = configStatus?.config;
+  const assistantConnected = assistantHasReachedInnPilot(agent);
 
   async function saveLanguage(next: Language) {
     if (next === language || savingLanguage) return;
@@ -78,6 +80,7 @@ export function SettingsPage({
               <Row
                 icon={Languages}
                 meta={t("settings.languageHint")}
+                stackAsideOnMobile
                 title={t("settings.language")}
                 aside={
                   <div className="ip-actions">
@@ -117,14 +120,14 @@ export function SettingsPage({
               <Row
                 icon={Bot}
                 meta={
-                  agent?.state === "connected"
+                  assistantConnected
                     ? t("assistant.connectedText")
                     : t("assistant.notConnectedText")
                 }
                 onOpen={() => onNavigate("assistant")}
                 openLabel={t("assistant.title")}
                 status={
-                  agent?.state === "connected"
+                  assistantConnected
                     ? { tone: "ready", label: t("status.connected") }
                     : { tone: "idle", label: t("status.notConnected") }
                 }

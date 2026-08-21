@@ -21,7 +21,8 @@ import {
   TechnicalDetails,
 } from "../components/ui";
 import { useI18n } from "../i18n";
-import { isOnboardingReady, type OnboardingSnapshot } from "../onboarding";
+import { isOnboardingStateReady, type OnboardingSnapshot } from "../onboarding";
+import { assistantHasReachedInnPilot } from "../onboarding/stages";
 import { formatWhen } from "../statusMapping";
 import type {
   AppConfigStatus,
@@ -54,13 +55,13 @@ export function SystemPage({
 }) {
   const { language, t } = useI18n();
 
-  const ready = onboarding ? isOnboardingReady(onboarding) : false;
+  const ready = onboarding ? isOnboardingStateReady(onboarding) : false;
   const workModules = modules.filter((module) => module.id !== "support");
   const troubled = workModules.filter(
     (module) => module.status === "blocked" || module.status === "needs_attention",
   );
 
-  const agentConnected = agent?.state === "connected";
+  const agentConnected = assistantHasReachedInnPilot(agent);
   const lifedeskConnected = lifedesk?.state === "connected";
 
   return (

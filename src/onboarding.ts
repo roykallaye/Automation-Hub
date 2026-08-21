@@ -2,6 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { AppPage } from "./types";
 import type { SetupDraft } from "./components/SetupWizard/setupDraft";
+import {
+  isOnboardingReady,
+  isOnboardingStateReady,
+} from "./onboarding/readiness";
+
+export {
+  isOnboardingReady,
+  isOnboardingStateReady,
+  shouldShowOnboardingJourney,
+} from "./onboarding/readiness";
 
 export const LEGACY_ONBOARDING_STORAGE_KEY = "innpilot.setup-session.v1";
 
@@ -167,12 +177,6 @@ export class OnboardingCommandError extends Error implements OnboardingErrorShap
   }
 }
 
-const READY_STATES = new Set<OnboardingState>([
-  "ready",
-  "readyLegacy",
-  "readyWithDeferredItems",
-]);
-
 const STATE_INTEGRITY_ERROR_CODES = new Set([
   "corrupt_state",
   "future_schema",
@@ -260,26 +264,7 @@ export function recoverOnboardingState() {
 }
 
 export function initialPageForOnboarding(snapshot: OnboardingSnapshot): AppPage {
-  return isOnboardingReady(snapshot) ? "home" : "system";
-}
-
-export function isOnboardingReady(snapshot: OnboardingSnapshot) {
-  return READY_STATES.has(snapshot.state) && snapshot.activeSession === null;
-}
-
-/**
- * Whether the backend's own state says setup succeeded, ignoring whether the
- * session record has been retired yet.
- *
- * `isOnboardingReady` additionally requires the session to be cleared, which is
- * the right test for "is this installation settled". It is the wrong test for
- * "may the manager leave the setup journey": between a successful apply and the
- * session being retired, the backend reports a ready state with a session still
- * attached, and gating the exit on that would leave "Go to InnPilot" doing
- * nothing. This asks only the presentational question.
- */
-export function isOnboardingStateReady(snapshot: OnboardingSnapshot) {
-  return READY_STATES.has(snapshot.state);
+  return isOnboardingStateReady(snapshot) ? "home" : "system";
 }
 
 export function onboardingErrorNeedsSupport(error: unknown) {

@@ -9,7 +9,7 @@
   It is not a chat surface. InnPilot does not need to become another chat app.
 */
 
-import { Bot, Check, Minus, RefreshCw, Unplug } from "lucide-react";
+import { Bot, Check, Copy, Minus, RefreshCw, Unplug } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 
@@ -30,6 +30,7 @@ import {
 } from "../components/ui";
 import { useI18n } from "../i18n";
 import { commandErrorMessage } from "../onboarding";
+import { assistantHasReachedInnPilot } from "../onboarding/stages";
 import { formatWhen } from "../statusMapping";
 import type { AppPage, DiscoveryManagerView, LocalAgentConnectionStatus } from "../types";
 
@@ -50,9 +51,22 @@ export function AssistantPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const connected = agent?.state === "connected";
+  const connected = assistantHasReachedInnPilot(agent);
+  const connectionPrepared = agent?.state === "connected" && Boolean(agent.profileId);
   const expired = agent?.state === "expired";
+
+  async function copyCommand() {
+    if (!agent?.codexAddCommand) return;
+    try {
+      await navigator.clipboard.writeText(agent.codexAddCommand);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setError(t("assistant.connectionUnavailable"));
+    }
+  }
 
   async function disconnect() {
     setConfirmingDisconnect(false);
@@ -91,7 +105,16 @@ export function AssistantPage({
         {error ? <Note tone="problem">{error}</Note> : null}
 
         <Card pad>
-          <div style={{ alignItems: "center", display: "flex", gap: 11, marginBottom: 6 }}>
+          <div
+            style={{
+              alignItems: "center",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 11,
+              marginBottom: 6,
+              minWidth: 0,
+            }}
+          >
             <span aria-hidden="true" className={`ip-headline__mark is-${connected ? "ready" : "attention"}`}>
               <Bot size={15} />
             </span>
@@ -100,11 +123,19 @@ export function AssistantPage({
                 ? t("assistant.connectedHeading")
                 : expired
                   ? t("assistant.expiredHeading")
-                  : t("assistant.notConnectedHeading")}
+                  : connectionPrepared
+                    ? t("connectAssistant.title")
+                    : t("assistant.notConnectedHeading")}
             </h2>
             <Status
-              label={connected ? t("status.connected") : t("status.notConnected")}
-              tone={connected ? "ready" : "idle"}
+              label={
+                connected
+                  ? t("status.connected")
+                  : connectionPrepared
+                    ? t("connect.stepCheck")
+                    : t("status.notConnected")
+              }
+              tone={connected ? "ready" : connectionPrepared ? "attention" : "idle"}
             />
           </div>
           <p style={{ color: "var(--ip-muted)", fontSize: "0.9rem", margin: 0, maxWidth: "58ch" }}>
@@ -112,8 +143,16 @@ export function AssistantPage({
               ? t("assistant.connectedText")
               : expired
                 ? t("assistant.expiredText")
-                : t("assistant.notConnectedText")}
+                : connectionPrepared
+                  ? t("connectAssistant.text")
+                  : t("assistant.notConnectedText")}
           </p>
+
+          {connectionPrepared && !connected && agent?.codexAddCommand ? (
+            <div style={{ marginTop: 14 }}>
+              <code className="ip-code">{agent.codexAddCommand}</code>
+            </div>
+          ) : null}
 
           <div className="ip-actions" style={{ marginTop: 16 }}>
             {connected ? (
@@ -125,6 +164,27 @@ export function AssistantPage({
               >
                 {t("assistant.disconnect")}
               </Button>
+            ) : connectionPrepared ? (
+              <>
+                <Button
+                  icon={copied ? Check : Copy}
+                  onClick={() => void copyCommand()}
+                  variant="primary"
+                >
+                  {copied ? t("connect.copied") : t("connect.copy")}
+                </Button>
+                <Button busy={busy} icon={RefreshCw} onClick={onRefresh} variant="secondary">
+                  {t("connect.check")}
+                </Button>
+                <Button
+                  busy={busy}
+                  icon={Unplug}
+                  onClick={() => setConfirmingDisconnect(true)}
+                  variant="ghost"
+                >
+                  {t("assistant.disconnect")}
+                </Button>
+              </>
             ) : (
               <Button busy={busy} icon={Bot} onClick={connect} variant="primary">
                 {expired ? t("assistant.reconnect") : t("assistant.connect")}

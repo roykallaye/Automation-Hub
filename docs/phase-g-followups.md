@@ -29,15 +29,15 @@ question (and a corresponding MCP read path so the assistant can pick it up).
 This is what would let the brief's "one question at a time, then simple choices"
 flow actually be answered in-product.
 
-## 3. Verified rollback has no reviewable issue detail
+## 3. Verified rollback detail is resolved for Phase G
 
-`rolledBack` exposes only `activeSession.failureCode`. The brief asks for a
-"Review issue" action alongside Try again / Manual / Support; there is nothing
-specific enough to show behind it, so that action is omitted rather than
-opening an empty screen.
+The protected Phase F application record already exposes bounded
+`safeFailureCode` and `blockerKeys` values. Phase G now shows those values only
+inside the collapsed technical disclosure on rollback/failure screens. Raw
+logs, paths and document content remain excluded.
 
-**Needed:** the failed verification check(s) surfaced on the session — which
-required check did not pass, and against which field.
+Richer business-facing issue copy can be added later from stable error codes;
+no empty "Review issue" action is shown.
 
 ## 4. German and French cannot be offered yet
 

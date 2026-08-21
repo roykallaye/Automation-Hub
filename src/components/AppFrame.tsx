@@ -19,6 +19,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Workflow,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -51,6 +52,8 @@ export function AppFrame({
   logoDataUrl,
   presence,
   attentionCount,
+  notice,
+  onDismissNotice,
   onPageChange,
 }: {
   children: ReactNode;
@@ -60,6 +63,8 @@ export function AppFrame({
   logoDataUrl?: string | null;
   presence: AssistantPresence;
   attentionCount: number;
+  notice?: string | null;
+  onDismissNotice?: () => void;
   onPageChange: (page: AppPage) => void;
 }) {
   const { t } = useI18n();
@@ -109,6 +114,21 @@ export function AppFrame({
 
         <div className="ip-main">
           <header className="ip-topbar">
+            {notice ? (
+              <div aria-live="polite" className="ip-topbar__notice" role="status">
+                <span title={notice}>{notice}</span>
+                {onDismissNotice ? (
+                  <button
+                    aria-label={t("common.close")}
+                    onClick={onDismissNotice}
+                    title={t("common.close")}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={14} />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             {browserPreview ? (
               <span className="ip-presence" title={t("shell.browserPreviewHint")}>
                 <MonitorSmartphone aria-hidden="true" size={14} />

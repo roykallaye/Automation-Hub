@@ -1039,13 +1039,6 @@ fn begin_or_resume_with_service(
                 return Ok(());
             }
 
-            if mode == OnboardingMode::AgentAssisted {
-                return Err(OnboardingError::new(
-                    "feature_unavailable",
-                    "Agent-assisted onboarding is not enabled in this phase.",
-                    true,
-                ));
-            }
             let origin = if document.installation.readiness == InstallationReadiness::NotStarted {
                 OnboardingOrigin::FreshInstall
             } else {
@@ -1601,13 +1594,6 @@ fn restart_with_service(
         "restart",
         &payload_mode,
         |document, context| {
-            if mode == OnboardingMode::AgentAssisted {
-                return Err(OnboardingError::new(
-                    "feature_unavailable",
-                    "Agent-assisted onboarding is not enabled in this phase.",
-                    true,
-                ));
-            }
             if document.active_session.as_ref().is_some_and(|session| {
                 matches!(
                     session.state,
@@ -4266,6 +4252,50 @@ mod tests {
             .unwrap();
         assert_eq!(progressed.state(), OnboardingState::NeedsUserInput);
         assert_eq!(service.get().unwrap().revision(), progressed.revision());
+    }
+
+    #[test]
+    fn agent_assisted_journey_can_begin_and_restart_without_manual_apply_authority() {
+        let (root, config_path, _) = configured_store("agent_journey", true);
+        let service = path_service(&root, &config_path);
+        let context = current_config_context(&config_path).unwrap();
+
+        let initial = service.reconcile_startup(false).unwrap();
+        let started = service
+            .begin_or_resume(
+                OnboardingMode::AgentAssisted,
+                initial.revision(),
+                "request-agent-begin-0001".to_string(),
+            )
+            .unwrap();
+        assert_eq!(started.state(), OnboardingState::BootstrapCreated);
+        assert_eq!(
+            started.active_session.as_ref().unwrap().mode,
+            OnboardingMode::AgentAssisted
+        );
+
+        let error = service
+            .prepare_apply(
+                started.revision(),
+                context.revision,
+                "manual-ui-confirmation".to_string(),
+                "request-agent-apply-0001".to_string(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "feature_unavailable");
+
+        let restarted = service
+            .restart(
+                OnboardingMode::AgentAssisted,
+                started.revision(),
+                "request-agent-restart-0001".to_string(),
+            )
+            .unwrap();
+        assert_eq!(restarted.state(), OnboardingState::BootstrapCreated);
+        assert_eq!(
+            restarted.active_session.as_ref().unwrap().mode,
+            OnboardingMode::AgentAssisted
+        );
     }
 
     #[test]

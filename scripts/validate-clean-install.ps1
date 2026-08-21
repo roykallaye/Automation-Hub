@@ -4,6 +4,10 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $nsisDirectory = Join-Path $root "src-tauri\target\release\bundle\nsis"
 $expectedDisplayName = "InnPilot Validation"
+$expectedInstallLeaf = "InnPilotValidation"
+$expectedInstallDirectory = [IO.Path]::GetFullPath(
+  (Join-Path $env:LOCALAPPDATA $expectedInstallLeaf)
+)
 $expectedAppData = [IO.Path]::GetFullPath(
   (Join-Path $env:APPDATA "com.innpilot.validation")
 )
@@ -77,7 +81,14 @@ function Stop-ValidationProcess {
 }
 
 function Invoke-SilentInstaller([string] $Path) {
-  $result = Start-Process -FilePath $Path -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  $installArgument = "/D=$expectedInstallDirectory"
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $Path
+  $startInfo.Arguments = "/S $installArgument"
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $result = [System.Diagnostics.Process]::Start($startInfo)
+  $result.WaitForExit()
   if ($result.ExitCode -ne 0) {
     throw "Validation installer exited with code $($result.ExitCode)."
   }
@@ -158,6 +169,9 @@ if ($null -ne $existingRecord) {
 if (Test-Path -LiteralPath $expectedAppData) {
   throw "The isolated InnPilot Validation app-data folder already exists. It was not touched."
 }
+if (Test-Path -LiteralPath $expectedInstallDirectory) {
+  throw "The isolated InnPilot Validation install folder already exists. It was not touched."
+}
 $ownsProfileCleanup = $true
 
 $installers = @(
@@ -179,14 +193,15 @@ try {
   }
   $installDirectory = ([string] $record.InstallLocation).Trim().Trim('"')
   Assert-UnderDirectory $installDirectory $env:LOCALAPPDATA "Validation installation"
-  if ((Split-Path $installDirectory -Leaf) -ne $expectedDisplayName) {
+  if ((Split-Path $installDirectory -Leaf) -ne $expectedInstallLeaf) {
     throw "The validation install used an unexpected directory."
   }
 
   $worker = Join-Path $installDirectory "worker\innpilot-worker.exe"
   $workerChecksum = Join-Path $installDirectory "worker\innpilot-worker.sha256"
+  $mcpSidecar = Join-Path $installDirectory "innpilot-mcp.exe"
   $thirdPartyNotices = Join-Path $installDirectory "THIRD_PARTY_NOTICES.md"
-  foreach ($required in @($worker, $workerChecksum, $thirdPartyNotices)) {
+  foreach ($required in @($worker, $workerChecksum, $mcpSidecar, $thirdPartyNotices)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
       throw "Packaged resource is missing: $required"
     }
@@ -198,6 +213,15 @@ try {
   $actualDigest = (Get-FileHash -LiteralPath $worker -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actualDigest -ne $declaredDigest) {
     throw "The clean-install worker failed its checksum."
+  }
+  # Tauri stamps bundle metadata into the copied external binary, so the
+  # installed helper must match the final release-sidecar artifact rather than
+  # the pre-stamped input under src-tauri/binaries.
+  $releaseMcpSidecar = Join-Path $root "src-tauri\target\release\innpilot-mcp.exe"
+  $expectedMcpDigest = (Get-FileHash -LiteralPath $releaseMcpSidecar -Algorithm SHA256).Hash.ToLowerInvariant()
+  $actualMcpDigest = (Get-FileHash -LiteralPath $mcpSidecar -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actualMcpDigest -ne $expectedMcpDigest) {
+    throw "The clean-install MCP sidecar does not match the prepared release helper."
   }
 
   $payloadPolicyPath = Join-Path $root "release\installed-payload-policy.json"
@@ -236,12 +260,9 @@ try {
     throw "The validation installer contains forbidden operational data."
   }
 
-  $application = @(
-    Get-ChildItem -LiteralPath $installDirectory -File -Filter "*.exe" |
-      Where-Object { $_.Name -ne "uninstall.exe" }
-  )
+  $application = @(Get-Item -LiteralPath (Join-Path $installDirectory "innpilot-validation.exe") -ErrorAction SilentlyContinue)
   if ($application.Count -ne 1) {
-    throw "Expected one installed InnPilot application executable."
+    throw "The installed InnPilot Validation application executable is missing."
   }
 
   $configPath = Join-Path $expectedAppData "config.json"
@@ -317,6 +338,8 @@ try {
     workerReadinessSeconds = $workerReadinessSeconds
     singleInstance = "passed"
     workerChecksum = $actualDigest
+    mcpSidecar = "passed"
+    mcpSidecarChecksum = $actualMcpDigest
     genericConfig = "passed"
     upgradePreservedConfig = "passed"
     uninstallPreservedAppData = "passed"

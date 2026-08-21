@@ -12,7 +12,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { AppFrame } from "../src/components/AppFrame";
+import { AppFrame, type AssistantPresence } from "../src/components/AppFrame";
 import { JOURNEY_STAGES, stageStatus, type JourneyStage } from "../src/onboarding/stages";
 import { I18nProvider, useI18n, type TranslationKey } from "../src/i18n";
 import { ActivityPage } from "../src/routes/ActivityPage";
@@ -20,6 +20,8 @@ import { AssistantPage } from "../src/routes/AssistantPage";
 import { AutomationsPage } from "../src/routes/AutomationsPage";
 import { GuidePage } from "../src/routes/GuidePage";
 import { HomePage } from "../src/routes/HomePage";
+import { SettingsPage } from "../src/routes/SettingsPage";
+import { SupportPage } from "../src/routes/SupportPage";
 import { SystemPage } from "../src/routes/SystemPage";
 import {
   ApplyingStage,
@@ -41,7 +43,15 @@ import "../src/design/system.css";
 
 const noop = () => undefined;
 
-function Shell({ page, children }: { page: AppPage; children: React.ReactNode }) {
+function Shell({
+  page,
+  children,
+  presence = "connected",
+}: {
+  page: AppPage;
+  children: React.ReactNode;
+  presence?: AssistantPresence;
+}) {
   return (
     <AppFrame
       attentionCount={page === "home" ? 1 : 0}
@@ -49,7 +59,7 @@ function Shell({ page, children }: { page: AppPage; children: React.ReactNode })
       currentPage={page}
       hotelName={fixture.HOTEL}
       onPageChange={noop}
-      presence="connected"
+      presence={presence}
     >
       {children}
     </AppFrame>
@@ -218,6 +228,40 @@ const SCENES: Record<string, () => JSX.Element> = {
       />
     </Shell>
   ),
+  "assistant-prepared": () => (
+    <Shell page="assistant" presence="attention">
+      <AssistantPage
+        agent={fixture.agentPrepared}
+        discovery={fixture.discoveryChecking}
+        onAgentChange={noop}
+        onNavigate={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
+  settings: () => (
+    <Shell page="settings">
+      <SettingsPage
+        agent={fixture.agentConnected}
+        configStatus={fixture.configStatus}
+        onNavigate={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
+  support: () => (
+    <Shell page="support">
+      <SupportPage
+        configStatus={fixture.configStatus}
+        onInstallAutomation={async () => {
+          throw new Error("Synthetic preview only");
+        }}
+        onNavigate={noop}
+        onOpenPath={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
   guide: () => (
     <Shell page="guide">
       <GuidePage lifedesk={fixture.lifedeskConnected} />
@@ -244,10 +288,22 @@ const SCENES: Record<string, () => JSX.Element> = {
         busy={false}
         onApprove={noop}
         onChoose={noop}
+        reason="missing"
         selectedRoots={[
           "D:\\ExampleHotel\\Amministrazione",
           "D:\\ExampleHotel\\Scansioni",
         ]}
+      />
+    </Journey>
+  ),
+  "onboard-scope-revoked": () => (
+    <Journey stage="check">
+      <ChooseScopeStage
+        busy={false}
+        onApprove={noop}
+        onChoose={noop}
+        reason="revoked"
+        selectedRoots={[]}
       />
     </Journey>
   ),
@@ -273,7 +329,33 @@ const SCENES: Record<string, () => JSX.Element> = {
   ),
   "onboard-review": () => (
     <Journey stage="review" wide>
-      <ReviewStage busy={false} discovery={fixture.discoveryWithProposal} onApprove={noop} />
+      <ReviewStage
+        busy={false}
+        discovery={fixture.discoveryWithProposal}
+        onApprove={noop}
+        onRefresh={noop}
+      />
+    </Journey>
+  ),
+  "onboard-stale": () => (
+    <Journey stage="review" wide>
+      <ReviewStage
+        busy={false}
+        discovery={{
+          ...fixture.discoveryWithProposal,
+          proposal: fixture.discoveryWithProposal.proposal
+            ? {
+                ...fixture.discoveryWithProposal.proposal,
+                invalidationReason: "proposal_stale_config",
+              }
+            : null,
+          review: fixture.discoveryWithProposal.review
+            ? { ...fixture.discoveryWithProposal.review, approvalEligible: false }
+            : null,
+        }}
+        onApprove={noop}
+        onRefresh={noop}
+      />
     </Journey>
   ),
   "onboard-applying": () => (
@@ -288,12 +370,18 @@ const SCENES: Record<string, () => JSX.Element> = {
   ),
   "onboard-rolledback": () => (
     <Journey stage="review">
-      <RolledBackStage busy={false} onManual={noop} onRetry={noop} onSupport={noop} />
+      <RolledBackStage
+        busy={false}
+        issue={null}
+        onManual={noop}
+        onRetry={noop}
+        onSupport={noop}
+      />
     </Journey>
   ),
   "onboard-failed": () => (
     <Journey stage="review">
-      <FailedStage failureCode="validation_failed" onSupport={noop} />
+      <FailedStage failureCode="validation_failed" issue={null} onSupport={noop} />
     </Journey>
   ),
 };
