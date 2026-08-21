@@ -277,8 +277,34 @@ const SCENES: Record<string, () => JSX.Element> = {
       <ConnectAssistantStage
         agent={fixture.agentNotConnected}
         busy={false}
+        checkedAt={null}
         onCheck={noop}
         onCreate={noop}
+        onManual={noop}
+      />
+    </Journey>
+  ),
+  "onboard-waiting-busy": () => (
+    <Journey stage="connect">
+      <ConnectAssistantStage
+        agent={fixture.agentPreparedNotReached}
+        busy
+        checkedAt={Date.parse("2026-08-21T09:41:07Z")}
+        onCheck={noop}
+        onCreate={noop}
+        onManual={noop}
+      />
+    </Journey>
+  ),
+  "onboard-waiting": () => (
+    <Journey stage="connect">
+      <ConnectAssistantStage
+        agent={fixture.agentPreparedNotReached}
+        busy={false}
+        checkedAt={Date.parse("2026-08-21T09:41:07Z")}
+        onCheck={noop}
+        onCreate={noop}
+        onManual={noop}
       />
     </Journey>
   ),

@@ -1146,9 +1146,46 @@ button.ip-row:hover {
   font-weight: 600;
 }
 
+/* A pill is a badge, not a row: keep it at its own width inside the grid. */
+.ip-steps__body > .ip-status {
+  justify-self: start;
+}
+
 .ip-steps__hint {
   color: var(--ip-muted);
   font-size: 0.85rem;
+}
+
+/*
+  Connection check result.
+
+  The highlight replays whenever the row remounts on a new check, so a repeated
+  identical verdict still reads as "that just refreshed" rather than a frozen
+  screen. Purely a comprehension aid — reduced-motion drops it.
+*/
+.ip-check-result {
+  align-items: center;
+  animation: ip-flash 900ms ease-out;
+  border-radius: var(--ip-radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 2px 0;
+  padding: 6px 8px;
+}
+
+.ip-check-result__when {
+  color: var(--ip-faint);
+  font-size: 0.8rem;
+}
+
+@keyframes ip-flash {
+  from {
+    background: var(--ip-accent-soft);
+  }
+  to {
+    background: transparent;
+  }
 }
 
 /* Progress checklist during "let it check" / applying */

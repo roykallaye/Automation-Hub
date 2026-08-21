@@ -49,6 +49,15 @@ import {
 /** How often to re-read backend state while waiting on out-of-band assistant work. */
 const POLL_MS = 4000;
 
+/**
+ * Minimum time a manual check keeps its spinner visible. A local read can
+ * return in a few milliseconds, which flickers past too fast to read as "I
+ * heard your click".
+ */
+const SPINNER_FLOOR_MS = 450;
+
+const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export function OnboardingJourney({
   snapshot,
   onSnapshotChange,
@@ -66,6 +75,7 @@ export function OnboardingJourney({
   const [agent, setAgent] = useState<LocalAgentConnectionStatus | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryManagerView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedRoots, setSelectedRoots] = useState<string[]>([]);
   const approvalRequestRef = useRef<{ proposalKey: string; requestId: string } | null>(null);
@@ -82,7 +92,26 @@ export function OnboardingJourney({
     if (nextSnapshot.status === "fulfilled") onSnapshotChange(nextSnapshot.value);
     if (nextAgent.status === "fulfilled") setAgent(nextAgent.value);
     if (nextDiscovery.status === "fulfilled") setDiscovery(nextDiscovery.value);
+    // Stamped on every read, automatic or manual, so the connect screen can say
+    // how fresh its answer is instead of looking frozen.
+    setCheckedAt(Date.now());
+    return nextAgent.status === "fulfilled" ? nextAgent.value : null;
   }, [onSnapshotChange]);
+
+  /**
+   * The manual "Check connection" press.
+   *
+   * Goes through `run` so the button shows a spinner and a failed read surfaces
+   * an error instead of silently doing nothing. The floor keeps the spinner on
+   * screen long enough to register as feedback — the work is real, only its
+   * visibility is padded.
+   */
+  async function checkConnection() {
+    await run(async () => {
+      const [next] = await Promise.all([readBackendState(), delay(SPINNER_FLOOR_MS)]);
+      return next;
+    }, t("assistant.connectionUnavailable"));
+  }
 
   useEffect(() => {
     void readBackendState();
@@ -252,8 +281,10 @@ export function OnboardingJourney({
             <ConnectAssistantStage
               agent={agent}
               busy={busy}
-              onCheck={readBackendState}
+              checkedAt={checkedAt}
+              onCheck={checkConnection}
               onCreate={createConnection}
+              onManual={onManualSetup}
             />
           ) : null}
 

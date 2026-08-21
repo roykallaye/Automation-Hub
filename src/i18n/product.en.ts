@@ -192,6 +192,12 @@ export const productEn = {
   "connect.check": "Check connection",
   "connect.helperUnavailable":
     "The connection helper is not available in this build, so the command cannot be prepared.",
+  "connect.waitingTitle": "Waiting for your assistant",
+  "connect.waitingText":
+    "InnPilot is ready on this side. Open Codex and ask it to check InnPilot — this screen updates by itself as soon as it does.",
+  "connect.notReachedYet": "Not connected yet",
+  "connect.lastChecked": "Checked at {time}",
+  "connect.checkingAutomatically": "InnPilot keeps checking on its own.",
   "connect.readOnly": "Read-only access",
   "connect.expires": "Expires",
   "connect.lastActivity": "Last activity",

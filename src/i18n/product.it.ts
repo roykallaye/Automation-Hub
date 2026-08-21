@@ -186,6 +186,12 @@ export const productIt = {
   "connect.check": "Verifica collegamento",
   "connect.helperUnavailable":
     "Il componente di collegamento non è disponibile in questa versione, quindi il comando non può essere preparato.",
+  "connect.waitingTitle": "In attesa del tuo assistente",
+  "connect.waitingText":
+    "InnPilot è pronto da questa parte. Apri Codex e chiedigli di controllare InnPilot: questa schermata si aggiorna da sola appena lo fa.",
+  "connect.notReachedYet": "Non ancora collegato",
+  "connect.lastChecked": "Controllato alle {time}",
+  "connect.checkingAutomatically": "InnPilot continua a controllare da solo.",
   "connect.readOnly": "Accesso in sola lettura",
   "connect.expires": "Scade",
   "connect.lastActivity": "Ultima attività",

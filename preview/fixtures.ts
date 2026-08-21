@@ -237,6 +237,19 @@ export const agentPrepared: LocalAgentConnectionStatus = {
   lastProtocolVersion: null,
 };
 
+/**
+ * The state a manager actually sits in after pasting the Codex command: the
+ * grant exists, but nothing has reached InnPilot yet, so every audit field is
+ * still empty.
+ */
+export const agentPreparedNotReached: LocalAgentConnectionStatus = {
+  ...agentConnected,
+  lastActivityAt: null,
+  lastTool: null,
+  lastClientName: null,
+  lastProtocolVersion: null,
+};
+
 export const lifedeskConnected: LifeDeskConnectionStatus = {
   state: "connected",
   installationLabel: "Reception PC",

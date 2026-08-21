@@ -91,20 +91,25 @@ export function ConnectIntroStage({
 export function ConnectAssistantStage({
   agent,
   busy,
+  checkedAt,
   onCheck,
   onCreate,
+  onManual,
 }: {
   agent: LocalAgentConnectionStatus | null;
   busy: boolean;
+  /** When the last read of backend state landed, manual or automatic. */
+  checkedAt: number | null;
   onCheck: () => void;
   onCreate: () => void;
+  onManual: () => void;
 }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [copied, setCopied] = useState(false);
-  const reachedInnPilot =
-    agent?.state === "connected" &&
-    Boolean(agent.lastActivityAt || agent.lastClientName || agent.lastProtocolVersion);
   const needsFreshProfile = !agent?.profileId || agent.state === "expired";
+  // The grant exists as soon as it is created locally; the assistant has only
+  // truly arrived once it has actually called InnPilot.
+  const connectionPrepared = Boolean(agent?.profileId) && agent?.state !== "expired";
 
   async function copyCommand() {
     if (!agent?.codexAddCommand) return;
@@ -117,37 +122,20 @@ export function ConnectAssistantStage({
     }
   }
 
-  if (reachedInnPilot) {
-    return (
-      <>
-        <div className="ip-stage-head">
-          <h1>{t("connectAssistant.connectedTitle")}</h1>
-          <p>{t("connectAssistant.connectedText")}</p>
-        </div>
-        <Card pad>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Status label={t("connect.codex")} tone="ready" />
-            <span style={{ color: "var(--ip-muted)", fontSize: "0.875rem" }}>
-              {t("connect.readOnly")}
-            </span>
-          </div>
-        </Card>
-        <AgentTechnicalDetails agent={agent} />
-      </>
-    );
-  }
-
   return (
     <>
       <div className="ip-stage-head">
-        <h1>{t("connectAssistant.title")}</h1>
-        <p>{t("connectAssistant.text")}</p>
+        <h1>{connectionPrepared ? t("connect.waitingTitle") : t("connectAssistant.title")}</h1>
+        <p>{connectionPrepared ? t("connect.waitingText") : t("connectAssistant.text")}</p>
       </div>
 
       <Card pad>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
           <strong style={{ fontSize: "0.95rem", fontWeight: 650 }}>{t("connect.codex")}</strong>
-          <Status label={t("connect.codexSupported")} tone="idle" />
+          <Status
+            label={connectionPrepared ? t("connect.notReachedYet") : t("connect.codexSupported")}
+            tone="idle"
+          />
         </div>
 
         <ol className="ip-steps">
@@ -195,15 +183,45 @@ export function ConnectAssistantStage({
             <div className="ip-steps__body">
               <span className="ip-steps__title">{t("connect.stepCheck")}</span>
               <span className="ip-steps__hint">{t("connect.stepCheckHint")}</span>
-              <div>
+
+              {/*
+                The result of the most recent read. Re-keyed on checkedAt so the
+                row remounts and replays its highlight — that flicker is the
+                only thing telling the manager a fresh answer just arrived,
+                since an unchanged verdict otherwise looks like nothing
+                happened.
+              */}
+              {connectionPrepared ? (
+                <div className="ip-check-result" key={checkedAt ?? "initial"}>
+                  <Status label={t("connect.notReachedYet")} tone="idle" />
+                  {checkedAt ? (
+                    <span className="ip-check-result__when">
+                      {t("connect.lastChecked", { time: clockTime(checkedAt, language) })}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="ip-actions">
                 <Button busy={busy} icon={RefreshCw} onClick={onCheck} variant="secondary">
                   {t("connect.check")}
                 </Button>
               </div>
+
+              {connectionPrepared ? (
+                <span className="ip-steps__hint">{t("connect.checkingAutomatically")}</span>
+              ) : null}
             </div>
           </li>
         </ol>
       </Card>
+
+      {/* Without this the screen is a dead end for anyone not using Codex. */}
+      <div className="ip-stage-foot">
+        <Button onClick={onManual} variant="ghost">
+          {t("connectIntro.secondary")}
+        </Button>
+      </div>
 
       <p className="ip-fineprint">
         <Lock aria-hidden="true" size={13} />
@@ -213,6 +231,14 @@ export function ConnectAssistantStage({
       <AgentTechnicalDetails agent={agent} />
     </>
   );
+}
+
+function clockTime(at: number, language: string) {
+  return new Intl.DateTimeFormat(language === "it" ? "it-IT" : "en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(at));
 }
 
 function AgentTechnicalDetails({ agent }: { agent: LocalAgentConnectionStatus | null }) {
