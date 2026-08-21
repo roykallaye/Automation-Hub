@@ -284,6 +284,41 @@ const SCENES: Record<string, () => JSX.Element> = {
       />
     </Journey>
   ),
+  "onboard-notconfigured": () => (
+    <Journey stage="connect">
+      <ConnectAssistantStage
+        agent={fixture.agentNotConnected}
+        busy={false}
+        checkedAt={null}
+        onCheck={noop}
+        onCreate={noop}
+        onManual={noop}
+      />
+    </Journey>
+  ),
+  "onboard-expired": () => (
+    <Journey stage="connect">
+      <ConnectAssistantStage
+        agent={{ ...fixture.agentPreparedNotReached, state: "expired" }}
+        busy={false}
+        checkedAt={Date.parse("2026-08-21T09:41:07Z")}
+        onCheck={noop}
+        onCreate={noop}
+        onManual={noop}
+      />
+    </Journey>
+  ),
+  "assistant-accessready": () => (
+    <Shell page="assistant">
+      <AssistantPage
+        agent={fixture.agentPreparedNotReached}
+        discovery={fixture.discoveryChecking}
+        onAgentChange={noop}
+        onNavigate={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
   "onboard-waiting-busy": () => (
     <Journey stage="connect">
       <ConnectAssistantStage

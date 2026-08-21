@@ -189,12 +189,24 @@ export const productIt = {
   "connect.waitingTitle": "In attesa del tuo assistente",
   "connect.waitingText":
     "InnPilot è pronto da questa parte. Apri Codex e chiedigli di controllare InnPilot: questa schermata si aggiorna da sola appena lo fa.",
-  "connect.notReachedYet": "Non ancora collegato",
   "connect.lastChecked": "Controllato alle {time}",
   "connect.checkingAutomatically": "InnPilot continua a controllare da solo.",
   "connect.readOnly": "Accesso in sola lettura",
   "connect.expires": "Scade",
   "connect.lastActivity": "Ultima attività",
+
+  /* ---------------------------------------------- assistant connection state */
+  "assistantState.notConfigured": "Non configurato",
+  "assistantState.accessReady": "Accesso pronto — in attesa del primo controllo",
+  "assistantState.accessReadyDetail":
+    "InnPilot ha preparato l'accesso per il tuo assistente. Non gli è ancora stato chiesto di controllare nulla, quindi InnPilot non può sapere se un assistente è collegato.",
+  "assistantState.connected": "Collegato",
+  "assistantState.reconnectRequired": "Riconnessione necessaria",
+  "connect.askCodexLabel": "In Codex, chiedi:",
+  "connect.askCodexPrompt": "Controlla InnPilot e prosegui la configurazione.",
+  "connect.copyPrompt": "Copia il messaggio",
+  "connect.askCodexHint":
+    "InnPilot vede il tuo assistente solo quando controlla davvero qualcosa, quindi questa schermata resta qui finché non lo fa.",
 
   /* ------------------------------------------------------------- onboarding */
   "journey.stageConnect": "Collega",

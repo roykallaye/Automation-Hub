@@ -25,6 +25,12 @@ import {
   Status,
   TechnicalDetails,
 } from "../components/ui";
+import {
+  ASSISTANT_STATE_DETAIL,
+  ASSISTANT_STATE_LABEL,
+  ASSISTANT_STATE_TONE,
+  assistantConnectionState,
+} from "../assistantConnection";
 import { useI18n, type Language } from "../i18n";
 import { deliveryModeLabel } from "../messages";
 import { assistantHasReachedInnPilot } from "../onboarding/stages";

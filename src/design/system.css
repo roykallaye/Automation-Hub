@@ -1188,6 +1188,48 @@ button.ip-row:hover {
   }
 }
 
+/*
+  The "ask your assistant this" block.
+
+  InnPilot cannot see the MCP handshake, only audited tool calls, so the
+  manager has to prompt the assistant. The exact wording is presented verbatim
+  and copyable rather than left as a paraphrase they have to invent.
+*/
+
+.ip-ask {
+  background: var(--ip-surface-sunk);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.ip-ask__label {
+  color: var(--ip-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ip-ask__row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ip-ask__prompt {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  color: var(--ip-ink);
+  flex: 1 1 240px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  min-width: 0;
+  padding: 8px 11px;
+}
+
 /* Progress checklist during "let it check" / applying */
 
 .ip-progress {

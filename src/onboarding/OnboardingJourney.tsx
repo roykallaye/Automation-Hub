@@ -32,7 +32,13 @@ import type {
   LocalAgentConnectionStatus,
   ProposalApplyResult,
 } from "../types";
-import { JOURNEY_STAGES, projectJourney, stageStatus, type JourneyStage } from "./stages";
+import {
+  JOURNEY_STAGES,
+  assistantHasReachedInnPilot,
+  projectJourney,
+  stageStatus,
+  type JourneyStage,
+} from "./stages";
 import {
   ApplyingStage,
   CheckingStage,
@@ -123,8 +129,7 @@ export function OnboardingJourney({
     view.kind === "checking" ||
     view.kind === "question" ||
     view.kind === "applying" ||
-    (view.kind === "connectAssistant" &&
-      !Boolean(agent?.lastActivityAt || agent?.lastClientName || agent?.lastProtocolVersion));
+    (view.kind === "connectAssistant" && !assistantHasReachedInnPilot(agent));
 
   useEffect(() => {
     if (!shouldPoll) return;

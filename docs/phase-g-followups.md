@@ -1,5 +1,55 @@
 # Phase G — follow-ups for Codex
 
+## 0. Assistant "session started" signal (deferred design decision)
+
+**Status:** deliberately not implemented. Recorded here because it changes
+security/audit semantics.
+
+InnPilot cannot observe that an assistant has attached. The helper's startup
+path (`local_mcp::run_stdio` → `LocalMcpFacade::authorize`) validates the grant
+and returns it *without writing anything*; `append_audit` has exactly one call
+site, the tool-invocation wrapper, and it is also the only thing that sets
+`LocalGrant::last_activity_at`. So a completed MCP handshake leaves no trace,
+and `lastActivityAt` / `lastClientName` / `lastProtocolVersion` stay null until
+a tool actually runs.
+
+The user-visible symptom: Codex reports a live connection while InnPilot said
+"not connected". Both were true under different definitions of the word.
+
+The frontend now tells the truth instead of guessing, via
+`src/assistantConnection.ts`:
+
+| State | Meaning |
+| --- | --- |
+| `notConfigured` | No usable grant (never created, or revoked). |
+| `accessReady` | Grant valid, but no audited tool activity yet. |
+| `connected` | The audit log proves an assistant has called InnPilot. |
+| `reconnectRequired` | Grant exists but is past expiry. |
+
+That closes the misleading-copy problem but not the underlying blindness. If we
+want InnPilot to distinguish "attached and idle" from "never attached", the
+backend has to record a session-start signal — for example updating
+`last_activity_at`, or appending a dedicated audit event, when `authorize`
+succeeds during helper startup or on MCP `initialize`.
+
+**Why it was not done here:** the audit log is a security artefact. Today every
+entry means "an assistant invoked a capability", and each carries a tool name,
+success flag and error code. Writing entries for connection attempts changes
+what the log asserts, adds an unauthenticated-until-validated write path at
+process start, and gives a way to grow the audit file without ever calling a
+tool (rate limiting currently sits in the tool wrapper, not in `authorize`).
+Those are ownership decisions about the security model, not UI polish.
+
+**If taken up, decide:** whether a session start is an audit event or only a
+grant-field update; whether it is rate-limited; whether a failed `authorize`
+(wrong installation, expired, revoked) is also recorded, since that is the
+diagnostically useful case; and whether `LocalAgentConnectionStatus` grows a
+field so the frontend can separate "attached" from "has done work" rather than
+collapsing both into `connected`.
+
+---
+
+
 Items the UI milestone deliberately did not implement because they need a
 backend or domain change. None of these were worked around in React.
 

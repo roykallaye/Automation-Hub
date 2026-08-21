@@ -12,6 +12,7 @@
   stages the current backend state belongs to.
 */
 
+import { assistantConnectionState } from "../assistantConnection";
 import type { OnboardingSnapshot, OnboardingState } from "../onboarding";
 import type { DiscoveryManagerView, LocalAgentConnectionStatus } from "../types";
 
@@ -63,12 +64,14 @@ const STAGE_BY_STATE: Record<OnboardingState, JourneyStage> = {
 
 export const JOURNEY_STAGES: JourneyStage[] = ["connect", "check", "review", "ready"];
 
-/** A grant is prepared locally before a real assistant has reached InnPilot. */
+/**
+ * A grant is prepared locally before any assistant has reached InnPilot, so
+ * leaving the Connect stage requires audited tool activity rather than the
+ * mere existence of access. See assistantConnection.ts for why the handshake
+ * is not observable.
+ */
 export function assistantHasReachedInnPilot(agent: LocalAgentConnectionStatus | null) {
-  return (
-    agent?.state === "connected" &&
-    Boolean(agent.lastActivityAt || agent.lastClientName || agent.lastProtocolVersion)
-  );
+  return assistantConnectionState(agent) === "connected";
 }
 
 /**

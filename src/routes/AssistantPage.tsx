@@ -28,9 +28,14 @@ import {
   Status,
   TechnicalDetails,
 } from "../components/ui";
+import {
+  ASSISTANT_STATE_DETAIL,
+  ASSISTANT_STATE_LABEL,
+  ASSISTANT_STATE_TONE,
+  assistantConnectionState,
+} from "../assistantConnection";
 import { useI18n } from "../i18n";
 import { commandErrorMessage } from "../onboarding";
-import { assistantHasReachedInnPilot } from "../onboarding/stages";
 import { formatWhen } from "../statusMapping";
 import type { AppPage, DiscoveryManagerView, LocalAgentConnectionStatus } from "../types";
 
@@ -53,9 +58,13 @@ export function AssistantPage({
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const connected = assistantHasReachedInnPilot(agent);
-  const connectionPrepared = agent?.state === "connected" && Boolean(agent.profileId);
-  const expired = agent?.state === "expired";
+  // "Access exists" and "an assistant has used it" are different questions;
+  // only the second justifies calling the assistant connected.
+  const connectionState = assistantConnectionState(agent);
+  const connected = connectionState === "connected";
+  const connectionPrepared = connectionState === "accessReady" || connected;
+  const expired = connectionState === "reconnectRequired";
+  const hasGrant = connectionPrepared;
 
   async function copyCommand() {
     if (!agent?.codexAddCommand) return;
@@ -115,7 +124,10 @@ export function AssistantPage({
               minWidth: 0,
             }}
           >
-            <span aria-hidden="true" className={`ip-headline__mark is-${connected ? "ready" : "attention"}`}>
+            <span
+              aria-hidden="true"
+              className={`ip-headline__mark is-${connected ? "ready" : "attention"}`}
+            >
               <Bot size={15} />
             </span>
             <h2 style={{ fontSize: "1.05rem", fontWeight: 650, margin: 0 }}>
@@ -124,28 +136,18 @@ export function AssistantPage({
                 : expired
                   ? t("assistant.expiredHeading")
                   : connectionPrepared
-                    ? t("connectAssistant.title")
+                    ? t("connect.waitingTitle")
                     : t("assistant.notConnectedHeading")}
             </h2>
+            {/* One shared derivation so this page, System, Settings, the shell
+                dot and the setup journey never disagree about the same grant. */}
             <Status
-              label={
-                connected
-                  ? t("status.connected")
-                  : connectionPrepared
-                    ? t("connect.stepCheck")
-                    : t("status.notConnected")
-              }
-              tone={connected ? "ready" : connectionPrepared ? "attention" : "idle"}
+              label={t(ASSISTANT_STATE_LABEL[connectionState])}
+              tone={ASSISTANT_STATE_TONE[connectionState]}
             />
           </div>
           <p style={{ color: "var(--ip-muted)", fontSize: "0.9rem", margin: 0, maxWidth: "58ch" }}>
-            {connected
-              ? t("assistant.connectedText")
-              : expired
-                ? t("assistant.expiredText")
-                : connectionPrepared
-                  ? t("connectAssistant.text")
-                  : t("assistant.notConnectedText")}
+            {t(ASSISTANT_STATE_DETAIL[connectionState])}
           </p>
 
           {connectionPrepared && !connected && agent?.codexAddCommand ? (
@@ -155,7 +157,7 @@ export function AssistantPage({
           ) : null}
 
           <div className="ip-actions" style={{ marginTop: 16 }}>
-            {connected ? (
+            {hasGrant ? (
               <Button
                 busy={busy}
                 icon={Unplug}

@@ -32,6 +32,11 @@ import {
   TechnicalDetails,
   type ProgressStep,
 } from "../components/ui";
+import {
+  ASSISTANT_STATE_LABEL,
+  ASSISTANT_STATE_TONE,
+  assistantConnectionState,
+} from "../assistantConnection";
 import { useI18n, type TranslationKey, type Translate } from "../i18n";
 import {
   PROPOSAL_GROUP_LABEL,
@@ -106,35 +111,41 @@ export function ConnectAssistantStage({
 }) {
   const { language, t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
   const needsFreshProfile = !agent?.profileId || agent.state === "expired";
-  // The grant exists as soon as it is created locally; the assistant has only
-  // truly arrived once it has actually called InnPilot.
-  const connectionPrepared = Boolean(agent?.profileId) && agent?.state !== "expired";
+  const connectionState = assistantConnectionState(agent);
+  // Access exists once the grant is created; whether an assistant is attached is
+  // a separate question InnPilot can only answer from audited tool activity.
+  const accessReady = connectionState === "accessReady";
+
+  async function copyText(value: string, mark: (copied: boolean) => void) {
+    try {
+      await navigator.clipboard.writeText(value);
+      mark(true);
+      window.setTimeout(() => mark(false), 1800);
+    } catch {
+      mark(false);
+    }
+  }
 
   async function copyCommand() {
     if (!agent?.codexAddCommand) return;
-    try {
-      await navigator.clipboard.writeText(agent.codexAddCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
+    await copyText(agent.codexAddCommand, setCopied);
   }
 
   return (
     <>
       <div className="ip-stage-head">
-        <h1>{connectionPrepared ? t("connect.waitingTitle") : t("connectAssistant.title")}</h1>
-        <p>{connectionPrepared ? t("connect.waitingText") : t("connectAssistant.text")}</p>
+        <h1>{accessReady ? t("connect.waitingTitle") : t("connectAssistant.title")}</h1>
+        <p>{accessReady ? t("connect.waitingText") : t("connectAssistant.text")}</p>
       </div>
 
       <Card pad>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
           <strong style={{ fontSize: "0.95rem", fontWeight: 650 }}>{t("connect.codex")}</strong>
           <Status
-            label={connectionPrepared ? t("connect.notReachedYet") : t("connect.codexSupported")}
-            tone="idle"
+            label={t(ASSISTANT_STATE_LABEL[connectionState])}
+            tone={ASSISTANT_STATE_TONE[connectionState]}
           />
         </div>
 
@@ -191,14 +202,39 @@ export function ConnectAssistantStage({
                 since an unchanged verdict otherwise looks like nothing
                 happened.
               */}
-              {connectionPrepared ? (
+              {accessReady ? (
                 <div className="ip-check-result" key={checkedAt ?? "initial"}>
-                  <Status label={t("connect.notReachedYet")} tone="idle" />
+                  <Status
+                    label={t(ASSISTANT_STATE_LABEL[connectionState])}
+                    tone={ASSISTANT_STATE_TONE[connectionState]}
+                  />
                   {checkedAt ? (
                     <span className="ip-check-result__when">
                       {t("connect.lastChecked", { time: clockTime(checkedAt, language) })}
                     </span>
                   ) : null}
+                </div>
+              ) : null}
+
+              {/*
+                InnPilot cannot observe the MCP handshake, only audited tool
+                calls, so the manager has to ask the assistant to do something.
+                The exact wording is copyable to remove the guesswork.
+              */}
+              {accessReady ? (
+                <div className="ip-ask">
+                  <span className="ip-ask__label">{t("connect.askCodexLabel")}</span>
+                  <div className="ip-ask__row">
+                    <code className="ip-ask__prompt">{t("connect.askCodexPrompt")}</code>
+                    <Button
+                      icon={promptCopied ? Check : Copy}
+                      onClick={() => void copyText(t("connect.askCodexPrompt"), setPromptCopied)}
+                      variant="secondary"
+                    >
+                      {promptCopied ? t("connect.copied") : t("connect.copyPrompt")}
+                    </Button>
+                  </div>
+                  <span className="ip-steps__hint">{t("connect.askCodexHint")}</span>
                 </div>
               ) : null}
 
@@ -208,7 +244,7 @@ export function ConnectAssistantStage({
                 </Button>
               </div>
 
-              {connectionPrepared ? (
+              {accessReady ? (
                 <span className="ip-steps__hint">{t("connect.checkingAutomatically")}</span>
               ) : null}
             </div>

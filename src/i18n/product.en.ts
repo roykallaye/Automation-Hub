@@ -195,12 +195,24 @@ export const productEn = {
   "connect.waitingTitle": "Waiting for your assistant",
   "connect.waitingText":
     "InnPilot is ready on this side. Open Codex and ask it to check InnPilot — this screen updates by itself as soon as it does.",
-  "connect.notReachedYet": "Not connected yet",
   "connect.lastChecked": "Checked at {time}",
   "connect.checkingAutomatically": "InnPilot keeps checking on its own.",
   "connect.readOnly": "Read-only access",
   "connect.expires": "Expires",
   "connect.lastActivity": "Last activity",
+
+  /* ---------------------------------------------- assistant connection state */
+  "assistantState.notConfigured": "Not configured",
+  "assistantState.accessReady": "Access ready — waiting for the first check",
+  "assistantState.accessReadyDetail":
+    "InnPilot has prepared access for your assistant. It has not been asked to check anything yet, so InnPilot cannot tell whether an assistant is attached.",
+  "assistantState.connected": "Connected",
+  "assistantState.reconnectRequired": "Reconnect required",
+  "connect.askCodexLabel": "In Codex, ask:",
+  "connect.askCodexPrompt": "Check InnPilot and continue the setup.",
+  "connect.copyPrompt": "Copy message",
+  "connect.askCodexHint":
+    "InnPilot only sees your assistant once it actually checks something, so this screen stays here until it does.",
 
   /* ------------------------------------------------------------- onboarding */
   "journey.stageConnect": "Connect",

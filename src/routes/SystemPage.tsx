@@ -20,9 +20,14 @@ import {
   Section,
   TechnicalDetails,
 } from "../components/ui";
+import {
+  ASSISTANT_STATE_DETAIL,
+  ASSISTANT_STATE_LABEL,
+  ASSISTANT_STATE_TONE,
+  assistantConnectionState,
+} from "../assistantConnection";
 import { useI18n } from "../i18n";
 import { isOnboardingStateReady, type OnboardingSnapshot } from "../onboarding";
-import { assistantHasReachedInnPilot } from "../onboarding/stages";
 import { formatWhen } from "../statusMapping";
 import type {
   AppConfigStatus,
@@ -61,7 +66,8 @@ export function SystemPage({
     (module) => module.status === "blocked" || module.status === "needs_attention",
   );
 
-  const agentConnected = assistantHasReachedInnPilot(agent);
+  const assistantState = assistantConnectionState(agent);
+  const agentConnected = assistantState === "connected";
   const lifedeskConnected = lifedesk?.state === "connected";
 
   return (
@@ -94,20 +100,13 @@ export function SystemPage({
             />
             <Row
               icon={Bot}
-              meta={
-                agentConnected
-                  ? t("assistant.connectedText")
-                  : agent?.state === "expired"
-                    ? t("assistant.expiredText")
-                    : t("assistant.notConnectedText")
-              }
+              meta={t(ASSISTANT_STATE_DETAIL[assistantState])}
               onOpen={() => onNavigate("assistant")}
               openLabel={t("system.assistant")}
-              status={
-                agentConnected
-                  ? { tone: "ready", label: t("status.connected") }
-                  : { tone: "idle", label: t("status.notConnected") }
-              }
+              status={{
+                tone: ASSISTANT_STATE_TONE[assistantState],
+                label: t(ASSISTANT_STATE_LABEL[assistantState]),
+              }}
               title={t("system.assistant")}
             />
             <Row
