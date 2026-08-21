@@ -616,6 +616,353 @@ impl ImprovementOpportunity {
     }
 }
 
+/* ------------------------------------------------------------- aggregates */
+
+pub(crate) const WORK_AREA_SCHEMA: u32 = 1;
+pub(crate) const MAX_WORK_AREAS: usize = 16;
+pub(crate) const MAX_ANSWER_CHARS: usize = 600;
+pub(crate) const MAX_RECEIPTS: usize = 32;
+pub(crate) const MAX_PHYSICAL_ITEMS: usize = 32;
+pub(crate) const MAX_DEPENDENCIES: usize = 32;
+
+/// The Work Area root record. Identity and lifecycle only; mapped content lives
+/// in the assessment, so renaming an area never disturbs its map.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WorkArea {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) template: WorkAreaTemplate,
+    pub(crate) description: Option<String>,
+    #[serde(default)]
+    pub(crate) scope_included: Vec<String>,
+    #[serde(default)]
+    pub(crate) scope_excluded: Vec<String>,
+    pub(crate) state: WorkAreaState,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) archived_at: Option<String>,
+}
+
+impl WorkArea {
+    pub(crate) fn scope_defined(&self) -> bool {
+        !self.scope_included.is_empty()
+    }
+}
+
+/// A typed manager answer. The variant must match the question response type;
+/// `AnswerValue::matches` is what the service checks before persisting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum AnswerValue {
+    YesNo { value: bool },
+    Choice { value: String },
+    Choices { values: Vec<String> },
+    Text { value: String },
+    Number { value: f64 },
+    Duration { value: String },
+    Frequency { value: String },
+}
+
+impl AnswerValue {
+    pub(crate) fn matches(&self, response_type: &ResponseType) -> bool {
+        match (self, response_type) {
+            (AnswerValue::YesNo { .. }, ResponseType::YesNo) => true,
+            (AnswerValue::Choice { value }, ResponseType::SingleChoice { choices }) => {
+                choices.contains(value)
+            }
+            (AnswerValue::Choices { values }, ResponseType::MultipleChoice { choices }) => {
+                !values.is_empty() && values.iter().all(|value| choices.contains(value))
+            }
+            (AnswerValue::Text { .. }, ResponseType::ShortText) => true,
+            (AnswerValue::Number { .. }, ResponseType::Number) => true,
+            (AnswerValue::Duration { .. }, ResponseType::Duration) => true,
+            (AnswerValue::Frequency { .. }, ResponseType::Frequency) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn within_bounds(&self) -> bool {
+        let text_ok = |value: &String| value.chars().count() <= MAX_ANSWER_CHARS;
+        match self {
+            AnswerValue::YesNo { .. } => true,
+            AnswerValue::Number { value } => value.is_finite(),
+            AnswerValue::Choice { value }
+            | AnswerValue::Text { value }
+            | AnswerValue::Duration { value }
+            | AnswerValue::Frequency { value } => text_ok(value),
+            AnswerValue::Choices { values } => values.len() <= 16 && values.iter().all(text_ok),
+        }
+    }
+}
+
+/// A recorded manager answer. This type only ever exists as the result of a
+/// local manager action, which is what makes its provenance trustworthy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ManagerAnswer {
+    pub(crate) question_id: String,
+    pub(crate) value: AnswerValue,
+    pub(crate) answered_at: String,
+    /// Work Area revision at which this answer was accepted.
+    pub(crate) at_revision: u64,
+}
+
+/// The mapped current-state understanding of a Work Area.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationalMap {
+    /// Bumped whenever mapped content changes. Plans bind to this value.
+    pub(crate) revision: u64,
+    #[serde(default)]
+    pub(crate) roles: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) systems: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) information_sources: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) document_types: Vec<MappedFact>,
+    /// Paper, printed forms, handwritten notes, knowledge held by one person.
+    #[serde(default)]
+    pub(crate) physical_information: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) dependencies: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) pain_points: Vec<MappedFact>,
+    #[serde(default)]
+    pub(crate) workflows: Vec<Workflow>,
+    #[serde(default)]
+    pub(crate) unknowns: Vec<String>,
+    pub(crate) prepared_at: Option<String>,
+    /// True only after an explicit manager confirmation operation.
+    pub(crate) confirmed: bool,
+}
+
+/// A prepared improvement plan, bound to the exact map revision it came from so
+/// it becomes visibly stale rather than silently current.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ImprovementPlan {
+    pub(crate) revision: u64,
+    pub(crate) source_map_revision: u64,
+    #[serde(default)]
+    pub(crate) opportunities: Vec<ImprovementOpportunity>,
+    pub(crate) prepared_at: String,
+}
+
+impl ImprovementPlan {
+    pub(crate) fn is_stale(&self, current_map_revision: u64) -> bool {
+        self.source_map_revision != current_map_revision
+    }
+}
+
+/// Idempotency receipt. A repeated request id with identical content returns
+/// the stored outcome; the same id with different content is a conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OperationReceipt {
+    pub(crate) request_id: String,
+    /// Digest of the authoritative request content.
+    pub(crate) payload_digest: String,
+    pub(crate) resulting_revision: u64,
+    pub(crate) recorded_at: String,
+}
+
+/// The full persisted aggregate for one Work Area.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WorkAreaRecord {
+    pub(crate) schema_version: u32,
+    pub(crate) installation_id: String,
+    /// Monotonic. Every accepted mutation advances it; CAS compares against it.
+    pub(crate) revision: u64,
+    pub(crate) area: WorkArea,
+    #[serde(default)]
+    pub(crate) questions: Vec<Question>,
+    #[serde(default)]
+    pub(crate) answers: Vec<ManagerAnswer>,
+    pub(crate) map: OperationalMap,
+    pub(crate) plan: Option<ImprovementPlan>,
+    #[serde(default)]
+    pub(crate) receipts: Vec<OperationReceipt>,
+}
+
+/// Why a stored record was rejected on load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordDefect {
+    UnsupportedSchema,
+    WrongInstallation,
+    TooManyRoles,
+    TooManySystems,
+    TooManyInformationSources,
+    TooManyDocumentTypes,
+    TooManyPhysicalItems,
+    TooManyDependencies,
+    TooManyPainPoints,
+    TooManyWorkflows,
+    TooManyWorkflowSteps,
+    TooManyQuestions,
+    TooManyOpportunities,
+    TooManyReceipts,
+    DuplicateId,
+    OversizedText,
+    AnswerWithoutQuestion,
+    AnswerTypeMismatch,
+    PlanAheadOfMap,
+}
+
+fn has_duplicates<'a>(ids: impl Iterator<Item = &'a String>) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Revalidate a record read from disk.
+///
+/// Domain invariants live in constructors and methods, but a stored document is
+/// just bytes: anything that edits the file, or a different writer, could
+/// present a record that violates them. Loading therefore re-checks bounds,
+/// identity and cross-references rather than trusting serde, and normalizes
+/// provenance in place so an inferred fact cannot arrive from disk already
+/// marked confirmed.
+pub(crate) fn validate_and_normalize(
+    record: &mut WorkAreaRecord,
+    installation_id: &str,
+) -> Result<(), RecordDefect> {
+    if record.schema_version != WORK_AREA_SCHEMA {
+        return Err(RecordDefect::UnsupportedSchema);
+    }
+    if record.installation_id != installation_id {
+        return Err(RecordDefect::WrongInstallation);
+    }
+
+    if record.map.roles.len() > MAX_ROLES {
+        return Err(RecordDefect::TooManyRoles);
+    }
+    if record.map.systems.len() > MAX_SYSTEMS {
+        return Err(RecordDefect::TooManySystems);
+    }
+    if record.map.information_sources.len() > MAX_INFORMATION_SOURCES {
+        return Err(RecordDefect::TooManyInformationSources);
+    }
+    if record.map.document_types.len() > MAX_DOCUMENT_TYPES {
+        return Err(RecordDefect::TooManyDocumentTypes);
+    }
+    if record.map.physical_information.len() > MAX_PHYSICAL_ITEMS {
+        return Err(RecordDefect::TooManyPhysicalItems);
+    }
+    if record.map.dependencies.len() > MAX_DEPENDENCIES {
+        return Err(RecordDefect::TooManyDependencies);
+    }
+    if record.map.pain_points.len() > MAX_PAIN_POINTS {
+        return Err(RecordDefect::TooManyPainPoints);
+    }
+    if record.map.workflows.len() > MAX_WORKFLOWS {
+        return Err(RecordDefect::TooManyWorkflows);
+    }
+    if record.questions.len() > MAX_QUESTIONS {
+        return Err(RecordDefect::TooManyQuestions);
+    }
+    if record.receipts.len() > MAX_RECEIPTS {
+        return Err(RecordDefect::TooManyReceipts);
+    }
+
+    if record.area.name.chars().count() > MAX_NAME_CHARS {
+        return Err(RecordDefect::OversizedText);
+    }
+    if record
+        .area
+        .description
+        .as_ref()
+        .is_some_and(|text| text.chars().count() > MAX_DESCRIPTION_CHARS)
+    {
+        return Err(RecordDefect::OversizedText);
+    }
+
+    for workflow in &record.map.workflows {
+        if workflow.steps.len() > MAX_WORKFLOW_STEPS {
+            return Err(RecordDefect::TooManyWorkflowSteps);
+        }
+        if has_duplicates(workflow.steps.iter().map(|step| &step.id)) {
+            return Err(RecordDefect::DuplicateId);
+        }
+    }
+    if has_duplicates(record.map.workflows.iter().map(|workflow| &workflow.id)) {
+        return Err(RecordDefect::DuplicateId);
+    }
+    if has_duplicates(
+        record
+            .questions
+            .iter()
+            .map(|question| &question.question_id),
+    ) {
+        return Err(RecordDefect::DuplicateId);
+    }
+
+    // Every answer must correspond to a real question and match its shape.
+    // Otherwise an edited file could assert an answer to a question that was
+    // never asked, or a value that question could not have produced.
+    for answer in &record.answers {
+        let Some(question) = record
+            .questions
+            .iter()
+            .find(|question| question.question_id == answer.question_id)
+        else {
+            return Err(RecordDefect::AnswerWithoutQuestion);
+        };
+        if !answer.value.matches(&question.response_type) {
+            return Err(RecordDefect::AnswerTypeMismatch);
+        }
+        if !answer.value.within_bounds() {
+            return Err(RecordDefect::OversizedText);
+        }
+    }
+
+    if let Some(plan) = &record.plan {
+        if plan.opportunities.len() > MAX_OPPORTUNITIES {
+            return Err(RecordDefect::TooManyOpportunities);
+        }
+        // A plan claiming to derive from a map revision that does not exist yet
+        // is not merely stale, it is incoherent.
+        if plan.source_map_revision > record.map.revision {
+            return Err(RecordDefect::PlanAheadOfMap);
+        }
+    }
+
+    // Provenance normalization: an inferred fact can never load as confirmed.
+    for facts in [
+        &mut record.map.roles,
+        &mut record.map.systems,
+        &mut record.map.information_sources,
+        &mut record.map.document_types,
+        &mut record.map.physical_information,
+        &mut record.map.dependencies,
+        &mut record.map.pain_points,
+    ] {
+        for fact in facts.iter_mut() {
+            fact.status = fact.normalized_status();
+        }
+    }
+
+    Ok(())
+}
+
+/// Readiness computed from a stored record.
+pub(crate) fn record_readiness(record: &WorkAreaRecord) -> MapReadiness {
+    map_readiness(
+        record.area.scope_defined(),
+        &record.map.roles,
+        &record.map.systems,
+        &record.map.information_sources,
+        &record.map.workflows,
+        &record.questions,
+    )
+}
+
 /* ------------------------------------------------------------------ tests */
 
 #[cfg(test)]
