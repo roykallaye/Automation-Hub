@@ -376,6 +376,90 @@ is no global planning event log. Rather than adding one — which would mean
 storing more than the aggregate needs — the Activity page reports where each
 area currently stands, and states that manager answers are never listed there.
 
+## Increment 5 — validation against a real assistant
+
+The point of this increment was not to add features. It was to find out whether
+the product actually works when a real MCP client drives it, and it found three
+things nothing else had.
+
+### What validation found
+
+**A map could never become ready.** Everything an assistant proposes is stored
+as inference; inference is not settled; readiness requires settled roles and
+systems. `confirm_fact` was the operation that resolves this, and it had no
+manager-reachable path — no Tauri command, no UI. The Understand stage was
+structurally uncompletable. `confirm_work_area_fact` is that path now, and the
+map shows a Confirm next to anything InnPilot guessed.
+
+**Evidence could not be linked.** `linked_evidence` gated map citations and was
+surfaced in the UI, but nothing could set it. `set_linked_evidence` is the typed
+manager operation; removing a cited reference is revocation, which drops the
+citations, advances the map revision so any plan becomes visibly stale, and
+marks the area for review.
+
+**A plan could brick its own Work Area.** In a live `codex-cli` session, Codex
+prepared a plan whose opportunities cited evidence the area had never been
+granted. The plan path did not apply the rule the map path already applied, so
+the record was written and then failed its own validation on the next load. The
+narrow fix is the same evidence check on the plan path. The real fix is that
+`save` now validates with exactly the check `load` applies and refuses the
+write, so an operation that forgets an invariant fails at the write instead of
+quietly making the area unopenable.
+
+### The real Codex walkthrough
+
+`codex-cli 0.144.3`, MCP protocol `2025-06-18`, against a synthetic Reception in
+a marked test root. Nothing about it was simulated.
+
+| Step | Outcome |
+| --- | --- |
+| Pre-H-A grant calls `innpilot_get_capabilities` | ten scopes returned |
+| Same grant calls `innpilot_list_work_areas` | `capability_denied`, retry `never` |
+| Manager reconnects locally | twelve scopes; the Work Area survived untouched |
+| Codex prepares questions | four, two blocking, mixed response types |
+| Codex tries to answer its own question | no tool exists; re-read confirmed still `open`, `managerAnswer` `null` |
+| Codex prepares the map | four workflows, every gap resolved except one |
+| Every workflow's remaining gap | `current_state_unconfirmed` |
+| Codex prepares a plan before readiness | `preflight_blocked` |
+| Manager answers and confirms locally | readiness `true`, state `map_ready` |
+| Codex prepares the plan | six opportunities across four categories |
+| Codex tries to apply or run one | no tool exists |
+
+The middle of that table is the product argument in one line: the assistant did
+everything it could, and the only thing between it and an automation candidate
+was a person saying "yes, that is how it works".
+
+The plan it produced, verbatim from the stored record:
+
+| Category | Automation readiness | Product gap | Capability match |
+| --- | --- | --- | --- |
+| `digitize` | `needs_digitization` | `new_innpilot_capability` | `new_capability_required` |
+| `standardize` | `needs_standardization` | `process_change_only` | `no_match` |
+| `digitize` | `needs_digitization` | `integration_opportunity` | `no_match` |
+| `standardize` | `needs_standardization` | `process_change_only` | `no_match` |
+| `automate` | `candidate` | `integration_opportunity` | `no_match` |
+| `keep_manual` | `not_recommended` | `manual_recommended` | `no_match` |
+
+One automation candidate out of six recommendations, and one conclusion that the
+work should stay with a person.
+
+### No operational side effect
+
+After the whole walkthrough the synthetic installation held only `config.json`
+(untouched since bootstrap, fifty minutes before the last Work Area write),
+onboarding state, the grant and audit, and the Work Area record. No workspace
+output, no automation run, no runner ledger, no activity records, no recovery
+points, no setup proposals, no proposal approvals.
+
+### Copy is checked now, not hoped for
+
+Two mojibake incidents escaped build, typecheck and every test, because mojibake
+is valid text to a compiler. `scripts/test-locale-integrity.mjs` checks the
+dictionaries and the Rust sources for the byte signatures a non-UTF-8 round trip
+leaves, along with key and placeholder parity. It immediately found four
+mojibake em dashes and a mojibake middle dot in `local_mcp.rs` — in strings that
+had been shipping to the assistant and the review screens.
+
 ## Not built yet
 
 Persistence and revisions; application services and Tauri adapters; the MCP
