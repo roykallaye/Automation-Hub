@@ -24,6 +24,7 @@ use crate::{
     },
     platform::{BuildInfo, InstallationPaths},
     work_area::{WorkAreaTemplate, MAX_DESCRIPTION_CHARS, MAX_NAME_CHARS, MAX_TEXT_CHARS},
+    work_area_planning::{CallerAuthority, WorkAreaPlanningService},
     work_area_store::{
         CreateWorkAreaRequest, SubmitAnswerRequest, WorkAreaRepository, WorkAreaService,
     },
@@ -76,7 +77,7 @@ pub(crate) struct CreateWorkAreaCommand {
 }
 
 pub(crate) struct WorkAreaApplicationService {
-    areas: WorkAreaService,
+    planning: WorkAreaPlanningService,
 }
 
 impl WorkAreaApplicationService {
@@ -86,17 +87,25 @@ impl WorkAreaApplicationService {
         // a record copied from another machine fails to load rather than being
         // silently adopted.
         let installation_id = onboarding_installation_id(app, &paths)?;
-        Ok(Self {
-            areas: WorkAreaService::new(WorkAreaRepository::new(
-                paths.work_area_root.clone(),
-                installation_id,
-            )),
-        })
+        Ok(Self::new(WorkAreaService::new(WorkAreaRepository::new(
+            paths.work_area_root.clone(),
+            installation_id,
+        ))))
+    }
+
+    pub(crate) fn new(areas: WorkAreaService) -> Self {
+        Self {
+            planning: WorkAreaPlanningService::new(areas),
+        }
+    }
+
+    fn areas(&self) -> &WorkAreaService {
+        self.planning.areas()
     }
 
     pub(crate) fn overview(&self) -> WorkspaceResult<Vec<WorkAreaSummaryView>> {
         Ok(self
-            .areas
+            .areas()
             .list()?
             .into_iter()
             .map(|summary| WorkAreaSummaryView {
@@ -114,7 +123,7 @@ impl WorkAreaApplicationService {
     }
 
     pub(crate) fn detail(&self, work_area_id: &str) -> WorkspaceResult<WorkAreaDetailView> {
-        let record = self.areas.get(work_area_id)?;
+        let record = self.areas().get(work_area_id)?;
         Ok(WorkAreaDetailView {
             context: context_view(&record),
             plan: plan_view(&record),
@@ -137,7 +146,7 @@ impl WorkAreaApplicationService {
         let responsibilities = normalize_responsibilities(command.responsibilities)?;
 
         let now = timestamp();
-        let record = self.areas.create(
+        let record = self.areas().create(
             CreateWorkAreaRequest {
                 name,
                 template: command.template,
@@ -155,7 +164,7 @@ impl WorkAreaApplicationService {
         let record = if responsibilities.is_empty() {
             record
         } else {
-            self.areas.set_scope(
+            self.areas().set_scope(
                 &record.area.id,
                 responsibilities,
                 Vec::new(),
@@ -172,14 +181,71 @@ impl WorkAreaApplicationService {
 
     /// The manager answering a question.
     ///
-    /// Deliberately the only write in this file that touches understanding.
-    /// The returned detail is read back from the stored record, so the UI shows
-    /// the backend's outcome rather than what it optimistically expected.
+    /// One of the two ways manager truth enters the system, the other being
+    /// `confirm`. The returned detail is read back from the stored record, so
+    /// the UI shows the backend's outcome rather than what it optimistically
+    /// expected.
     pub(crate) fn submit_answer(
         &self,
         request: SubmitAnswerRequest,
     ) -> WorkspaceResult<WorkAreaDetailView> {
-        let record = self.areas.submit_manager_answer(request, &timestamp())?;
+        let record = self.areas().submit_manager_answer(request, &timestamp())?;
+        Ok(WorkAreaDetailView {
+            context: context_view(&record),
+            plan: plan_view(&record),
+        })
+    }
+
+    /// Manager confirmation of one mapped fact or workflow.
+    ///
+    /// This is the operation the whole Understand stage turns on. Everything an
+    /// assistant proposes is stored as inference, and inference is not settled,
+    /// so a map built entirely from assistant work can never reach readiness on
+    /// its own. Someone who actually knows the business has to say "yes, that is
+    /// how it works" — and this is the only path by which that happens.
+    /// `CallerAuthority::LocalManager` is passed as a Rust argument, so no
+    /// request field can claim it.
+    pub(crate) fn confirm(
+        &self,
+        work_area_id: &str,
+        target_id: &str,
+        expected_revision: u64,
+    ) -> WorkspaceResult<WorkAreaDetailView> {
+        let record = self.planning.confirm_fact(
+            CallerAuthority::LocalManager,
+            work_area_id,
+            target_id,
+            expected_revision,
+            &timestamp(),
+        )?;
+        Ok(WorkAreaDetailView {
+            context: context_view(&record),
+            plan: plan_view(&record),
+        })
+    }
+
+    /// Replace the approved evidence this area may cite.
+    ///
+    /// Not exposed as a Tauri command yet: the manager-facing way to choose
+    /// evidence is the Phase E discovery scope, and wiring a picker to it is a
+    /// separate piece of UI. The typed operation exists so the pilot can build
+    /// a realistic area and so revocation has a real mechanism.
+    #[allow(
+        dead_code,
+        reason = "reachable once the evidence picker UI lands; exercised by the pilot"
+    )]
+    pub(crate) fn set_evidence(
+        &self,
+        work_area_id: &str,
+        evidence: Vec<String>,
+        expected_revision: u64,
+    ) -> WorkspaceResult<WorkAreaDetailView> {
+        let record = self.areas().set_linked_evidence(
+            work_area_id,
+            evidence,
+            expected_revision,
+            &timestamp(),
+        )?;
         Ok(WorkAreaDetailView {
             context: context_view(&record),
             plan: plan_view(&record),
@@ -191,7 +257,7 @@ impl WorkAreaApplicationService {
         work_area_id: &str,
         expected_revision: u64,
     ) -> WorkspaceResult<Vec<WorkAreaSummaryView>> {
-        self.areas
+        self.areas()
             .archive(work_area_id, expected_revision, &timestamp())?;
         self.overview()
     }
@@ -203,11 +269,11 @@ impl WorkAreaApplicationService {
     /// history, not proposals.
     pub(crate) fn opportunities(&self) -> WorkspaceResult<Vec<OpportunityListing>> {
         let mut listings = Vec::new();
-        for summary in self.areas.list()? {
+        for summary in self.areas().list()? {
             if summary.state == crate::work_area::WorkAreaState::Archived {
                 continue;
             }
-            let record = self.areas.get(&summary.id)?;
+            let record = self.areas().get(&summary.id)?;
             for opportunity in opportunity_views(&record) {
                 listings.push(OpportunityListing {
                     work_area_id: record.area.id.clone(),

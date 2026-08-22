@@ -289,6 +289,67 @@ pub(crate) struct SubmitAnswerRequest {
     pub(crate) request_id: String,
 }
 
+/// How many approved structural findings one area may cite.
+const MAX_LINKED_EVIDENCE: usize = 32;
+
+/// Whether the stored map cites any of these evidence references.
+///
+/// Used to decide whether removing evidence actually invalidates anything. A
+/// reference the map never used can be unlinked without disturbing the map.
+fn map_cites_any(record: &WorkAreaRecord, removed: &[String]) -> bool {
+    if removed.is_empty() {
+        return false;
+    }
+    let cites = |refs: &[String]| refs.iter().any(|reference| removed.contains(reference));
+    let groups = [
+        &record.map.roles,
+        &record.map.systems,
+        &record.map.information_sources,
+        &record.map.document_types,
+        &record.map.physical_information,
+        &record.map.dependencies,
+        &record.map.pain_points,
+    ];
+    groups
+        .iter()
+        .any(|facts| facts.iter().any(|fact| cites(&fact.evidence_refs)))
+        || record
+            .map
+            .workflows
+            .iter()
+            .any(|workflow| cites(&workflow.evidence_refs))
+}
+
+/// Drop every citation to evidence that is no longer linked.
+///
+/// The mapped facts themselves are kept. What InnPilot learned does not become
+/// untrue because access was withdrawn — it becomes unsupported, which is why
+/// the area is simultaneously marked as needing review.
+fn forget_evidence(record: &mut WorkAreaRecord, removed: &[String]) {
+    let strip = |refs: &mut Vec<String>| refs.retain(|reference| !removed.contains(reference));
+    for facts in [
+        &mut record.map.roles,
+        &mut record.map.systems,
+        &mut record.map.information_sources,
+        &mut record.map.document_types,
+        &mut record.map.physical_information,
+        &mut record.map.dependencies,
+        &mut record.map.pain_points,
+    ] {
+        for fact in facts.iter_mut() {
+            strip(&mut fact.evidence_refs);
+        }
+    }
+    for workflow in record.map.workflows.iter_mut() {
+        strip(&mut workflow.evidence_refs);
+    }
+    if let Some(plan) = record.plan.as_mut() {
+        for opportunity in plan.opportunities.iter_mut() {
+            strip(&mut opportunity.evidence_refs);
+        }
+    }
+}
+
 /// Typed application service. Every operation expresses product meaning; there
 /// is deliberately no generic `update_work_area(json)`.
 pub(crate) struct WorkAreaService {
@@ -470,6 +531,71 @@ impl WorkAreaService {
             record.area.state = WorkAreaState::Archived;
             record.area.archived_at = Some(now.to_string());
             record.area.updated_at = now.to_string();
+            record.revision += 1;
+            self.repository.save(&record)?;
+            Ok(record)
+        })
+    }
+
+    /// Replace the evidence this area may cite.
+    ///
+    /// Evidence linking is a manager decision: it says which approved
+    /// structural findings this business area is allowed to reason from, and it
+    /// is what `prepare_operational_map` checks citations against. There is no
+    /// assistant-reachable equivalent, so an assistant cannot widen its own
+    /// evidence.
+    ///
+    /// Removing a reference is revocation. Anything the map cited is now
+    /// standing on information InnPilot may no longer read, so the map revision
+    /// advances — which makes any existing plan visibly stale — and the area
+    /// asks to be looked at again. Evidence that was never cited changes
+    /// nothing, because nothing depended on it.
+    pub(crate) fn set_linked_evidence(
+        &self,
+        work_area_id: &str,
+        evidence: Vec<String>,
+        expected_revision: u64,
+        now: &str,
+    ) -> WorkspaceResult<WorkAreaRecord> {
+        if evidence.len() > MAX_LINKED_EVIDENCE {
+            return Err(invalid_request(
+                "That is more evidence than InnPilot links to one work area.",
+                vec!["evidence".to_string()],
+            ));
+        }
+        for reference in &evidence {
+            if reference.trim().is_empty() || reference.chars().count() > MAX_ID_CHARS {
+                return Err(invalid_request(
+                    "That evidence reference is not one InnPilot recognises.",
+                    vec!["evidence".to_string()],
+                ));
+            }
+        }
+        self.repository.with_area_lock(work_area_id, || {
+            let mut record = self.repository.load(work_area_id)?;
+            require_revision(&record, expected_revision)?;
+
+            let removed: Vec<String> = record
+                .area
+                .linked_evidence
+                .iter()
+                .filter(|reference| !evidence.contains(reference))
+                .cloned()
+                .collect();
+            let cited = map_cites_any(&record, &removed);
+
+            record.area.linked_evidence = evidence;
+            record.area.updated_at = now.to_string();
+            if cited {
+                // The map may not keep citing what the area no longer has
+                // access to — a record that did would fail its own validation
+                // on the next load and become unreadable. Dropping the citation
+                // is also the honest reading: the finding stands, but InnPilot
+                // can no longer point at what led it there.
+                forget_evidence(&mut record, &removed);
+                record.map.revision += 1;
+                record.area.state = WorkAreaState::MapNeedsReview;
+            }
             record.revision += 1;
             self.repository.save(&record)?;
             Ok(record)

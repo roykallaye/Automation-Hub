@@ -29,6 +29,8 @@ mod setup;
 mod templates;
 mod work_area;
 mod work_area_app;
+#[cfg(test)]
+mod work_area_pilot;
 mod work_area_planning;
 mod work_area_store;
 mod work_area_view;
@@ -191,6 +193,7 @@ pub fn run() {
             get_work_area,
             create_work_area,
             submit_work_area_answer,
+            confirm_work_area_fact,
             archive_work_area,
             list_work_area_opportunities
         ])
@@ -235,6 +238,24 @@ fn submit_work_area_answer(
     request: work_area_store::SubmitAnswerRequest,
 ) -> Result<work_area_app::WorkAreaDetailView, domain::WorkspaceError> {
     work_area_app::WorkAreaApplicationService::resolve(&app)?.submit_answer(request)
+}
+
+/// Manager confirmation that a mapped fact or workflow is really how the
+/// business works. Everything the assistant proposes is stored as inference,
+/// and inference never counts toward readiness, so this is what allows a map to
+/// become ready at all. There is deliberately no MCP equivalent.
+#[tauri::command]
+fn confirm_work_area_fact(
+    app: AppHandle,
+    work_area_id: String,
+    target_id: String,
+    expected_revision: u64,
+) -> Result<work_area_app::WorkAreaDetailView, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.confirm(
+        &work_area_id,
+        &target_id,
+        expected_revision,
+    )
 }
 
 #[tauri::command]

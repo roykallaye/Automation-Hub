@@ -489,6 +489,10 @@ export const productIt = {
   "workArea.reviewFolderAccess": "Rivedi l'accesso alle cartelle",
   "workArea.planningOnly": "Mappare e pianificare non modifica i tuoi file e non avvia automazioni.",
   "workArea.stillUnclear": "Ancora poco chiaro",
+  "workArea.confirm.action": "Conferma",
+  "workArea.confirm.factLabel": "Conferma che {label} è corretto",
+  "workArea.confirm.workflowAsk": "È davvero così che funziona oggi? InnPilot lo ha dedotto da ciò che ha potuto vedere e ha bisogno che sia tu a dirlo.",
+  "workArea.confirm.workflowAction": "Sì, funziona così",
 
   "workArea.stage.starting": "Appena iniziata",
   "workArea.stage.startingText": "InnPilot non sa ancora abbastanza di quest'area.",

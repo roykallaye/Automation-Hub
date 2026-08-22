@@ -48,6 +48,22 @@ export function submitWorkAreaAnswer(request: {
   return invoke<WorkAreaDetail>("submit_work_area_answer", { request });
 }
 
+/**
+ * Confirm that a mapped fact or workflow is really how the business works.
+ *
+ * Everything the assistant proposes is stored as inference, and inference never
+ * counts toward readiness — so without this the Understand stage could never
+ * complete. It is manager authority, which is why it lives here and has no MCP
+ * equivalent.
+ */
+export function confirmWorkAreaFact(request: {
+  workAreaId: string;
+  targetId: string;
+  expectedRevision: number;
+}) {
+  return invoke<WorkAreaDetail>("confirm_work_area_fact", request);
+}
+
 export function archiveWorkArea(workAreaId: string, expectedRevision: number) {
   return invoke<WorkAreaSummary[]>("archive_work_area", { workAreaId, expectedRevision });
 }

@@ -138,7 +138,18 @@ export function CoverageRow({
  * confirmation" and toned as attention, so it can never be mistaken at a glance
  * for something the manager actually said.
  */
-export function FactList({ facts, empty }: { facts: Fact[]; empty: string }) {
+export function FactList({
+  busy = false,
+  facts,
+  empty,
+  onConfirm,
+}: {
+  busy?: boolean;
+  facts: Fact[];
+  empty: string;
+  /** Offered only for things InnPilot guessed, and only the manager may act. */
+  onConfirm?: (factId: string) => void;
+}) {
   const { t } = useI18n();
   if (facts.length === 0) {
     return <p className="ip-wa-empty-line">{empty}</p>;
@@ -150,6 +161,18 @@ export function FactList({ facts, empty }: { facts: Fact[]; empty: string }) {
           <span className="ip-wa-facts__label">{fact.label}</span>
           {fact.detail ? <span className="ip-wa-facts__detail">{fact.detail}</span> : null}
           <Status label={t(TRUTH_LABEL[fact.status])} tone={TRUTH_TONE[fact.status]} />
+          {onConfirm && fact.status === "inferred" ? (
+            <button
+              aria-label={t("workArea.confirm.factLabel", { label: fact.label })}
+              className="ip-btn ip-btn--ghost ip-wa-confirm"
+              disabled={busy}
+              onClick={() => onConfirm(fact.id)}
+              type="button"
+            >
+              <Check aria-hidden="true" size={14} />
+              {t("workArea.confirm.action")}
+            </button>
+          ) : null}
         </li>
       ))}
     </ul>

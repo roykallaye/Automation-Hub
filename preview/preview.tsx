@@ -370,6 +370,20 @@ const SCENES: Record<string, () => JSX.Element> = {
       />
     </Shell>
   ),
+  /* The map before the manager has confirmed anything: every assistant guess
+     carries its own "Confirm", which is what readiness actually waits on. */
+  "work-area-confirm": () => (
+    <Shell page="workAreas">
+      <UnderstandStage
+        busy={false}
+        context={workArea.receptionMapping.context}
+        onAnswerQuestions={noop}
+        onConfirm={noop}
+        onView={noop}
+        view={{ kind: "map" }}
+      />
+    </Shell>
+  ),
   "work-area-workflow": () => (
     <Shell page="workAreas">
       <UnderstandStage
@@ -416,6 +430,7 @@ const SCENES: Record<string, () => JSX.Element> = {
         onAnswer={async () => undefined}
         onArchive={async () => undefined}
         onBack={noop}
+        onConfirm={async () => undefined}
         onOpenAssistant={noop}
       />
     </Shell>
@@ -429,6 +444,7 @@ const SCENES: Record<string, () => JSX.Element> = {
         onAnswer={async () => undefined}
         onArchive={async () => undefined}
         onBack={noop}
+        onConfirm={async () => undefined}
         onOpenAssistant={noop}
       />
     </Shell>
@@ -443,6 +459,7 @@ const SCENES: Record<string, () => JSX.Element> = {
         onAnswer={async () => undefined}
         onArchive={async () => undefined}
         onBack={noop}
+        onConfirm={async () => undefined}
         onOpenAssistant={noop}
       />
     </Shell>

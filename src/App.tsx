@@ -36,6 +36,7 @@ import { attentionModules } from "./statusMapping";
 import { assistantWorkAreaAccess } from "./assistantConnection";
 import {
   archiveWorkArea,
+  confirmWorkAreaFact,
   createWorkArea,
   getWorkArea,
   listWorkAreaOpportunities,
@@ -230,6 +231,32 @@ function App() {
           value: input.value,
           expectedRevision: workAreaDetail.context.revision,
           requestId: input.requestId,
+        }),
+      );
+      await refreshWorkAreas();
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
+  /**
+   * Manager confirmation.
+   *
+   * Sent with the revision on screen, so a confirmation given against a view
+   * that has since moved on is refused rather than applied to something else.
+   */
+  async function confirmWorkAreaTarget(targetId: string) {
+    if (!workAreaDetail) return;
+    setWorkAreaError(null);
+    setWorkAreaBusy(true);
+    try {
+      setWorkAreaDetail(
+        await confirmWorkAreaFact({
+          workAreaId: workAreaDetail.context.id,
+          targetId,
+          expectedRevision: workAreaDetail.context.revision,
         }),
       );
       await refreshWorkAreas();
@@ -633,6 +660,7 @@ function App() {
               evidenceUnavailable={evidenceUnavailable}
               onAnswer={answerWorkAreaQuestion}
               onArchive={archiveOpenWorkArea}
+              onConfirm={confirmWorkAreaTarget}
               onBack={() => {
                 setWorkAreaDetail(null);
                 setWorkAreaError(null);

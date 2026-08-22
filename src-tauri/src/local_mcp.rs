@@ -1,4 +1,4 @@
-﻿//! Secure local MCP foundation.
+//! Secure local MCP foundation.
 //!
 //! This module is the only public library seam used by the standalone
 //! `innpilot-mcp` helper.  It deliberately exposes redacted reads and
@@ -106,7 +106,7 @@ const SCOPES: [&str; 12] = [
 ///
 /// These are snapshotted into a grant at creation. A grant issued before H-A
 /// stores only the ten earlier scopes, `authorize` checks the stored vector,
-/// and nothing unions it with this constant â€” so an upgrade never escalates an
+/// and nothing unions it with this constant — so an upgrade never escalates an
 /// existing connection. Gaining these requires the manager to reconnect.
 /// Referenced by the grant-migration tests that enforce the property above.
 #[cfg(test)]
@@ -2337,17 +2337,17 @@ fn manager_proposal_review(
         let current = installed_draft
             .and_then(|value| value.get(field))
             .map(review_value)
-            .unwrap_or_else(|| "â€”".to_string());
+            .unwrap_or_else(|| "—".to_string());
         let proposed_value = path
             .map(|path| path.local_path.clone())
             .or_else(|| proposed.get(field).map(review_value))
-            .unwrap_or_else(|| "â€”".to_string());
+            .unwrap_or_else(|| "—".to_string());
         fields.push(ManagerProposalReviewField {
             field: field.clone(),
             current_value: current,
             proposed_value,
             evidence: path
-                .map(|path| format!("Structural snapshot Â· {}", path.evidence_ref))
+                .map(|path| format!("Structural snapshot · {}", path.evidence_ref))
                 .unwrap_or_else(|| "Validated configuration field".to_string()),
             validation: if proposal.safe.status == "ready_for_review"
                 && proposal.safe.unresolved_questions.is_empty()
@@ -2383,7 +2383,7 @@ fn review_value(value: &serde_json::Value) -> String {
                 "No".to_string()
             }
         }
-        serde_json::Value::Null => "â€”".to_string(),
+        serde_json::Value::Null => "—".to_string(),
         other => other.to_string(),
     }
 }
@@ -3640,6 +3640,52 @@ mod tests {
     /// The property recorded in 8c2949f, now enforced by a test.
     ///
     /// A grant issued before Work Areas existed stores only its original
+    /// The exact released scope set.
+    ///
+    /// Enumerated rather than pattern-matched. Substring checks are actively
+    /// misleading here — `installation.read` contains "install" and
+    /// `discovery.run` contains "run" — so a test built on them would either
+    /// fail on safe scopes or, worse, be relaxed until it passed and stop
+    /// meaning anything. Listing the twelve makes any addition a deliberate,
+    /// reviewed change to this test.
+    #[test]
+    fn the_released_scope_set_is_exactly_these_twelve_reads_and_proposals() {
+        assert_eq!(
+            BTreeSet::from(SCOPES),
+            BTreeSet::from([
+                // Phase D — read-only installation and configuration facts.
+                "installation.read",
+                "onboarding.read",
+                "configuration.read_redacted",
+                "health.read",
+                "recovery.read",
+                "proposal.validate",
+                // Phase E — bounded structural discovery and proposal drafting.
+                "discovery.scope.read",
+                "discovery.run",
+                "proposal.prepare",
+                "proposal.read",
+                // Phase H-A — Work Area planning.
+                "work_area.read",
+                "work_area.propose",
+            ]),
+        );
+
+        // No scope authorises applying, configuring, executing, recovering or
+        // answering. Those verbs have no representation in the grant language
+        // at all, which is why there is nothing for a tool to be granted.
+        for scope in SCOPES {
+            let (_, action) = scope.rsplit_once('.').expect("scope is dotted");
+            assert!(
+                matches!(
+                    action,
+                    "read" | "read_redacted" | "validate" | "prepare" | "propose" | "run"
+                ),
+                "scope {scope} ends in an action outside the read/propose vocabulary"
+            );
+        }
+    }
+
     /// scopes. Upgrading the software must not widen it.
     #[test]
     fn a_pre_h_a_grant_is_denied_every_work_area_tool() {

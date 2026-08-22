@@ -35,6 +35,7 @@ export function WorkAreaDetailPage({
   onAnswer,
   onArchive,
   onBack,
+  onConfirm,
   onOpenAssistant,
   reconnectPrompt,
 }: {
@@ -49,6 +50,8 @@ export function WorkAreaDetailPage({
     requestId: string;
   }) => Promise<void>;
   onArchive: () => Promise<void>;
+  /** Manager confirmation of one mapped fact or workflow. */
+  onConfirm: (targetId: string) => Promise<void>;
   onBack: () => void;
   onOpenAssistant: () => void;
   reconnectPrompt?: React.ReactNode;
@@ -147,8 +150,10 @@ export function WorkAreaDetailPage({
 
         {stage === "understand" ? (
           <UnderstandStage
+            busy={busy}
             context={context}
             onAnswerQuestions={() => setAnswering(true)}
+            onConfirm={(targetId) => void onConfirm(targetId)}
             onView={setUnderstandView}
             view={understandView}
           />

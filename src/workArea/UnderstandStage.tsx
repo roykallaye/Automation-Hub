@@ -14,6 +14,7 @@
 
 import {
   ArrowLeft,
+  Check,
   CircleHelp,
   FileStack,
   Notebook,
@@ -41,13 +42,18 @@ export type UnderstandView =
   | { kind: "workflow"; workflowId: string };
 
 export function UnderstandStage({
+  busy = false,
   context,
   onAnswerQuestions,
+  onConfirm,
   onView,
   view,
 }: {
+  busy?: boolean;
   context: WorkAreaContext;
   onAnswerQuestions: () => void;
+  /** Manager confirmation. Absent in read-only previews. */
+  onConfirm?: (targetId: string) => void;
   onView: (view: UnderstandView) => void;
   view: UnderstandView;
 }) {
@@ -65,11 +71,26 @@ export function UnderstandStage({
         </Note>
       );
     }
-    return <WorkflowDetail onBack={() => onView({ kind: "map" })} workflow={workflow} />;
+    return (
+      <WorkflowDetail
+        busy={busy}
+        onBack={() => onView({ kind: "map" })}
+        onConfirm={onConfirm}
+        workflow={workflow}
+      />
+    );
   }
 
   if (view.kind === "map") {
-    return <OperationalMapPanel context={context} onOpenWorkflow={onView} onBack={() => onView({ kind: "overview" })} />;
+    return (
+      <OperationalMapPanel
+        busy={busy}
+        context={context}
+        onBack={() => onView({ kind: "overview" })}
+        onConfirm={onConfirm}
+        onOpenWorkflow={onView}
+      />
+    );
   }
 
   return (
@@ -184,12 +205,16 @@ function UnderstandOverview({
 /* -------------------------------------------------------- operational map */
 
 function OperationalMapPanel({
+  busy,
   context,
   onBack,
+  onConfirm,
   onOpenWorkflow,
 }: {
+  busy: boolean;
   context: WorkAreaContext;
   onBack: () => void;
+  onConfirm?: (targetId: string) => void;
   onOpenWorkflow: (view: UnderstandView) => void;
 }) {
   const { t } = useI18n();
@@ -221,15 +246,30 @@ function OperationalMapPanel({
       </Block>
 
       <Block title={t("workArea.section.people")}>
-        <FactList empty={t("workArea.map.noneYet")} facts={map.roles} />
+        <FactList
+          busy={busy}
+          empty={t("workArea.map.noneYet")}
+          facts={map.roles}
+          onConfirm={onConfirm}
+        />
       </Block>
 
       <Block title={t("workArea.section.tools")}>
-        <FactList empty={t("workArea.map.noneYet")} facts={map.systems} />
+        <FactList
+          busy={busy}
+          empty={t("workArea.map.noneYet")}
+          facts={map.systems}
+          onConfirm={onConfirm}
+        />
       </Block>
 
       <Block title={t("workArea.section.information")}>
-        <FactList empty={t("workArea.map.noneYet")} facts={map.informationSources} />
+        <FactList
+          busy={busy}
+          empty={t("workArea.map.noneYet")}
+          facts={map.informationSources}
+          onConfirm={onConfirm}
+        />
         {map.documentTypes.length > 0 ? (
           <>
             <h3 className="ip-wa-subhead">{t("workArea.section.documents")}</h3>
@@ -314,10 +354,14 @@ function shortFlow(workflow: MappedWorkflow, t: Translate) {
 /* ------------------------------------------------------- workflow detail */
 
 function WorkflowDetail({
+  busy,
   onBack,
+  onConfirm,
   workflow,
 }: {
+  busy: boolean;
   onBack: () => void;
+  onConfirm?: (targetId: string) => void;
   workflow: MappedWorkflow;
 }) {
   const { t } = useI18n();
@@ -338,6 +382,20 @@ function WorkflowDetail({
         title={workflow.name}
       >
         <WorkflowFlow steps={workflow.steps} title={t("workArea.workflow.today")} />
+
+        {/*
+          The one question only the manager can settle. Until it is answered,
+          this workflow cannot become an automation candidate, however complete
+          the description looks.
+        */}
+        {onConfirm && workflow.phase === "current" && !workflow.currentStateConfirmed ? (
+          <div className="ip-wa-confirm-ask">
+            <p>{t("workArea.confirm.workflowAsk")}</p>
+            <Button busy={busy} icon={Check} onClick={() => onConfirm(workflow.id)} variant="primary">
+              {t("workArea.confirm.workflowAction")}
+            </Button>
+          </div>
+        ) : null}
       </Block>
 
       {/*

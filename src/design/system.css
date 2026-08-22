@@ -2382,3 +2382,29 @@ button.ip-row:hover {
     gap: 12px;
   }
 }
+
+/* The manager's confirmation affordance. Quiet: it appears only next to things
+   InnPilot guessed, and it is an answer, not a command. */
+.ip-wa-confirm {
+  font-size: 0.79rem;
+  min-height: 30px;
+  padding: 3px 10px;
+}
+
+.ip-wa-confirm-ask {
+  align-items: center;
+  border-top: 1px solid var(--ip-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.ip-wa-confirm-ask p {
+  color: var(--ip-ink-soft);
+  font-size: 0.875rem;
+  margin: 0;
+  max-width: 52ch;
+}

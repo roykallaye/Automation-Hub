@@ -494,6 +494,10 @@ export const productEn = {
   "workArea.reviewFolderAccess": "Review folder access",
   "workArea.planningOnly": "Mapping and planning do not change your files and do not run automations.",
   "workArea.stillUnclear": "Still unclear",
+  "workArea.confirm.action": "Confirm",
+  "workArea.confirm.factLabel": "Confirm that {label} is correct",
+  "workArea.confirm.workflowAsk": "Is this really how the work happens today? InnPilot worked this out from what it could see, and it needs you to say.",
+  "workArea.confirm.workflowAction": "Yes, this is how it works",
 
   "workArea.stage.starting": "Just started",
   "workArea.stage.startingText": "InnPilot does not know enough about this area yet.",
