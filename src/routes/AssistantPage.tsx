@@ -33,6 +33,7 @@ import {
   ASSISTANT_STATE_LABEL,
   ASSISTANT_STATE_TONE,
   assistantConnectionState,
+  assistantWorkAreaAccess,
 } from "../assistantConnection";
 import { useI18n } from "../i18n";
 import { commandErrorMessage } from "../onboarding";
@@ -65,6 +66,9 @@ export function AssistantPage({
   const connectionPrepared = connectionState === "accessReady" || connected;
   const expired = connectionState === "reconnectRequired";
   const hasGrant = connectionPrepared;
+  // Scopes are stored with the grant and never widened in place, so an older
+  // connection is fully working and simply cannot help with Work Areas.
+  const workAreaAccess = assistantWorkAreaAccess(agent);
 
   async function copyCommand() {
     if (!agent?.codexAddCommand) return;
@@ -156,6 +160,22 @@ export function AssistantPage({
             </div>
           ) : null}
 
+          {/*
+            Connected, but from before Work Area mapping existed. This is not a
+            broken connection and is never described as one — it is missing
+            capability, and the remedy is a new grant the manager approves.
+          */}
+          {workAreaAccess === "needsUpdate" ? (
+            <div style={{ marginTop: 14 }}>
+              <Note tone="attention">{t("workArea.access.text")}</Note>
+              <div className="ip-actions" style={{ marginTop: 10 }}>
+                <Button busy={busy} icon={RefreshCw} onClick={connect} variant="primary">
+                  {t("workArea.access.reconnect")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="ip-actions" style={{ marginTop: 16 }}>
             {hasGrant ? (
               <Button
@@ -205,6 +225,15 @@ export function AssistantPage({
                 <Capability allowed label={t("assistant.canCheckSetup")} />
                 <Capability allowed label={t("assistant.canPrepare")} />
                 <Capability allowed label={t("assistant.canDiagnose")} />
+                {/* Shown as granted only when the stored grant actually says so. */}
+                <Capability
+                  allowed={workAreaAccess === "ready"}
+                  label={t("assistant.canMapWorkAreas")}
+                />
+                <Capability
+                  allowed={workAreaAccess === "ready"}
+                  label={t("assistant.canPreparePlans")}
+                />
               </Rows>
             </Card>
           </Section>
@@ -212,6 +241,7 @@ export function AssistantPage({
           <Section title={t("assistant.cannotDo")}>
             <Card>
               <Rows>
+                <Capability label={t("assistant.cannotAnswer")} />
                 <Capability label={t("assistant.cannotApprove")} />
                 <Capability label={t("assistant.cannotRun")} />
                 <Capability label={t("assistant.cannotRead")} />

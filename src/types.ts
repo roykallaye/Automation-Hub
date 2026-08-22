@@ -11,6 +11,8 @@ export type ActivityMode = "dry_run" | "execute" | "unknown";
 
 export type AppPage =
   | "home"
+  /** The parts of the business InnPilot is learning about. */
+  | "workAreas"
   | "automations"
   | "activity"
   | "assistant"

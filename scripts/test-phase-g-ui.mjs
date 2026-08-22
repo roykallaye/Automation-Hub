@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { transform } from "esbuild";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
+/*
+  Bundle rather than transform.
+
+  A single-file transform leaves relative imports in place, and a data: URL
+  module cannot resolve them — so any module under test that imports a real
+  value (rather than only types) fails to load. `stages.ts` does exactly that:
+  it imports `assistantConnectionState`, because there is one shared definition
+  of what "connected" means. Bundling keeps that sharing testable.
+*/
 async function importTypeScript(path) {
-  const source = await readFile(new URL(path, import.meta.url), "utf8");
-  const compiled = await transform(source, {
+  const result = await build({
+    bundle: true,
+    entryPoints: [fileURLToPath(new URL(path, import.meta.url))],
     format: "esm",
-    loader: "ts",
+    platform: "node",
     target: "es2020",
+    write: false,
   });
-  return import(`data:text/javascript;base64,${Buffer.from(compiled.code).toString("base64")}`);
+  const code = result.outputFiles[0].text;
+  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
 const { assistantHasReachedInnPilot, projectJourney } = await importTypeScript(

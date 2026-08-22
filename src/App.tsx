@@ -30,7 +30,26 @@ import { HomePage } from "./routes/HomePage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { SupportPage } from "./routes/SupportPage";
 import { SystemPage } from "./routes/SystemPage";
+import { WorkAreaDetailPage } from "./routes/WorkAreaDetailPage";
+import { WorkAreasPage } from "./routes/WorkAreasPage";
 import { attentionModules } from "./statusMapping";
+import { assistantWorkAreaAccess } from "./assistantConnection";
+import {
+  archiveWorkArea,
+  createWorkArea,
+  getWorkArea,
+  listWorkAreaOpportunities,
+  listWorkAreas,
+  submitWorkAreaAnswer,
+} from "./workArea/api";
+import { AssistantAccessPrompt } from "./workArea/components";
+import type {
+  AnswerValue,
+  CreateWorkAreaCommand,
+  OpportunityListing,
+  WorkAreaDetail,
+  WorkAreaSummary,
+} from "./workArea/types";
 import type {
   ActivityRecord,
   AppConfigStatus,
@@ -75,6 +94,13 @@ function App() {
    * screen to show, never whether setup succeeded.
    */
   const [leftJourney, setLeftJourney] = useState(false);
+  const [workAreas, setWorkAreas] = useState<WorkAreaSummary[]>([]);
+  const [workAreaDetail, setWorkAreaDetail] = useState<WorkAreaDetail | null>(null);
+  const [workAreaBusy, setWorkAreaBusy] = useState(false);
+  const [workAreaError, setWorkAreaError] = useState<string | null>(null);
+  const [opportunities, setOpportunities] = useState<OpportunityListing[]>([]);
+  /** "Not now" on the access prompt is remembered for this session only. */
+  const [accessPromptDismissed, setAccessPromptDismissed] = useState(false);
   const configRefreshId = useRef(0);
 
   const browserPreview =
@@ -129,6 +155,126 @@ function App() {
     if (nextLifedesk.status === "fulfilled") setLifedesk(nextLifedesk.value);
   }, [browserPreview]);
 
+  /*
+    Work Areas.
+
+    Every operation below is a round trip. React never edits an area in memory:
+    it sends a typed local manager operation and then renders whatever the
+    backend says the area now is. That is what keeps "answered", "map ready",
+    "plan stale" and "automation candidate" backend facts rather than screen
+    state that happens to look right.
+  */
+  const refreshWorkAreas = useCallback(async () => {
+    if (browserPreview) return;
+    try {
+      const [areas, listings] = await Promise.all([
+        listWorkAreas(),
+        listWorkAreaOpportunities(),
+      ]);
+      setWorkAreas(areas);
+      setOpportunities(listings);
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+    }
+  }, [browserPreview]);
+
+  async function openWorkArea(workAreaId: string) {
+    setWorkAreaError(null);
+    setWorkAreaBusy(true);
+    try {
+      setWorkAreaDetail(await getWorkArea(workAreaId));
+    } catch (error) {
+      setWorkAreaDetail(null);
+      setWorkAreaError(commandErrorMessage(error));
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
+  async function addWorkArea(command: CreateWorkAreaCommand) {
+    setWorkAreaError(null);
+    setWorkAreaBusy(true);
+    try {
+      const detail = await createWorkArea(command);
+      setWorkAreaDetail(detail);
+      await refreshWorkAreas();
+      return true;
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+      return false;
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
+  /**
+   * Record one manager answer.
+   *
+   * `expectedRevision` is the revision the manager was looking at, so an answer
+   * given against a view that has since changed is refused rather than applied
+   * to a different area than the one on screen.
+   */
+  async function answerWorkAreaQuestion(input: {
+    questionId: string;
+    value: AnswerValue;
+    requestId: string;
+  }) {
+    if (!workAreaDetail) return;
+    setWorkAreaError(null);
+    setWorkAreaBusy(true);
+    try {
+      setWorkAreaDetail(
+        await submitWorkAreaAnswer({
+          workAreaId: workAreaDetail.context.id,
+          questionId: input.questionId,
+          value: input.value,
+          expectedRevision: workAreaDetail.context.revision,
+          requestId: input.requestId,
+        }),
+      );
+      await refreshWorkAreas();
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
+  async function archiveOpenWorkArea() {
+    if (!workAreaDetail) return;
+    setWorkAreaBusy(true);
+    try {
+      setWorkAreas(
+        await archiveWorkArea(workAreaDetail.context.id, workAreaDetail.context.revision),
+      );
+      setWorkAreaDetail(null);
+      await refreshWorkAreas();
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
+  /**
+   * Create a fresh grant so the assistant can help with Work Areas.
+   *
+   * This deliberately goes through the normal connect flow rather than adding
+   * scopes to the existing grant: the manager approves the new access, and the
+   * Assistant page is where the reconnect command lives.
+   */
+  async function updateAssistantAccess() {
+    setWorkAreaBusy(true);
+    try {
+      setAgent(await invoke<LocalAgentConnectionStatus>("create_local_agent_connection"));
+      setCurrentPage("assistant");
+    } catch (error) {
+      setWorkAreaError(commandErrorMessage(error));
+    } finally {
+      setWorkAreaBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (browserPreview) {
       setOnboardingResolved(true);
@@ -151,6 +297,7 @@ function App() {
     void refreshLatestLogs();
     void refreshActivityHistory();
     void refreshConnections();
+    void refreshWorkAreas();
     void invoke<RunSummary | null>("get_last_run_summary")
       .then((summary) => {
         if (summary) {
@@ -315,6 +462,34 @@ function App() {
     return null;
   }
 
+  /*
+    The old-grant case, stated accurately.
+
+    A grant created before Work Areas existed is valid and in use; it simply
+    never received the mapping scopes, because stored scopes are not widened in
+    place. That is a capability gap, not a broken connection, so it is raised
+    only where it actually blocks something.
+  */
+  const workAreaAccess = assistantWorkAreaAccess(agent);
+  const accessPrompt =
+    workAreaAccess === "needsUpdate" && !accessPromptDismissed ? (
+      <AssistantAccessPrompt
+        busy={workAreaBusy}
+        onDismiss={() => setAccessPromptDismissed(true)}
+        onReconnect={() => void updateAssistantAccess()}
+      />
+    ) : null;
+
+  // Structural evidence is reachable only while the approved discovery scope
+  // is active. If it is not, a map built from folder structure is standing on
+  // information InnPilot can no longer see.
+  const evidenceUnavailable = Boolean(
+    workAreaDetail &&
+      workAreaDetail.context.linkedEvidence.length > 0 &&
+      discovery !== null &&
+      discovery.discovery.scope?.state !== "active",
+  );
+
   const hotelName = configStatus?.config.client.displayName || "InnPilot";
   const runningLabel = runningCommand
     ? (actions.find((action) => action.commandName === runningCommand)?.label ?? null)
@@ -440,9 +615,43 @@ function App() {
             loading={loadingConfig}
             modules={modules}
             onNavigate={setCurrentPage}
+            onOpenWorkArea={(id) => {
+              setCurrentPage("workAreas");
+              void openWorkArea(id);
+            }}
             runningLabel={runningLabel}
+            workAreas={workAreas}
           />
         )}
+
+        {currentPage === "workAreas" &&
+          (workAreaDetail ? (
+            <WorkAreaDetailPage
+              busy={workAreaBusy}
+              detail={workAreaDetail}
+              error={workAreaError}
+              evidenceUnavailable={evidenceUnavailable}
+              onAnswer={answerWorkAreaQuestion}
+              onArchive={archiveOpenWorkArea}
+              onBack={() => {
+                setWorkAreaDetail(null);
+                setWorkAreaError(null);
+              }}
+              onOpenAssistant={() => setCurrentPage("assistant")}
+              reconnectPrompt={accessPrompt}
+            />
+          ) : (
+            <WorkAreasPage
+              areas={workAreas}
+              busy={workAreaBusy}
+              error={workAreaError}
+              loading={workAreaBusy}
+              onCreate={addWorkArea}
+              onOpen={(id) => void openWorkArea(id)}
+              onRefresh={() => void refreshWorkAreas()}
+              reconnectPrompt={accessPrompt}
+            />
+          ))}
 
         {currentPage === "automations" && (
           <AutomationsPage
@@ -452,7 +661,12 @@ function App() {
             modules={modules}
             onNavigate={setCurrentPage}
             onOpenPath={openPath}
+            onOpenWorkArea={(id) => {
+              setCurrentPage("workAreas");
+              void openWorkArea(id);
+            }}
             onRun={startAction}
+            opportunities={opportunities}
             runningCommand={runningCommand}
           />
         )}
@@ -464,7 +678,12 @@ function App() {
             latestLogs={latestLogs}
             onOpenActivityReport={openActivityReport}
             onOpenPath={openPath}
+            onOpenWorkArea={(id) => {
+              setCurrentPage("workAreas");
+              void openWorkArea(id);
+            }}
             onRefresh={refreshAll}
+            workAreas={workAreas}
           />
         )}
 

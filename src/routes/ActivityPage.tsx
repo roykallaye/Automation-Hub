@@ -6,7 +6,7 @@
   path stay available per entry, one disclosure away.
 */
 
-import { History, RefreshCw } from "lucide-react";
+import { Building2, History, RefreshCw } from "lucide-react";
 
 import {
   Button,
@@ -17,10 +17,13 @@ import {
   PageHead,
   Row,
   Rows,
+  Section,
   TechnicalDetails,
 } from "../components/ui";
 import { useI18n, type Translate } from "../i18n";
 import { activityTone, formatWhen } from "../statusMapping";
+import { areaStage, STAGE_LABEL, STAGE_TONE } from "../workArea/vocabulary";
+import type { WorkAreaSummary } from "../workArea/types";
 import type { ActivityRecord, AppConfigStatus, LatestLog } from "../types";
 
 export function ActivityPage({
@@ -29,14 +32,18 @@ export function ActivityPage({
   latestLogs,
   onOpenActivityReport,
   onOpenPath,
+  onOpenWorkArea,
   onRefresh,
+  workAreas,
 }: {
   activityHistory: ActivityRecord[];
   configStatus: AppConfigStatus | null;
   latestLogs: LatestLog[];
   onOpenActivityReport: (path?: string | null) => void;
   onOpenPath: (path?: string | null) => void;
+  onOpenWorkArea: (workAreaId: string) => void;
   onRefresh: () => void;
+  workAreas: WorkAreaSummary[];
 }) {
   const { language, t } = useI18n();
   const records = [...activityHistory].reverse();
@@ -49,18 +56,22 @@ export function ActivityPage({
         title={t("activity.title")}
       />
 
-      {records.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={History}
-            message={t("activity.emptyText")}
-            title={t("activity.emptyTitle")}
-          />
-        </Card>
-      ) : (
-        <div className="ip-stack">
-          <Card>
-            <Rows>
+      <div className="ip-stack">
+        <WorkAreaProgress onOpenWorkArea={onOpenWorkArea} workAreas={workAreas} />
+
+        <Section description={t("activity.runsText")} title={t("activity.runs")}>
+          {records.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={History}
+                level={3}
+                message={t("activity.emptyText")}
+                title={t("activity.emptyTitle")}
+              />
+            </Card>
+          ) : (
+            <Card>
+              <Rows>
               {records.map((record) => (
                 <Row
                   key={record.id}
@@ -75,9 +86,12 @@ export function ActivityPage({
                   title={eventSentence(record, t)}
                 />
               ))}
-            </Rows>
-          </Card>
+              </Rows>
+            </Card>
+          )}
+        </Section>
 
+        {records.length > 0 ? (
           <TechnicalDetails label={t("activity.technical")}>
             <DetailList
               items={records.slice(0, 12).flatMap((record) => [
@@ -137,9 +151,69 @@ export function ActivityPage({
               </div>
             ) : null}
           </TechnicalDetails>
-        </div>
-      )}
+        ) : null}
+      </div>
     </>
+  );
+}
+
+/*
+  Business understanding.
+
+  There is deliberately no event log behind this. Work Area operations write
+  idempotency receipts, not activity records, and turning those into a global
+  feed would mean storing more than the aggregate needs. So this reports the
+  current standing of each area from the same summaries the overview uses.
+
+  Manager answers never appear here. What a manager told InnPilot about their
+  business belongs inside the area, not in a timeline that exists to explain
+  what the software did.
+*/
+function WorkAreaProgress({
+  onOpenWorkArea,
+  workAreas,
+}: {
+  onOpenWorkArea: (workAreaId: string) => void;
+  workAreas: WorkAreaSummary[];
+}) {
+  const { t } = useI18n();
+  const active = workAreas.filter((area) => area.state !== "archived");
+  if (active.length === 0) return null;
+
+  return (
+    <Section description={t("activity.understandingText")} title={t("activity.understanding")}>
+      <Card>
+        <Rows>
+          {active.map((area) => {
+            const stage = areaStage(area);
+            return (
+              <Row
+                icon={Building2}
+                key={area.id}
+                meta={[
+                  area.workflowsMapped > 0
+                    ? t("workArea.workflowsMapped", { count: area.workflowsMapped })
+                    : null,
+                  area.openBlockingQuestions > 0
+                    ? t("workArea.questionsRemaining", { count: area.openBlockingQuestions })
+                    : null,
+                  area.planStale ? t("workArea.planNeedsUpdate") : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                onOpen={() => onOpenWorkArea(area.id)}
+                openLabel={`${area.name} — ${t("workArea.open")}`}
+                status={{ tone: STAGE_TONE[stage], label: t(STAGE_LABEL[stage]) }}
+                title={area.name}
+              />
+            );
+          })}
+        </Rows>
+      </Card>
+      <p className="ip-fineprint" style={{ marginTop: 10 }}>
+        {t("activity.answersPrivate")}
+      </p>
+    </Section>
   );
 }
 

@@ -293,6 +293,89 @@ fragment.
 A real Codex end-to-end session against synthetic fixtures, and the reconnect
 prompt in the Assistant UI. Both belong to Increments 4–5.
 
+## Increment 4 — the manager experience
+
+The Work Area experience is now reachable from the application: **Work areas**
+sits between Home and Automations, because automation opportunities are
+something InnPilot finds by understanding a business area, and the navigation
+should read in the order the work happens.
+
+### One projection, two adapters
+
+The views moved out of `local_mcp.rs` into `work_area_view.rs`. The manager UI
+and the assistant now read the same projection rather than two that could drift.
+That matters more than tidiness: a second, UI-only view could quietly present an
+inferred fact as settled or a stale plan as current, because it would have its
+own opinion about normalization. Here the answer is computed once.
+
+Two fields were added to the shared views for the UI, both harmless to the
+assistant and useful to it: `Question.response_type` (so the answer control is
+chosen by the declared response type rather than guessed from prompt wording)
+and `prepared_at` on the map and plan.
+
+### The local manager adapter
+
+`work_area_app.rs` exposes six Tauri commands, none of which has an MCP
+equivalent:
+
+| Command | Authority |
+| --- | --- |
+| `list_work_areas` | read |
+| `get_work_area` | read |
+| `list_work_area_opportunities` | read |
+| `create_work_area` | local manager |
+| `submit_work_area_answer` | local manager |
+| `archive_work_area` | local manager |
+
+The asymmetry with the MCP surface is the trust boundary. The assistant may
+prepare questions, a map and a plan; it has no tool that answers, confirms,
+approves or archives.
+
+`create_work_area` takes the area's responsibilities and applies them through
+`set_scope`. Scope is the one part of the map the assistant may not invent:
+deciding what a department is responsible for is a business decision, not an
+inference from folder structure. The planning service never writes it.
+
+### Understand → Improve → Automate
+
+The detail screen makes the sequence structural rather than implied. Improve and
+Automate exist only once the backend has produced a plan, and until then they
+are visibly quieter than Understand — reachable, because being told why Automate
+is empty beats a dead control, but never equally available.
+
+Improve lists categories in the order the work happens, with Automate last and
+given no extra visual weight. A plan whose honest answer is "digitize this
+first" or "keep this manual" is a good plan, and the layout has to agree.
+
+### Where truth is rendered
+
+`src/workArea/vocabulary.ts` is the whole translation from process-engineering
+vocabulary to manager vocabulary, and it holds two rules: every table is total
+over its backend enum, and no table upgrades certainty. An inferred fact renders
+as "Needs confirmation" with an attention tone; a catalog match renders as "may
+already support", never "supported"; a proposed future workflow renders as a
+suggestion even when its `current_state_confirmed` flag is set.
+
+`scripts/test-work-area-ui.mjs` enforces both rules, along with the ordering of
+the dominant action and the Home alert rules. It found and now guards the case
+that matters most commercially: `TRUTH_TONE.inferred !== TRUTH_TONE.confirmed`.
+
+### The old-grant case
+
+A grant created before Work Areas existed keeps exactly the ten scopes it was
+given. `assistantWorkAreaAccess` derives a third state from the stored scopes:
+the assistant is connected *and* cannot help map a business area. The UI says
+so, offers a reconnect that creates a fresh grant through the normal approval
+flow, and never describes the gap as a broken connection or silently widens the
+stored scopes.
+
+### Deliberately not done
+
+Work Area operations write idempotency receipts, not activity records, so there
+is no global planning event log. Rather than adding one — which would mean
+storing more than the aggregate needs — the Activity page reports where each
+area currently stands, and states that manager answers are never listed there.
+
 ## Not built yet
 
 Persistence and revisions; application services and Tauri adapters; the MCP

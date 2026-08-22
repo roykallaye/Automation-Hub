@@ -13,6 +13,7 @@
 import {
   Activity as ActivityIcon,
   Bot,
+  Building2,
   CircleHelp,
   Home,
   MonitorSmartphone,
@@ -31,8 +32,12 @@ export type AssistantPresence = "connected" | "notConnected" | "working" | "atte
 
 type NavItem = { key: AppPage; icon: LucideIcon; labelKey: TranslationKey };
 
+// Work areas sits before Automations on purpose: automation opportunities are
+// something InnPilot finds by understanding a business area, so the navigation
+// reads in the order the work actually happens.
 const PRIMARY: NavItem[] = [
   { key: "home", icon: Home, labelKey: "nav.home" },
+  { key: "workAreas", icon: Building2, labelKey: "nav.workAreas" },
   { key: "automations", icon: Workflow, labelKey: "nav.automations" },
   { key: "activity", icon: ActivityIcon, labelKey: "nav.activity" },
   { key: "assistant", icon: Bot, labelKey: "nav.assistant" },

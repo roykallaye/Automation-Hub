@@ -58,6 +58,29 @@ export function assistantConnectionState(
   return hasAuditedActivity(agent) ? "connected" : "accessReady";
 }
 
+/**
+ * Whether the current grant covers Work Area mapping.
+ *
+ * Scopes are stored with the grant and never widened in place, so a connection
+ * created before Work Areas existed keeps exactly the capabilities it was given.
+ * That is a real, narrow state: the assistant is genuinely connected and
+ * genuinely cannot help map a business area. Calling it "disconnected" would be
+ * false, and silently upgrading the grant would defeat the point of asking the
+ * manager to approve access in the first place.
+ */
+export type WorkAreaAccess = "unavailable" | "needsUpdate" | "ready";
+
+const WORK_AREA_SCOPES = ["work_area.read", "work_area.propose"];
+
+export function assistantWorkAreaAccess(
+  agent: LocalAgentConnectionStatus | null,
+): WorkAreaAccess {
+  const state = assistantConnectionState(agent);
+  if (state === "notConfigured" || state === "reconnectRequired") return "unavailable";
+  const scopes = agent?.scopes ?? [];
+  return WORK_AREA_SCOPES.every((scope) => scopes.includes(scope)) ? "ready" : "needsUpdate";
+}
+
 export const ASSISTANT_STATE_LABEL: Record<AssistantConnectionState, TranslationKey> = {
   notConfigured: "assistantState.notConfigured",
   accessReady: "assistantState.accessReady",

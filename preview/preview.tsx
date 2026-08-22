@@ -23,6 +23,12 @@ import { HomePage } from "../src/routes/HomePage";
 import { SettingsPage } from "../src/routes/SettingsPage";
 import { SupportPage } from "../src/routes/SupportPage";
 import { SystemPage } from "../src/routes/SystemPage";
+import { WorkAreaDetailPage } from "../src/routes/WorkAreaDetailPage";
+import { WorkAreasPage } from "../src/routes/WorkAreasPage";
+import { AssistantAccessPrompt } from "../src/workArea/components";
+import { AutomateStage, ImproveStage } from "../src/workArea/ImproveAutomate";
+import { QuestionFlow } from "../src/workArea/QuestionFlow";
+import { UnderstandStage } from "../src/workArea/UnderstandStage";
 import {
   ApplyingStage,
   CheckingStage,
@@ -37,6 +43,7 @@ import {
 } from "../src/onboarding/stageScreens";
 import type { AppPage } from "../src/types";
 import * as fixture from "./fixtures";
+import * as workArea from "./workAreaFixtures";
 
 import "../src/styles.css";
 import "../src/design/system.css";
@@ -134,7 +141,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         loading={false}
         modules={fixture.modulesReady}
         onNavigate={noop}
+        onOpenWorkArea={noop}
         runningLabel={null}
+        workAreas={workArea.areas}
       />
     </Shell>
   ),
@@ -147,7 +156,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         loading={false}
         modules={fixture.modulesAttention}
         onNavigate={noop}
+        onOpenWorkArea={noop}
         runningLabel={null}
+        workAreas={workArea.areas}
       />
     </Shell>
   ),
@@ -160,7 +171,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         loading={false}
         modules={fixture.modulesReady}
         onNavigate={noop}
+        onOpenWorkArea={noop}
         runningLabel={null}
+        workAreas={workArea.areas}
       />
     </Shell>
   ),
@@ -173,7 +186,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         modules={fixture.modulesAttention}
         onNavigate={noop}
         onOpenPath={noop}
+        onOpenWorkArea={noop}
         onRun={noop}
+        opportunities={workArea.opportunityListings}
         runningCommand={null}
       />
     </Shell>
@@ -186,7 +201,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         latestLogs={[]}
         onOpenActivityReport={noop}
         onOpenPath={noop}
+        onOpenWorkArea={noop}
         onRefresh={noop}
+        workAreas={workArea.areas}
       />
     </Shell>
   ),
@@ -198,7 +215,9 @@ const SCENES: Record<string, () => JSX.Element> = {
         latestLogs={[]}
         onOpenActivityReport={noop}
         onOpenPath={noop}
+        onOpenWorkArea={noop}
         onRefresh={noop}
+        workAreas={workArea.areasEmpty}
       />
     </Shell>
   ),
@@ -265,6 +284,167 @@ const SCENES: Record<string, () => JSX.Element> = {
   guide: () => (
     <Shell page="guide">
       <GuidePage lifedesk={fixture.lifedeskConnected} />
+    </Shell>
+  ),
+  /* ---------------------------------------------------------- work areas */
+
+  "work-areas-empty": () => (
+    <Shell page="workAreas">
+      <WorkAreasPage
+        areas={workArea.areasEmpty}
+        busy={false}
+        error={null}
+        loading={false}
+        onCreate={async () => true}
+        onOpen={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
+  "work-areas": () => (
+    <Shell page="workAreas">
+      <WorkAreasPage
+        areas={workArea.areas}
+        busy={false}
+        error={null}
+        loading={false}
+        onCreate={async () => true}
+        onOpen={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
+  "work-areas-access": () => (
+    <Shell page="workAreas">
+      <WorkAreasPage
+        areas={workArea.areas}
+        busy={false}
+        error={null}
+        loading={false}
+        onCreate={async () => true}
+        onOpen={noop}
+        onRefresh={noop}
+        reconnectPrompt={
+          <AssistantAccessPrompt busy={false} onDismiss={noop} onReconnect={noop} />
+        }
+      />
+    </Shell>
+  ),
+  "work-area-create": () => (
+    <Shell page="workAreas">
+      <WorkAreasPage
+        areas={workArea.areas}
+        busy={false}
+        error={null}
+        initialCreating
+        loading={false}
+        onCreate={async () => true}
+        onOpen={noop}
+        onRefresh={noop}
+      />
+    </Shell>
+  ),
+  /*
+    The stages are rendered directly rather than driven through the detail
+    page's own navigation, so each scene is exactly one screen and a headless
+    run can assert on it without clicking.
+  */
+  "work-area-questions": () => (
+    <Shell page="workAreas">
+      <QuestionFlow
+        busy={false}
+        context={workArea.receptionMapping.context}
+        error={null}
+        onAnswer={async () => undefined}
+        onDone={noop}
+      />
+    </Shell>
+  ),
+  "work-area-map": () => (
+    <Shell page="workAreas">
+      <UnderstandStage
+        context={workArea.receptionPlanned.context}
+        onAnswerQuestions={noop}
+        onView={noop}
+        view={{ kind: "map" }}
+      />
+    </Shell>
+  ),
+  "work-area-workflow": () => (
+    <Shell page="workAreas">
+      <UnderstandStage
+        context={workArea.receptionPlanned.context}
+        onAnswerQuestions={noop}
+        onView={noop}
+        view={{ kind: "workflow", workflowId: "wf-guest-requests" }}
+      />
+    </Shell>
+  ),
+  "work-area-improve": () => (
+    <Shell page="workAreas">
+      <ImproveStage
+        context={workArea.receptionPlanned.context}
+        onBackToUnderstand={noop}
+        plan={workArea.receptionPlanned.plan}
+      />
+    </Shell>
+  ),
+  "work-area-automate": () => (
+    <Shell page="workAreas">
+      <AutomateStage
+        context={workArea.receptionPlanned.context}
+        onOpenImprove={noop}
+        plan={workArea.receptionPlanned.plan}
+      />
+    </Shell>
+  ),
+  "work-area-automate-empty": () => (
+    <Shell page="workAreas">
+      <AutomateStage
+        context={workArea.receptionMapping.context}
+        onOpenImprove={noop}
+        plan={null}
+      />
+    </Shell>
+  ),
+  "work-area-mapping": () => (
+    <Shell page="workAreas">
+      <WorkAreaDetailPage
+        busy={false}
+        detail={workArea.receptionMapping}
+        error={null}
+        onAnswer={async () => undefined}
+        onArchive={async () => undefined}
+        onBack={noop}
+        onOpenAssistant={noop}
+      />
+    </Shell>
+  ),
+  "work-area-planned": () => (
+    <Shell page="workAreas">
+      <WorkAreaDetailPage
+        busy={false}
+        detail={workArea.receptionPlanned}
+        error={null}
+        onAnswer={async () => undefined}
+        onArchive={async () => undefined}
+        onBack={noop}
+        onOpenAssistant={noop}
+      />
+    </Shell>
+  ),
+  "work-area-stale": () => (
+    <Shell page="workAreas">
+      <WorkAreaDetailPage
+        busy={false}
+        detail={workArea.receptionStalePlan}
+        error={null}
+        evidenceUnavailable
+        onAnswer={async () => undefined}
+        onArchive={async () => undefined}
+        onBack={noop}
+        onOpenAssistant={noop}
+      />
     </Shell>
   ),
   "onboard-connect": () => (

@@ -28,8 +28,10 @@ mod runner_service;
 mod setup;
 mod templates;
 mod work_area;
+mod work_area_app;
 mod work_area_planning;
 mod work_area_store;
+mod work_area_view;
 mod worker_runtime;
 mod workflows;
 
@@ -184,10 +186,72 @@ pub fn run() {
             get_environment_discovery_status,
             approve_and_apply_setup_proposal,
             approve_environment_discovery,
-            revoke_environment_discovery
+            revoke_environment_discovery,
+            list_work_areas,
+            get_work_area,
+            create_work_area,
+            submit_work_area_answer,
+            archive_work_area,
+            list_work_area_opportunities
         ])
         .run(tauri::generate_context!())
         .expect("error while running InnPilot");
+}
+
+/* --------------------------------------------------------------- Work Areas
+
+  The local manager surface. Every one of these is reachable only from the
+  desktop window; none of them has an MCP equivalent. That asymmetry is what
+  makes a manager answer trustworthy, so it is enforced by which commands exist
+  rather than by anything the assistant is asked to respect.
+*/
+
+#[tauri::command]
+fn list_work_areas(
+    app: AppHandle,
+) -> Result<Vec<work_area_view::WorkAreaSummaryView>, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.overview()
+}
+
+#[tauri::command]
+fn get_work_area(
+    app: AppHandle,
+    work_area_id: String,
+) -> Result<work_area_app::WorkAreaDetailView, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.detail(&work_area_id)
+}
+
+#[tauri::command]
+fn create_work_area(
+    app: AppHandle,
+    command: work_area_app::CreateWorkAreaCommand,
+) -> Result<work_area_app::WorkAreaDetailView, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.create(command)
+}
+
+#[tauri::command]
+fn submit_work_area_answer(
+    app: AppHandle,
+    request: work_area_store::SubmitAnswerRequest,
+) -> Result<work_area_app::WorkAreaDetailView, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.submit_answer(request)
+}
+
+#[tauri::command]
+fn archive_work_area(
+    app: AppHandle,
+    work_area_id: String,
+    expected_revision: u64,
+) -> Result<Vec<work_area_view::WorkAreaSummaryView>, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?
+        .archive(&work_area_id, expected_revision)
+}
+
+#[tauri::command]
+fn list_work_area_opportunities(
+    app: AppHandle,
+) -> Result<Vec<work_area_app::OpportunityListing>, domain::WorkspaceError> {
+    work_area_app::WorkAreaApplicationService::resolve(&app)?.opportunities()
 }
 
 #[tauri::command]

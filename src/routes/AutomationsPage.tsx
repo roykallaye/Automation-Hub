@@ -12,6 +12,7 @@ import {
   FileText,
   FolderOpen,
   KeyRound,
+  Lightbulb,
   Play,
   ScanText,
   Workflow as WorkflowIcon,
@@ -34,6 +35,7 @@ import {
   PageHead,
   Row,
   Rows,
+  Section,
   Status,
   TechnicalDetails,
 } from "../components/ui";
@@ -41,6 +43,8 @@ import { useI18n, type TranslationKey, type Translate } from "../i18n";
 import { deliveryModeLabel } from "../messages";
 import { moduleForCommand } from "../moduleReadiness";
 import { activityTone, formatWhen, moduleStatusLabel, moduleTone } from "../statusMapping";
+import { OpportunityCard } from "../workArea/ImproveAutomate";
+import type { OpportunityListing } from "../workArea/types";
 import type {
   ActivityRecord,
   AppConfigStatus,
@@ -104,7 +108,9 @@ export function AutomationsPage({
   modules,
   onNavigate,
   onOpenPath,
+  onOpenWorkArea,
   onRun,
+  opportunities,
   runningCommand,
 }: {
   actionDisabledReason: (action: AutomationAction) => string | null;
@@ -113,7 +119,10 @@ export function AutomationsPage({
   modules: ModuleReadiness[];
   onNavigate: (page: AppPage) => void;
   onOpenPath: (path?: string | null) => void;
+  onOpenWorkArea: (workAreaId: string) => void;
   onRun: (action: AutomationAction) => void;
+  /** Planning findings from Work Areas. Never runnable. */
+  opportunities: OpportunityListing[];
   runningCommand: string | null;
 }) {
   const { t } = useI18n();
@@ -149,49 +158,100 @@ export function AutomationsPage({
     <>
       <PageHead description={t("automations.description")} title={t("automations.title")} />
 
-      {visible.length === 0 ? (
-        <Card>
-          <EmptyState
-            action={
-              <Button onClick={() => onNavigate("system")} variant="primary">
-                {t("automations.fixSetup")}
-              </Button>
-            }
-            icon={WorkflowIcon}
-            message={t("automations.noneText")}
-            title={t("automations.noneTitle")}
-          />
-        </Card>
-      ) : (
-        <Card>
-          <Rows>
-            {visible.map((entry) => {
-              const module = moduleForCommand(modules, entry.action.commandName);
-              const running = runningCommand === entry.action.commandName;
-              return (
-                <Row
-                  icon={entry.icon}
-                  key={entry.action.commandName}
-                  meta={t(entry.purposeKey)}
-                  onOpen={() => setOpenKey(entry.action.commandName)}
-                  openLabel={`${t(entry.nameKey)} — ${t("automations.open")}`}
-                  status={
-                    running
-                      ? { tone: "running", label: t("automations.running") }
-                      : module
-                        ? {
-                            tone: moduleTone(module.status),
-                            label: moduleStatusLabel(module.status, t),
-                          }
-                        : { tone: "idle", label: t("status.checking") }
-                  }
-                  title={t(entry.nameKey)}
-                />
-              );
-            })}
-          </Rows>
-        </Card>
-      )}
+      <div className="ip-stack">
+        <Section description={t("automations.availableText")} title={t("automations.available")}>
+          {visible.length === 0 ? (
+            <Card>
+              <EmptyState
+                action={
+                  <Button onClick={() => onNavigate("system")} variant="primary">
+                    {t("automations.fixSetup")}
+                  </Button>
+                }
+                icon={WorkflowIcon}
+                level={3}
+                message={t("automations.noneText")}
+                title={t("automations.noneTitle")}
+              />
+            </Card>
+          ) : (
+            <Card>
+              <Rows>
+                {visible.map((entry) => {
+                  const module = moduleForCommand(modules, entry.action.commandName);
+                  const running = runningCommand === entry.action.commandName;
+                  return (
+                    <Row
+                      icon={entry.icon}
+                      key={entry.action.commandName}
+                      meta={t(entry.purposeKey)}
+                      onOpen={() => setOpenKey(entry.action.commandName)}
+                      openLabel={`${t(entry.nameKey)} — ${t("automations.open")}`}
+                      status={
+                        running
+                          ? { tone: "running", label: t("automations.running") }
+                          : module
+                            ? {
+                                tone: moduleTone(module.status),
+                                label: moduleStatusLabel(module.status, t),
+                              }
+                            : { tone: "idle", label: t("status.checking") }
+                      }
+                      title={t(entry.nameKey)}
+                    />
+                  );
+                })}
+              </Rows>
+            </Card>
+          )}
+        </Section>
+
+        {/*
+          Opportunities are findings, not features. They live in their own
+          section, carry no Run button, and say which area they came from — so
+          "InnPilot suggested this" and "InnPilot can do this" never blur.
+        */}
+        <Section
+          description={t("automations.opportunitiesText")}
+          title={t("automations.opportunities")}
+        >
+          {opportunities.length === 0 ? (
+            <Card>
+              <EmptyState
+                action={
+                  <Button onClick={() => onNavigate("workAreas")} variant="secondary">
+                    {t("automations.openWorkAreas")}
+                  </Button>
+                }
+                icon={Lightbulb}
+                level={3}
+                message={t("automations.noOpportunitiesText")}
+                title={t("automations.noOpportunities")}
+              />
+            </Card>
+          ) : (
+            <div className="ip-wa-items">
+              {opportunities.map((listing) => (
+                <div key={`${listing.workAreaId}-${listing.opportunity.id}`}>
+                  <OpportunityCard
+                    opportunity={listing.opportunity}
+                    where={
+                      listing.planStale
+                        ? `${listing.workAreaName} · ${t("workArea.planNeedsUpdate")}`
+                        : listing.workAreaName
+                    }
+                  />
+                  <div className="ip-actions" style={{ marginTop: 8 }}>
+                    <Button onClick={() => onOpenWorkArea(listing.workAreaId)} variant="ghost">
+                      {t("automations.openArea", { name: listing.workAreaName })}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      </div>
     </>
   );
 }

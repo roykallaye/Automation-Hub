@@ -12,6 +12,7 @@
 import {
   AlertTriangle,
   ArrowRight,
+  Building2,
   Check,
   CircleHelp,
   History,
@@ -29,6 +30,8 @@ import {
   moduleStatusLabel,
   moduleTone,
 } from "../statusMapping";
+import { actionableAreas, ALERT_TITLE, ALERT_TONE } from "../workArea/vocabulary";
+import type { WorkAreaSummary } from "../workArea/types";
 import type { ActivityRecord, AppConfigStatus, AppPage, ModuleReadiness } from "../types";
 
 export function HomePage({
@@ -39,6 +42,8 @@ export function HomePage({
   modules,
   runningLabel,
   onNavigate,
+  onOpenWorkArea,
+  workAreas,
 }: {
   activityHistory: ActivityRecord[];
   configStatus: AppConfigStatus | null;
@@ -47,10 +52,15 @@ export function HomePage({
   modules: ModuleReadiness[];
   runningLabel: string | null;
   onNavigate: (page: AppPage) => void;
+  onOpenWorkArea: (workAreaId: string) => void;
+  workAreas: WorkAreaSummary[];
 }) {
   const { language, t } = useI18n();
   const attention = attentionModules(modules);
   const recent = [...activityHistory].reverse().slice(0, 3);
+  // Only areas with something the manager could do right now. Home is not a
+  // Work Area dashboard.
+  const areaAlerts = actionableAreas(workAreas);
 
   const headline = resolveHeadline({
     attentionCount: attention.length,
@@ -102,8 +112,37 @@ export function HomePage({
           </Section>
         ) : null}
 
+        {areaAlerts.length > 0 ? (
+          <Section title={t("home.workAreasSection")}>
+            <Card>
+              <Rows>
+                {areaAlerts.map((alert) => (
+                  <Row
+                    icon={Building2}
+                    key={alert.area.id}
+                    meta={
+                      alert.kind === "questions"
+                        ? t("workArea.questionsRemaining", {
+                            count: alert.area.openBlockingQuestions,
+                          })
+                        : t(ALERT_TITLE[alert.kind])
+                    }
+                    onOpen={() => onOpenWorkArea(alert.area.id)}
+                    openLabel={`${alert.area.name} — ${t("workArea.open")}`}
+                    status={{ tone: ALERT_TONE[alert.kind], label: t(ALERT_TITLE[alert.kind]) }}
+                    title={alert.area.name}
+                  />
+                ))}
+              </Rows>
+            </Card>
+          </Section>
+        ) : null}
+
         <div className="ip-actions">
-          <Button icon={Workflow} onClick={() => onNavigate("automations")} variant="primary">
+          <Button icon={Building2} onClick={() => onNavigate("workAreas")} variant="primary">
+            {t("home.openWorkAreas")}
+          </Button>
+          <Button icon={Workflow} onClick={() => onNavigate("automations")} variant="secondary">
             {t("home.openAutomations")}
           </Button>
           <Button icon={CircleHelp} onClick={() => onNavigate("guide")} variant="ghost">

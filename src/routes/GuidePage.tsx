@@ -14,14 +14,24 @@ import { ArrowUpDown, CloudCog, MonitorCheck } from "lucide-react";
 
 import { Card, PageHead, Section, Status } from "../components/ui";
 import { useI18n, type TranslationKey } from "../i18n";
+import { PlanningOnlyNote } from "../workArea/components";
 import type { LifeDeskConnectionStatus } from "../types";
 
+/*
+  Six steps, in the order the work actually happens.
+
+  Automation is step five, not step one. A manager who reads this should come
+  away understanding that InnPilot's job is to understand a part of the business
+  and make it work better — and that automating is one possible conclusion, not
+  the purpose.
+*/
 const STEPS: { titleKey: TranslationKey; textKey: TranslationKey }[] = [
   { titleKey: "guide.step1", textKey: "guide.step1Text" },
   { titleKey: "guide.step2", textKey: "guide.step2Text" },
   { titleKey: "guide.step3", textKey: "guide.step3Text" },
   { titleKey: "guide.step4", textKey: "guide.step4Text" },
   { titleKey: "guide.step5", textKey: "guide.step5Text" },
+  { titleKey: "guide.step6", textKey: "guide.step6Text" },
 ];
 
 export function GuidePage({ lifedesk }: { lifedesk: LifeDeskConnectionStatus | null }) {
@@ -46,6 +56,9 @@ export function GuidePage({ lifedesk }: { lifedesk: LifeDeskConnectionStatus | n
             ))}
           </ol>
         </Card>
+
+        {/* Stated once, where a manager is forming their mental model. */}
+        <PlanningOnlyNote />
 
         <Section title={t("pair.title")}>
           <Card>

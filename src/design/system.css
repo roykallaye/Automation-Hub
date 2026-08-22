@@ -1806,3 +1806,579 @@ button.ip-row:hover {
     opacity: 1;
   }
 }
+
+/* ============================================================== work areas
+
+  Work Area screens reuse the Phase G surfaces (card, row, status, disclosure)
+  and add only what those cannot express: a stage sequence, a settled-ness
+  marker on a fact, and a readable process flow. No new palette, no new radii,
+  no second visual system.
+*/
+
+.ip-wa-stages {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.ip-wa-stage {
+  align-items: flex-start;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 10px;
+  min-height: 62px;
+  padding: 12px 14px;
+  text-align: left;
+  transition: border-color var(--ip-motion) ease, background var(--ip-motion) ease;
+  width: 100%;
+}
+
+.ip-wa-stage:hover {
+  border-color: var(--ip-line-strong);
+}
+
+.ip-wa-stage.is-active {
+  background: var(--ip-surface-sunk);
+  border-color: var(--ip-accent);
+}
+
+/* A stage whose prerequisite is unmet: reachable, explainable, and visibly
+   quieter, so Automate never looks as available as Understand. */
+.ip-wa-stage.is-locked {
+  opacity: 0.62;
+}
+
+.ip-wa-stage__num {
+  align-items: center;
+  background: var(--ip-surface-sunk);
+  border-radius: 999px;
+  color: var(--ip-muted);
+  display: inline-flex;
+  flex: none;
+  font-size: 0.78rem;
+  font-weight: 650;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.ip-wa-stage.is-active .ip-wa-stage__num {
+  background: var(--ip-accent);
+  color: #fff;
+}
+
+.ip-wa-stage__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ip-wa-stage__title {
+  color: var(--ip-ink);
+  font-size: 0.925rem;
+  font-weight: 620;
+}
+
+.ip-wa-stage__hint {
+  color: var(--ip-muted);
+  font-size: 0.8rem;
+}
+
+.ip-wa-stage-state {
+  color: var(--ip-muted);
+  font-size: 0.885rem;
+  margin: 0;
+  max-width: 62ch;
+}
+
+/* ------------------------------------------------------------------ blocks */
+
+.ip-wa-block__head {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ip-wa-block__head h2 {
+  font-size: 1rem;
+  font-weight: 620;
+  margin: 0;
+}
+
+.ip-wa-block__head p {
+  color: var(--ip-muted);
+  font-size: 0.855rem;
+  margin: 4px 0 0;
+  max-width: 62ch;
+}
+
+.ip-wa-subhead {
+  color: var(--ip-ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+
+.ip-wa-empty-line {
+  color: var(--ip-faint);
+  font-size: 0.865rem;
+  margin: 0;
+}
+
+.ip-wa-plain {
+  color: var(--ip-ink-soft);
+  display: grid;
+  font-size: 0.885rem;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ip-wa-plain li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------- facts */
+
+.ip-wa-facts {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ip-wa-facts li {
+  align-items: baseline;
+  border-bottom: 1px solid var(--ip-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.ip-wa-facts li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ip-wa-facts__label {
+  color: var(--ip-ink);
+  font-size: 0.895rem;
+  font-weight: 550;
+}
+
+.ip-wa-facts__detail {
+  color: var(--ip-muted);
+  flex: 1 1 220px;
+  font-size: 0.83rem;
+  min-width: 0;
+}
+
+/* The settled-ness marker always sits at the end of the line, whether or not
+   the fact carries a detail, so the column reads down cleanly. */
+.ip-wa-facts li > .ip-status {
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------- workflows */
+
+.ip-wa-flow {
+  background: var(--ip-surface-sunk);
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  padding: 14px 16px;
+}
+
+/* A suggestion is drawn differently from the current state on purpose: the two
+   must never be mistaken for one another. */
+.ip-wa-flow--suggested {
+  border-style: dashed;
+}
+
+.ip-wa-flow__title {
+  color: var(--ip-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.ip-wa-flow ol {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ip-wa-flow li {
+  align-items: center;
+  color: var(--ip-ink-soft);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.885rem;
+  gap: 8px;
+  padding: 7px 0 7px 18px;
+  position: relative;
+}
+
+.ip-wa-flow li::before {
+  color: var(--ip-faint);
+  content: "↓";
+  font-size: 0.8rem;
+  left: 2px;
+  position: absolute;
+  top: 0;
+}
+
+.ip-wa-flow li:first-child::before {
+  content: "•";
+}
+
+.ip-wa-flow__text {
+  min-width: 0;
+}
+
+.ip-wa-compare {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.ip-wa-chip {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line);
+  border-radius: 999px;
+  color: var(--ip-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- items */
+
+.ip-wa-items {
+  display: grid;
+  gap: 14px;
+}
+
+.ip-wa-item {
+  border: 1px solid var(--ip-line);
+  border-radius: var(--ip-radius-sm);
+  padding: 14px 16px;
+}
+
+.ip-wa-item header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ip-wa-item h3 {
+  font-size: 0.955rem;
+  font-weight: 620;
+  margin: 0;
+  min-width: 0;
+}
+
+.ip-wa-item__where {
+  color: var(--ip-muted);
+  font-size: 0.8rem;
+  margin: -6px 0 10px;
+}
+
+.ip-wa-item__lead {
+  color: var(--ip-ink-soft);
+  font-size: 0.875rem;
+  margin: 0 0 10px;
+  max-width: 66ch;
+}
+
+.ip-wa-item__body {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ip-wa-item__body dt {
+  color: var(--ip-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ip-wa-item__body dd {
+  color: var(--ip-ink-soft);
+  font-size: 0.885rem;
+  margin: 2px 0 0;
+  max-width: 68ch;
+  overflow-wrap: anywhere;
+}
+
+.ip-wa-item__capability,
+.ip-wa-item__gap {
+  color: var(--ip-muted);
+  font-size: 0.82rem;
+  margin: 10px 0 0;
+  max-width: 66ch;
+}
+
+.ip-wa-attributes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 12px 0 0;
+}
+
+.ip-wa-attributes dt {
+  color: var(--ip-faint);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ip-wa-attributes dd {
+  color: var(--ip-ink-soft);
+  font-size: 0.845rem;
+  margin: 2px 0 0;
+}
+
+.ip-wa-prereq {
+  border-top: 1px solid var(--ip-line);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.ip-wa-prereq__head {
+  color: var(--ip-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ip-wa-prereq ul {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+
+.ip-wa-prereq li {
+  align-items: center;
+  color: var(--ip-ink-soft);
+  display: flex;
+  font-size: 0.865rem;
+  gap: 7px;
+}
+
+.ip-wa-keep-manual {
+  align-items: center;
+  color: var(--ip-muted);
+  display: inline-flex;
+  font-size: 0.79rem;
+  font-weight: 600;
+  gap: 5px;
+}
+
+/* -------------------------------------------------------- unclear / notes */
+
+.ip-wa-unclear {
+  background: var(--ip-surface-sunk);
+  border-radius: var(--ip-radius-sm);
+  display: grid;
+  gap: 5px;
+  padding: 11px 13px;
+}
+
+.ip-wa-unclear__head {
+  align-items: center;
+  color: var(--ip-attention);
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 650;
+  gap: 6px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ip-wa-unclear span:last-child {
+  color: var(--ip-ink-soft);
+  font-size: 0.865rem;
+}
+
+.ip-wa-boundary {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+/* ------------------------------------------------------------- choices */
+
+.ip-wa-choices {
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.ip-wa-choices--stack {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.ip-wa-choices legend {
+  color: var(--ip-ink);
+  font-size: 0.855rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  padding: 0;
+}
+
+.ip-wa-choice {
+  align-items: center;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line-strong);
+  border-radius: var(--ip-radius-sm);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.885rem;
+  gap: 9px;
+  min-height: 42px;
+  padding: 9px 13px;
+  transition: border-color var(--ip-motion) ease;
+}
+
+.ip-wa-choice:hover {
+  border-color: var(--ip-accent);
+}
+
+.ip-wa-choice:focus-within {
+  border-color: var(--ip-accent);
+  outline: 2px solid var(--ip-accent);
+  outline-offset: 1px;
+}
+
+.ip-wa-choice input {
+  accent-color: var(--ip-accent);
+  flex: none;
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.ip-wa-choice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ----------------------------------------------------------- questions */
+
+.ip-wa-question__progress {
+  color: var(--ip-faint);
+  font-size: 0.78rem;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.ip-wa-question__prompt {
+  font-size: 1.15rem;
+  font-weight: 620;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 46ch;
+}
+
+.ip-wa-question__why {
+  color: var(--ip-muted);
+  font-size: 0.855rem;
+  margin: 10px 0 0;
+  max-width: 60ch;
+}
+
+.ip-wa-question__input {
+  margin-top: 18px;
+  max-width: 46ch;
+}
+
+.ip-wa-prompt__title {
+  font-size: 1.05rem;
+  font-weight: 620;
+  margin: 0;
+}
+
+.ip-wa-prompt__text {
+  color: var(--ip-muted);
+  font-size: 0.885rem;
+  margin: 8px 0 0;
+  max-width: 62ch;
+}
+
+/* The Work Area forms use plain labels; match the Phase G field treatment. */
+.ip-field > label {
+  color: var(--ip-ink);
+  font-size: 0.855rem;
+  font-weight: 600;
+}
+
+.ip-field > input,
+.ip-field > textarea {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-line-strong);
+  border-radius: var(--ip-radius-sm);
+  color: var(--ip-ink);
+  font-family: inherit;
+  font-size: 0.885rem;
+  min-height: 38px;
+  padding: 8px 11px;
+  width: 100%;
+}
+
+.ip-field > textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.ip-field > input:focus,
+.ip-field > textarea:focus {
+  border-color: var(--ip-accent);
+}
+
+@media (max-width: 640px) {
+  .ip-wa-stages {
+    grid-template-columns: 1fr;
+  }
+
+  .ip-wa-item,
+  .ip-wa-flow {
+    padding: 12px;
+  }
+
+  .ip-wa-attributes {
+    gap: 12px;
+  }
+}
