@@ -228,6 +228,43 @@ not collide.
 Schema moved 1 → 2 for the receipt operation field and `linked_evidence`. Older
 records fail closed rather than being reinterpreted.
 
+## Increment 3 — MCP planning adapter (not yet implemented)
+
+The current surface is 10 tools and 10 scopes (`SCOPES` in `local_mcp.rs`).
+Planned additions are read tools plus narrow planning-write tools that call
+`WorkAreaPlanningService` with `CallerAuthority::AssistantPlanning`. There will
+be **no** MCP tool that answers a manager question, confirms an inference,
+approves a map, configures an automation or applies configuration.
+
+### Grant migration — verified, not assumed
+
+The concern was that adding `work_area.read` / `work_area.propose` to the
+`SCOPES` constant might silently escalate existing grants on upgrade. Reading
+the code, it does not, and the reason is structural:
+
+* `create_grant()` copies `SCOPES` into the grant **at creation time**, and the
+  grant is then serialized with its own `scopes` vector.
+* `load_grant_unlocked()` deserializes that stored vector verbatim. There is no
+  backfill, migration or union with the current constant.
+* `authorize()` checks `grant.scopes` — the stored vector — not the constant,
+  and returns `capability_denied` when the required scope is absent.
+
+So a pre-H-A grant keeps its ten stored scopes and is denied the new Work Area
+tools. Gaining them requires the manager to create a new connection locally.
+
+Two obligations follow for Increment 3, both of which must be tested rather
+than trusted:
+
+1. Do not add any code path that unions stored scopes with `SCOPES` on load,
+   "repairs" an old grant, or treats a missing scope as permitted for
+   backwards compatibility.
+2. Add an explicit adversarial test that constructs a grant carrying only the
+   pre-H-A scopes and asserts every new Work Area tool is refused.
+
+The user-visible consequence — an existing assistant connection cannot use Work
+Area planning until it is reconnected — is deliberate and should be surfaced in
+the Assistant UI as a reconnect prompt rather than worked around.
+
 ## Not built yet
 
 Persistence and revisions; application services and Tauri adapters; the MCP
