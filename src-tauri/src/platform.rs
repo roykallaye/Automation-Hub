@@ -21,6 +21,8 @@ pub(crate) struct InstallationPaths {
     pub(crate) discovery_root: PathBuf,
     pub(crate) proposal_root: PathBuf,
     pub(crate) proposal_approval_root: PathBuf,
+    /// Phase H-A Work Area planning records, one protected document per area.
+    pub(crate) work_area_root: PathBuf,
 }
 
 impl InstallationPaths {
@@ -61,6 +63,7 @@ impl InstallationPaths {
             discovery_root: app_data_dir.join("environment-discovery"),
             proposal_root: app_data_dir.join("setup-proposals"),
             proposal_approval_root: app_data_dir.join("proposal-approvals"),
+            work_area_root: app_data_dir.join("work-areas"),
         }
     }
 }

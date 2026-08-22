@@ -33,6 +33,7 @@
 // and UI that call it.
 #![allow(dead_code)]
 
+use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -157,7 +158,7 @@ fn conflicting_receipt() -> WorkspaceError {
 ///
 /// There is deliberately no provenance or truth field: the wire format gives a
 /// model nowhere to claim manager confirmation.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProposedFact {
     pub(crate) id: String,
@@ -167,7 +168,7 @@ pub(crate) struct ProposedFact {
     pub(crate) evidence_refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProposedStep {
     pub(crate) id: String,
@@ -182,7 +183,7 @@ pub(crate) struct ProposedStep {
 /// A workflow the assistant proposes. `phase` is accepted because describing a
 /// possible future flow is legitimate — but a future flow can never satisfy the
 /// automation gate, which is enforced separately.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProposedWorkflow {
     pub(crate) id: String,
@@ -209,7 +210,7 @@ pub(crate) struct ProposedWorkflow {
     pub(crate) evidence_refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProposedQuestion {
     pub(crate) question_id: String,
@@ -223,7 +224,7 @@ pub(crate) struct ProposedQuestion {
     pub(crate) blocking: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PrepareQuestionsRequest {
     pub(crate) work_area_id: String,
@@ -232,7 +233,7 @@ pub(crate) struct PrepareQuestionsRequest {
     pub(crate) questions: Vec<ProposedQuestion>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PrepareMapRequest {
     pub(crate) work_area_id: String,
@@ -260,7 +261,7 @@ pub(crate) struct PrepareMapRequest {
 
 /// A proposed opportunity. Note the absence of any execution, script, command,
 /// configuration or approval field — planning artifacts have no such vocabulary.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProposedOpportunity {
     pub(crate) id: String,
@@ -283,7 +284,7 @@ pub(crate) struct ProposedOpportunity {
     pub(crate) evidence_refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PreparePlanRequest {
     pub(crate) work_area_id: String,
@@ -295,7 +296,7 @@ pub(crate) struct PreparePlanRequest {
 }
 
 /// How confidently an opportunity maps onto something InnPilot already does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CapabilityMatch {
     NoMatch,

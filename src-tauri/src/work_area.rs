@@ -28,6 +28,9 @@
 // them follow. Until those arrive, parts of this surface have no caller.
 #![allow(dead_code)]
 
+// schemars is not a direct dependency; rmcp re-exports it, and these
+// planning types double as the MCP tool schemas.
+use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
 /* ------------------------------------------------------------------ bounds */
@@ -52,7 +55,7 @@ pub(crate) const MAX_PAIN_POINTS: usize = 32;
 /// Where a mapped fact came from. Kept separate from `TruthStatus` because
 /// "who said it" and "how sure are we" are different questions — conflating
 /// them is how an agent guess becomes an apparent manager confirmation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Provenance {
     /// The manager answered a question in InnPilot.
@@ -86,7 +89,7 @@ impl Provenance {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TruthStatus {
     /// Seen directly by InnPilot (structural discovery, configuration, status).
@@ -148,7 +151,7 @@ impl MappedFact {
 
 /// Semantic lifecycle for a Work Area. Deliberately not a UI page index: the
 /// backend decides what stage the area is in from stored facts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WorkAreaState {
     NotStarted,
@@ -166,7 +169,7 @@ pub(crate) enum WorkAreaState {
     Archived,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WorkAreaTemplate {
     Reception,
@@ -184,7 +187,7 @@ pub(crate) enum WorkAreaTemplate {
 
 /* ----------------------------------------------------------------- questions */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum QuestionCategory {
     Scope,
@@ -200,7 +203,7 @@ pub(crate) enum QuestionCategory {
     Baseline,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ResponseType {
     YesNo,
@@ -212,7 +215,7 @@ pub(crate) enum ResponseType {
     Frequency,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum QuestionStatus {
     Open,
@@ -247,7 +250,7 @@ impl Question {
 
 /* ----------------------------------------------------------------- workflow */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum StepMedium {
     Digital,
@@ -271,7 +274,7 @@ pub(crate) struct WorkflowStep {
 
 /// Whether a workflow describes today or a proposed tomorrow. Rule 7: the two
 /// never overwrite each other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WorkflowPhase {
     Current,
@@ -313,7 +316,7 @@ pub(crate) struct Workflow {
 }
 
 /// Why a workflow is not yet eligible to produce an automation candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WorkflowGap {
     MissingPurpose,
@@ -392,7 +395,7 @@ pub(crate) fn workflow_supports_automation_candidate(
 
 /* --------------------------------------------------------------- readiness */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SectionCoverage {
     Empty,
@@ -507,7 +510,7 @@ pub(crate) fn map_readiness(
 
 /// Rule 4: automation is one category among several. Rule 5: keeping work
 /// manual is a legitimate, expressible recommendation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ImprovementCategory {
     Digitize,
@@ -520,7 +523,7 @@ pub(crate) enum ImprovementCategory {
 }
 
 /// How ready a workflow is for automation, and if not, what blocks it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AutomationReadiness {
     NotReady,
@@ -536,7 +539,7 @@ pub(crate) enum AutomationReadiness {
 /// Whether acting on an opportunity is a process change, a configuration, or
 /// something InnPilot would have to grow. Keeps "write a custom script" from
 /// being the reflexive answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ProductGap {
     ProcessChangeOnly,
@@ -548,7 +551,7 @@ pub(crate) enum ProductGap {
     NeedsMoreInformation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Magnitude {
     Low,
@@ -558,7 +561,7 @@ pub(crate) enum Magnitude {
 
 /// Where a number came from. An agent estimate must never be rendered as a
 /// measured saving.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MeasurementSource {
     Measured,
