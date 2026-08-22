@@ -28,6 +28,7 @@ mod runner_service;
 mod setup;
 mod templates;
 mod work_area;
+mod work_area_planning;
 mod work_area_store;
 mod worker_runtime;
 mod workflows;

@@ -53,8 +53,8 @@ use crate::domain::{
 use crate::runner_identity::{protect_for_current_user, unprotect_for_current_user};
 use crate::work_area::{
     record_readiness, validate_and_normalize, AnswerValue, ManagerAnswer, MapReadiness,
-    OperationalMap, QuestionStatus, RecordDefect, WorkArea, WorkAreaRecord, WorkAreaState,
-    WorkAreaTemplate, MAX_WORK_AREAS, WORK_AREA_SCHEMA,
+    OperationKind, OperationalMap, QuestionStatus, RecordDefect, WorkArea, WorkAreaRecord,
+    WorkAreaState, WorkAreaTemplate, MAX_WORK_AREAS, WORK_AREA_SCHEMA,
 };
 
 const RECORD_MAGIC: &[u8] = b"INNPILOT-WORKAREA-V1\0";
@@ -327,6 +327,26 @@ impl WorkAreaService {
         self.repository.load(work_area_id)
     }
 
+    /// Guarded read-modify-write under the area lock.
+    ///
+    /// The record is saved only when the closure advanced the revision, so an
+    /// idempotent replay returns the stored outcome without rewriting the file.
+    pub(crate) fn mutate<T>(
+        &self,
+        work_area_id: &str,
+        operation: impl FnOnce(&mut WorkAreaRecord) -> WorkspaceResult<T>,
+    ) -> WorkspaceResult<T> {
+        self.repository.with_area_lock(work_area_id, || {
+            let mut record = self.repository.load(work_area_id)?;
+            let before = record.revision;
+            let result = operation(&mut record)?;
+            if record.revision != before {
+                self.repository.save(&record)?;
+            }
+            Ok(result)
+        })
+    }
+
     pub(crate) fn readiness(&self, work_area_id: &str) -> WorkspaceResult<MapReadiness> {
         Ok(record_readiness(&self.repository.load(work_area_id)?))
     }
@@ -368,6 +388,7 @@ impl WorkAreaService {
                 scope_included: Vec::new(),
                 scope_excluded: Vec::new(),
                 state: WorkAreaState::NotStarted,
+                linked_evidence: Vec::new(),
                 created_at: now.to_string(),
                 updated_at: now.to_string(),
                 archived_at: None,
@@ -492,7 +513,11 @@ impl WorkAreaService {
                 .iter()
                 .find(|receipt| receipt.request_id == request.request_id)
             {
-                if receipt.payload_digest == digest {
+                // A request id is scoped to one operation. Reuse across
+                // operations is a conflict, not a retry.
+                if receipt.operation == OperationKind::ManagerAnswer
+                    && receipt.payload_digest == digest
+                {
                     return Ok(record);
                 }
                 return Err(conflicting_receipt());
@@ -548,6 +573,7 @@ impl WorkAreaService {
 
             record.receipts.push(crate::work_area::OperationReceipt {
                 request_id: request.request_id.clone(),
+                operation: OperationKind::ManagerAnswer,
                 payload_digest: digest.clone(),
                 resulting_revision: record.revision,
                 recorded_at: now.to_string(),
@@ -589,6 +615,8 @@ fn next_state_after_answer(record: &WorkAreaRecord) -> WorkAreaState {
 
 fn answer_digest(request: &SubmitAnswerRequest) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(b"manager_answer");
+    hasher.update([0]);
     hasher.update(request.work_area_id.as_bytes());
     hasher.update([0]);
     hasher.update(request.question_id.as_bytes());

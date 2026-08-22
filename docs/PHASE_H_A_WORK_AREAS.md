@@ -130,6 +130,104 @@ Every collection is capped (`MAX_ROLES`, `MAX_WORKFLOWS`, `MAX_QUESTIONS`,
 `MAX_OPPORTUNITIES`, …), mirroring Phase E store conventions, so agent-prepared
 content cannot grow a record without limit.
 
+## Increment 2 — persistence (`c37ab85`)
+
+One DPAPI-protected document per Work Area at `work-areas/<id>/state.dpapi`,
+with a per-area lock. Not a company-wide file, and not a forest of per-entity
+files: a Work Area is both the unit the manager works on and the unit every
+invariant is scoped to, so making it the transactional unit means no operation
+spans two documents and there is nothing to two-phase commit. Listing scans the
+directory rather than keeping an index, which removes a second source of truth
+that could disagree with the records it describes.
+
+SQLite was considered and rejected. The runner ledger earns its database by
+being append-heavy and queried across time; these are small, independently
+locked documents read whole.
+
+**Loading revalidates rather than trusting bytes.** Domain invariants live in
+methods, but a stored document is just bytes. `validate_and_normalize()`
+re-checks schema, installation binding, collection bounds, duplicate ids,
+oversized text, evidence citations, and that every answer references a real
+question and matches its response type. It also normalizes provenance in place,
+so a fact written as confirmed but sourced from `agent_inference` loads back as
+`inferred` — the Rule 3 guarantee survives a round trip through disk, which is
+exactly where it would otherwise have been bypassed. A plan citing a map
+revision that does not exist yet is treated as corrupt, not merely stale.
+
+**Staleness is dependency-aware.** A manager answer or a scope change advances
+the map revision and makes a derived plan stale. A rename does not.
+
+**Idempotency is checked before CAS.** A retry carries the revision the caller
+last saw, which is by then stale, so checking CAS first would reject the very
+case idempotency exists to serve.
+
+## Increment 2b — planning-preparation service (`work_area_planning.rs`)
+
+The boundary the MCP adapter and the local UI both call. Neither touches
+persistence directly; `WorkAreaService::mutate` is the single guarded
+read-modify-write under the area lock.
+
+### Authority comes from the caller, never the payload
+
+`CallerAuthority` (`LocalManager` | `AssistantPlanning`) is a Rust argument
+supplied by the adapter. It is never deserialized, so a model cannot set it.
+
+More importantly, the agent-facing request types have **no provenance or truth
+fields at all**. `ProposedFact` carries a label, a detail and evidence
+references — there is nowhere to write `manager_answer` or `confirmed`. With
+`deny_unknown_fields`, attempting it is a parse error rather than something a
+check must remember to strip. The service then assigns
+`Provenance::AgentInference` / `TruthStatus::Inferred` itself.
+
+This is deliberately structural: rejecting a forged field relies on a check
+existing; removing the field means the forgery cannot be expressed. There is a
+test asserting the forged JSON fails to parse.
+
+Manager confirmation is a separate operation requiring `LocalManager`. An
+agent-prepared workflow is stored with `current_state_confirmed: false` — only
+a manager can assert that a flow is how work actually happens.
+
+### Gates are enforced, not advertised
+
+`prepare_improvement_plan` refuses outright while `record_readiness()` is not
+ready, returning structured blocker keys. An `Automate` opportunity must name a
+workflow, that workflow must exist, and it must pass
+`workflow_automation_gate()` — otherwise the whole plan is refused rather than
+accepted with a warning. A plan whose `source_map_revision` differs from the
+stored map is rejected as stale, so the assistant cannot reason over an old map.
+
+`keep_manual` is accepted with no automation anywhere in the plan, and nothing
+forces a mapped workflow to produce a candidate.
+
+### Evidence boundary
+
+A Work Area carries `linked_evidence`: the opaque Phase E references the
+manager associated with it. Planning may cite only those, enforced both at
+submission and again on load. This is what stops one area from reading
+another's discovery evidence.
+
+### Capability matching is conservative
+
+`INNPILOT_CAPABILITIES` mirrors the real workflow keys in `preflight.rs`. An
+opportunity naming a key outside that list is rejected. A key inside it
+classifies as `PossibleExistingCapability` — deliberately never "supported",
+because catalog presence is not proof of workflow compatibility. Nothing is
+configured or applied.
+
+### Idempotency binding
+
+Receipts key on (installation, work area, operation, request id) — installation
+and work area implicitly, since a receipt only lives inside that area's
+installation-bound record. `OperationKind` was added to the receipt in schema 2
+because otherwise one request id reused across two operations would look like a
+retry of whichever ran first. The digest also binds operation and work area.
+Tested: replay returns the stored outcome, reuse across operations conflicts,
+reuse with different content conflicts, and the same id in a different area does
+not collide.
+
+Schema moved 1 → 2 for the receipt operation field and `linked_evidence`. Older
+records fail closed rather than being reinterpreted.
+
 ## Not built yet
 
 Persistence and revisions; application services and Tauri adapters; the MCP

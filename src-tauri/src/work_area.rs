@@ -618,7 +618,7 @@ impl ImprovementOpportunity {
 
 /* ------------------------------------------------------------- aggregates */
 
-pub(crate) const WORK_AREA_SCHEMA: u32 = 1;
+pub(crate) const WORK_AREA_SCHEMA: u32 = 2;
 pub(crate) const MAX_WORK_AREAS: usize = 16;
 pub(crate) const MAX_ANSWER_CHARS: usize = 600;
 pub(crate) const MAX_RECEIPTS: usize = 32;
@@ -639,6 +639,11 @@ pub(crate) struct WorkArea {
     #[serde(default)]
     pub(crate) scope_excluded: Vec<String>,
     pub(crate) state: WorkAreaState,
+    /// Opaque Phase E evidence references the manager has associated with this
+    /// area. Planning may cite only these, which is what stops one area from
+    /// reading another's discovery evidence.
+    #[serde(default)]
+    pub(crate) linked_evidence: Vec<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) archived_at: Option<String>,
@@ -756,12 +761,31 @@ impl ImprovementPlan {
     }
 }
 
+/// Which operation a receipt belongs to.
+///
+/// Without this, one request id reused across two different operations would
+/// look like a retry of whichever ran first. The receipt key is
+/// (installation, work area, operation, request id) - installation and work
+/// area are implicit because a receipt only ever lives inside that area's
+/// installation-bound record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OperationKind {
+    ManagerAnswer,
+    ManagerConfirmation,
+    PrepareQuestions,
+    PrepareMap,
+    PreparePlan,
+}
+
 /// Idempotency receipt. A repeated request id with identical content returns
-/// the stored outcome; the same id with different content is a conflict.
+/// the stored outcome; the same id with different content, or the same id used
+/// for a different operation, is a conflict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct OperationReceipt {
     pub(crate) request_id: String,
+    pub(crate) operation: OperationKind,
     /// Digest of the authoritative request content.
     pub(crate) payload_digest: String,
     pub(crate) resulting_revision: u64,
@@ -809,6 +833,7 @@ pub(crate) enum RecordDefect {
     AnswerWithoutQuestion,
     AnswerTypeMismatch,
     PlanAheadOfMap,
+    UnknownEvidenceReference,
 }
 
 fn has_duplicates<'a>(ids: impl Iterator<Item = &'a String>) -> bool {
@@ -930,6 +955,43 @@ pub(crate) fn validate_and_normalize(
         // is not merely stale, it is incoherent.
         if plan.source_map_revision > record.map.revision {
             return Err(RecordDefect::PlanAheadOfMap);
+        }
+    }
+
+    // Every cited evidence reference must be one the manager linked to this
+    // area. A record naming evidence the area was never granted is rejected
+    // rather than quietly trusted.
+    {
+        let allowed: std::collections::BTreeSet<&String> =
+            record.area.linked_evidence.iter().collect();
+        let mut cited: Vec<&String> = Vec::new();
+        for facts in [
+            &record.map.roles,
+            &record.map.systems,
+            &record.map.information_sources,
+            &record.map.document_types,
+            &record.map.physical_information,
+            &record.map.dependencies,
+            &record.map.pain_points,
+        ] {
+            cited.extend(facts.iter().flat_map(|fact| fact.evidence_refs.iter()));
+        }
+        cited.extend(
+            record
+                .map
+                .workflows
+                .iter()
+                .flat_map(|workflow| workflow.evidence_refs.iter()),
+        );
+        if let Some(plan) = &record.plan {
+            cited.extend(
+                plan.opportunities
+                    .iter()
+                    .flat_map(|opportunity| opportunity.evidence_refs.iter()),
+            );
+        }
+        if cited.iter().any(|reference| !allowed.contains(*reference)) {
+            return Err(RecordDefect::UnknownEvidenceReference);
         }
     }
 
