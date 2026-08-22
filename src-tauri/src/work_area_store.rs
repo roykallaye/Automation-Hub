@@ -212,6 +212,23 @@ impl WorkAreaRepository {
     }
 
     fn save(&self, record: &WorkAreaRecord) -> WorkspaceResult<()> {
+        // Validate before writing, with exactly the check `load` will apply.
+        //
+        // Without this an operation can persist a record that fails its own
+        // validation on the next read, which leaves the area permanently
+        // unopenable — fail-closed, but bricked. A real assistant session found
+        // this by citing evidence the area had never been granted: the plan was
+        // accepted, written, and the Work Area could not be loaded again.
+        // Refusing the write is the only place that can be fixed once for every
+        // operation rather than remembered in each one.
+        let mut candidate = record.clone();
+        validate_and_normalize(&mut candidate, &self.installation_id).map_err(|defect| {
+            invalid_request(
+                "InnPilot could not store that change to the work area.",
+                vec![format!("record_defect:{defect:?}")],
+            )
+        })?;
+
         let clear = serde_json::to_vec(record).map_err(|error| store_error(error.to_string()))?;
         if clear.len() > MAX_RECORD_BYTES {
             return Err(invalid_request(
@@ -1279,8 +1296,14 @@ mod tests {
         assert_eq!(loaded.map.roles[0].status, TruthStatus::Inferred);
     }
 
+    /// Load revalidates rather than trusting the bytes.
+    ///
+    /// The corrupt record is written directly rather than through `save`,
+    /// because `save` now refuses it — which is the point of the companion test
+    /// below. This one covers the other direction: a record damaged by anything
+    /// other than this process must still be refused on the way in.
     #[test]
-    fn a_plan_ahead_of_its_map_is_treated_as_corrupt() {
+    fn a_plan_ahead_of_its_map_is_treated_as_corrupt_on_load() {
         let root = TempRoot::new("plan-ahead");
         let service = service(&root);
         let created = create(&service);
@@ -1288,10 +1311,38 @@ mod tests {
         seeded.map.revision = 2;
         seeded.plan = Some(plan(9));
         seeded.revision += 1;
-        service.repository.save(&seeded).unwrap();
+        write_record_bypassing_validation(&service, &seeded);
 
         let error = service.get(&seeded.area.id).unwrap_err();
         assert_eq!(error.code(), WorkspaceErrorCode::CorruptState);
+    }
+
+    /// The same record cannot be produced through the supported path.
+    #[test]
+    fn a_plan_ahead_of_its_map_is_refused_on_save() {
+        let root = TempRoot::new("plan-ahead-save");
+        let service = service(&root);
+        let created = create(&service);
+        let mut seeded = created.clone();
+        seeded.map.revision = 2;
+        seeded.plan = Some(plan(9));
+        seeded.revision += 1;
+
+        let error = service.repository.save(&seeded).unwrap_err();
+        assert_eq!(error.code(), WorkspaceErrorCode::InvalidRequest);
+    }
+
+    /// Write protected bytes the way `save` would, minus the validation, so a
+    /// test can produce a record the product itself would never write.
+    fn write_record_bypassing_validation(service: &WorkAreaService, record: &WorkAreaRecord) {
+        let clear = serde_json::to_vec(record).expect("serialize");
+        let protected = protect_for_current_user(&clear).expect("protect");
+        let mut bytes = RECORD_MAGIC.to_vec();
+        bytes.extend_from_slice(&protected);
+        let dir = service.repository.area_dir(&record.area.id);
+        fs::create_dir_all(&dir).expect("area dir");
+        crate::config::atomic_replace_configuration_bytes(&dir.join("state.dpapi"), &bytes)
+            .expect("write");
     }
 
     /* ---- limits ---- */

@@ -2535,6 +2535,243 @@ pub fn revoke_synthetic(root: PathBuf) -> Result<LocalAgentConnectionStatus, Str
 }
 
 #[cfg(debug_assertions)]
+fn synthetic_work_area_service(
+    root: PathBuf,
+) -> Result<crate::work_area_app::WorkAreaApplicationService, String> {
+    require_synthetic_root(&root)?;
+    let facade =
+        LocalMcpFacade::new(root, ADAPTER_VERSION.to_string()).map_err(|error| error.message)?;
+    let onboarding = facade
+        .setup
+        .onboarding()
+        .get()
+        .map_err(|error| error.message)?;
+    Ok(crate::work_area_app::WorkAreaApplicationService::new(
+        WorkAreaService::new(WorkAreaRepository::new(
+            facade.paths.work_area_root.clone(),
+            onboarding.installation_id().to_string(),
+        )),
+    ))
+}
+
+/// Create the synthetic Reception area the Codex walkthrough runs against.
+///
+/// Debug-only, and it does exactly what the desktop UI would: the same typed
+/// create and evidence operations, with local manager authority. It exists so a
+/// real MCP client can be driven against a realistic area without a hotel.
+#[cfg(debug_assertions)]
+pub fn seed_work_area_synthetic(root: PathBuf) -> Result<String, String> {
+    let app = synthetic_work_area_service(root)?;
+    let detail = app
+        .create(crate::work_area_app::CreateWorkAreaCommand {
+            name: "Reception".to_string(),
+            template: crate::work_area::WorkAreaTemplate::Reception,
+            description: Some("The front desk at the synthetic hotel.".to_string()),
+            responsibilities: vec![
+                "Guest inquiries".to_string(),
+                "Booking-related communication".to_string(),
+                "Contract handling".to_string(),
+                "Shift handover".to_string(),
+                "Daily reporting".to_string(),
+            ],
+        })
+        .map_err(|error| {
+            format!(
+                "{}: {}",
+                error.envelope().summary,
+                error.diagnostic().unwrap_or("no diagnostic")
+            )
+        })?;
+    let detail = app
+        .set_evidence(
+            &detail.context.id,
+            vec![
+                "evidence-contracts-a".to_string(),
+                "evidence-contracts-b".to_string(),
+                "evidence-scans".to_string(),
+            ],
+            detail.context.revision,
+        )
+        .map_err(|error| {
+            format!(
+                "{}: {}",
+                error.envelope().summary,
+                error.diagnostic().unwrap_or("no diagnostic")
+            )
+        })?;
+    serde_json::to_string(&detail.context).map_err(|error| error.to_string())
+}
+
+/// The local manager half of the walkthrough: read state, answer a question, or
+/// confirm what the assistant inferred. Debug-only; there is no MCP equivalent
+/// of any of these, which is the property the walkthrough is demonstrating.
+#[cfg(debug_assertions)]
+pub fn work_area_manager_synthetic(
+    root: PathBuf,
+    work_area_id: String,
+    action: String,
+    value: Option<String>,
+) -> Result<String, String> {
+    let app = synthetic_work_area_service(root)?;
+    match action.as_str() {
+        "status" => {
+            let detail = app.detail(&work_area_id).map_err(|error| {
+                format!(
+                    "{}: {}",
+                    error.envelope().summary,
+                    error.diagnostic().unwrap_or("no diagnostic")
+                )
+            })?;
+            serde_json::to_string(&detail).map_err(|error| error.to_string())
+        }
+        "answer" => {
+            let raw = value.ok_or_else(|| "answer needs questionId=value".to_string())?;
+            let (question_id, answer) = raw
+                .split_once('=')
+                .ok_or_else(|| "answer needs questionId=value".to_string())?;
+            let detail = app.detail(&work_area_id).map_err(|error| {
+                format!(
+                    "{}: {}",
+                    error.envelope().summary,
+                    error.diagnostic().unwrap_or("no diagnostic")
+                )
+            })?;
+            let question = detail
+                .context
+                .questions
+                .iter()
+                .find(|question| question.question_id == question_id)
+                .ok_or_else(|| "no such question".to_string())?;
+            let typed = match &question.response_type {
+                crate::work_area::ResponseType::YesNo => crate::work_area::AnswerValue::YesNo {
+                    value: matches!(answer, "yes" | "true" | "y"),
+                },
+                crate::work_area::ResponseType::SingleChoice { .. } => {
+                    crate::work_area::AnswerValue::Choice {
+                        value: answer.to_string(),
+                    }
+                }
+                crate::work_area::ResponseType::MultipleChoice { .. } => {
+                    crate::work_area::AnswerValue::Choices {
+                        values: answer.split('|').map(str::to_string).collect(),
+                    }
+                }
+                crate::work_area::ResponseType::Number => crate::work_area::AnswerValue::Number {
+                    value: answer.parse().map_err(|_| "not a number".to_string())?,
+                },
+                crate::work_area::ResponseType::Duration => {
+                    crate::work_area::AnswerValue::Duration {
+                        value: answer.to_string(),
+                    }
+                }
+                crate::work_area::ResponseType::Frequency => {
+                    crate::work_area::AnswerValue::Frequency {
+                        value: answer.to_string(),
+                    }
+                }
+                crate::work_area::ResponseType::ShortText => crate::work_area::AnswerValue::Text {
+                    value: answer.to_string(),
+                },
+            };
+            let updated = app
+                .submit_answer(crate::work_area_store::SubmitAnswerRequest {
+                    work_area_id: work_area_id.clone(),
+                    question_id: question_id.to_string(),
+                    value: typed,
+                    expected_revision: detail.context.revision,
+                    request_id: format!("dev-answer-{question_id}"),
+                })
+                .map_err(|error| {
+                    format!(
+                        "{}: {}",
+                        error.envelope().summary,
+                        error.diagnostic().unwrap_or("no diagnostic")
+                    )
+                })?;
+            serde_json::to_string(&updated.context).map_err(|error| error.to_string())
+        }
+        "confirm-all" => {
+            // Exactly what a manager clicking through the map would produce.
+            loop {
+                let detail = app.detail(&work_area_id).map_err(|error| {
+                    format!(
+                        "{}: {}",
+                        error.envelope().summary,
+                        error.diagnostic().unwrap_or("no diagnostic")
+                    )
+                })?;
+                let pending: Option<String> = detail
+                    .context
+                    .map
+                    .roles
+                    .iter()
+                    .chain(detail.context.map.systems.iter())
+                    .chain(detail.context.map.information_sources.iter())
+                    .find(|fact| fact.status == crate::work_area::TruthStatus::Inferred)
+                    .map(|fact| fact.id.clone())
+                    .or_else(|| {
+                        detail
+                            .context
+                            .map
+                            .workflows
+                            .iter()
+                            .find(|workflow| {
+                                workflow.phase == crate::work_area::WorkflowPhase::Current
+                                    && !workflow.current_state_confirmed
+                            })
+                            .map(|workflow| workflow.id.clone())
+                    });
+                let Some(target) = pending else { break };
+                app.confirm(&work_area_id, &target, detail.context.revision)
+                    .map_err(|error| {
+                        format!(
+                            "{}: {}",
+                            error.envelope().summary,
+                            error.diagnostic().unwrap_or("no diagnostic")
+                        )
+                    })?;
+            }
+            let detail = app.detail(&work_area_id).map_err(|error| {
+                format!(
+                    "{}: {}",
+                    error.envelope().summary,
+                    error.diagnostic().unwrap_or("no diagnostic")
+                )
+            })?;
+            serde_json::to_string(&detail.context).map_err(|error| error.to_string())
+        }
+        other => Err(format!("unknown manager action {other}")),
+    }
+}
+
+/// Rewrite the stored grant to the ten scopes a pre-H-A connection carried.
+///
+/// This is how the walkthrough reproduces a real upgraded installation: the
+/// grant is valid and in use, and simply predates Work Areas.
+#[cfg(debug_assertions)]
+pub fn downgrade_grant_synthetic(root: PathBuf) -> Result<String, String> {
+    require_synthetic_root(&root)?;
+    let facade =
+        LocalMcpFacade::new(root, ADAPTER_VERSION.to_string()).map_err(|error| error.message)?;
+    let grant = facade
+        .active_grant()
+        .map_err(|error| error.message)?
+        .ok_or_else(|| "no active grant".to_string())?;
+    let mut downgraded = facade
+        .load_grant(&grant.profile_id)
+        .map_err(|error| error.message)?;
+    downgraded.scopes = SCOPES
+        .iter()
+        .filter(|scope| !["work_area.read", "work_area.propose"].contains(scope))
+        .map(|scope| (*scope).to_string())
+        .collect();
+    facade
+        .save_grant_unlocked(&downgraded)
+        .map_err(|error| error.message)?;
+    serde_json::to_string(&downgraded.scopes).map_err(|error| error.to_string())
+}
+
+#[cfg(debug_assertions)]
 pub fn validate_synthetic(
     root: PathBuf,
     proposal_id: String,

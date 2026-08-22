@@ -191,9 +191,11 @@ impl WorkspaceError {
         self.envelope
     }
 
-    // Read back only by this module's redaction tests; the diagnostic is
-    // deliberately withheld from the serialized envelope.
-    #[cfg(test)]
+    // The diagnostic is deliberately withheld from the serialized envelope and
+    // from release builds entirely. Debug builds may read it so the synthetic
+    // dev commands can say *why* a record was refused; a release binary has no
+    // way to reach it at all.
+    #[cfg(any(test, debug_assertions))]
     pub(crate) fn diagnostic(&self) -> Option<&str> {
         self.diagnostic.as_deref()
     }

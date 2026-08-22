@@ -1912,6 +1912,74 @@ mod tests {
         );
     }
 
+    /* ------------------------- found by the real Codex session */
+
+    /// A live `codex-cli` session broke a Work Area by citing evidence in an
+    /// improvement plan that the area had never been granted. The plan was
+    /// accepted and written, and the area could not be loaded afterwards.
+    ///
+    /// Two things were wrong: the plan path did not apply the evidence rule the
+    /// map path already applied, and `save` would write a record that `load`
+    /// would then refuse. Both are covered here.
+    #[test]
+    fn a_plan_may_not_cite_evidence_the_area_was_never_granted() {
+        let root = PilotRoot::new("plan-evidence");
+        let (app, id) = reception_ready(&root);
+        let detail = detail_of(&app, &id);
+
+        let mut plan = plan_request(
+            &id,
+            detail.context.revision,
+            detail.context.map.map_revision,
+            "req-plan-foreign",
+        );
+        plan.opportunities[0].evidence_refs = vec!["evidence-from-somewhere-else".to_string()];
+        let error = root
+            .planning()
+            .prepare_improvement_plan(CallerAuthority::AssistantPlanning, plan, &now(27))
+            .expect_err("foreign evidence in a plan is refused");
+        assert_eq!(code(&error), WorkspaceErrorCode::InvalidRequest);
+
+        // And the area is still readable, which is the part that actually broke.
+        let after = detail_of(&app, &id);
+        assert_eq!(after.context.id, id);
+        assert!(after.plan.is_none(), "the rejected plan was never stored");
+    }
+
+    /// The general invariant, independent of any one operation: whatever is
+    /// written must be readable back. Enforced in `save`, so an operation that
+    /// forgets a rule fails loudly at the write instead of quietly bricking the
+    /// area at the next read.
+    #[test]
+    fn a_record_that_could_not_be_read_back_is_never_written() {
+        let root = PilotRoot::new("save-validates");
+        let (app, id) = reception_ready(&root);
+        let service = root.service();
+
+        let error = service
+            .mutate(&id, |record| {
+                // Exactly the shape the Codex session produced: a citation to
+                // evidence this area does not have.
+                record.map.roles[0]
+                    .evidence_refs
+                    .push("evidence-never-granted".to_string());
+                record.revision += 1;
+                Ok(())
+            })
+            .expect_err("an unreadable record is refused at the write");
+        assert_eq!(code(&error), WorkspaceErrorCode::InvalidRequest);
+
+        // The area survives, at its previous revision.
+        let after = detail_of(&app, &id);
+        assert!(after
+            .context
+            .map
+            .roles
+            .iter()
+            .all(|fact| !fact.id.is_empty()));
+        assert_eq!(service.get(&id).expect("still readable").area.id, id);
+    }
+
     /* ------------------------------------------- unused-import anchors */
 
     #[test]

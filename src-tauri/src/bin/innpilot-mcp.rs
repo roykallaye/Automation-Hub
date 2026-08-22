@@ -92,6 +92,45 @@ async fn main() -> ExitCode {
             synthetic_json_command(args, innpilot_lib::local_mcp::revoke_discovery_synthetic)
         }
         #[cfg(debug_assertions)]
+        Some("--dev-seed-work-area-synthetic") => {
+            synthetic_json_command(args, innpilot_lib::local_mcp::seed_work_area_synthetic)
+        }
+        #[cfg(debug_assertions)]
+        Some("--dev-downgrade-grant-synthetic") => {
+            synthetic_json_command(args, innpilot_lib::local_mcp::downgrade_grant_synthetic)
+        }
+        #[cfg(debug_assertions)]
+        Some("--dev-work-area-manager-synthetic") => {
+            let Some(root) = args.next() else {
+                eprintln!("Synthetic manager action requires a marked test root.");
+                return ExitCode::from(2);
+            };
+            let Some(work_area_id) = args.next() else {
+                eprintln!("Synthetic manager action requires a work area id.");
+                return ExitCode::from(2);
+            };
+            let Some(action) = args.next() else {
+                eprintln!("Synthetic manager action requires an action.");
+                return ExitCode::from(2);
+            };
+            let value = args.next();
+            match innpilot_lib::local_mcp::work_area_manager_synthetic(
+                PathBuf::from(root),
+                work_area_id,
+                action,
+                value,
+            ) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        #[cfg(debug_assertions)]
         Some("--dev-validate-synthetic") => {
             let Some(root) = args.next() else {
                 eprintln!("Synthetic validation requires a marked test root.");

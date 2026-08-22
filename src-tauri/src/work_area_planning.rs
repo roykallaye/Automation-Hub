@@ -715,6 +715,24 @@ impl WorkAreaPlanningService {
                 return Err(stale_revision(record.revision));
             }
 
+            // Same rule as the map: an opportunity may only cite evidence the
+            // manager linked to this area. Without it an assistant can point a
+            // recommendation at another area's findings, and the stored record
+            // stops satisfying its own invariants.
+            let allowed: std::collections::BTreeSet<&String> =
+                record.area.linked_evidence.iter().collect();
+            if let Some(unknown) = request
+                .opportunities
+                .iter()
+                .flat_map(|opportunity| opportunity.evidence_refs.iter())
+                .find(|reference| !allowed.contains(*reference))
+            {
+                return Err(invalid_request(
+                    "That plan cites evidence this work area does not have access to.",
+                    vec![format!("evidence:{unknown}")],
+                ));
+            }
+
             let open_blockers = readiness.open_blocking_questions;
             let mut opportunities = Vec::new();
             for proposed in &request.opportunities {
