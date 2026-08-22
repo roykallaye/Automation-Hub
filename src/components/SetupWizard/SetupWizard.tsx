@@ -28,6 +28,7 @@ import type {
   HubConfig,
   ExistingFolderRole,
   FolderInspection,
+  ManagedAutomationInstallResult,
   PreflightReport,
   PreflightItem,
   SaveSetupResult,
@@ -683,6 +684,30 @@ export function SetupWizard({
           requestId: createOnboardingRequestId("apply"),
         };
       }
+      /*
+        Put the automation scripts on disk before applying.
+
+        The configuration names five script paths under the InnPilot data
+        folder, and preflight checks that they exist. Nothing in this wizard
+        ever created them, so a manual setup would validate against files that
+        could not be there and fail at the last step with a message about
+        missing scripts — after the manager had done all the work. Installing
+        them here is idempotent, and a failure is reported rather than swallowed
+        because it would otherwise resurface as that same confusing error.
+      */
+      try {
+        await invoke<ManagedAutomationInstallResult>("install_managed_automation_scripts", {
+          confirmed: true,
+        });
+      } catch (error) {
+        setSetupResult({
+          kind: "error",
+          title: t("wizard.actionCouldNotFinish"),
+          message: normalizeOnboardingError(error).message,
+        });
+        return;
+      }
+
       const applied = await invoke<ApplyApprovedSetupResult>("apply_approved_setup", {
         request: {
           patch,

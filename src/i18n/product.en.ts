@@ -189,6 +189,8 @@ export const productEn = {
   "connect.create": "Create connection",
   "connect.copy": "Copy command",
   "connect.copied": "Copied",
+  "connect.checkNow": "Check now",
+  "connect.orManualLabel": "Not using an assistant?",
   "connect.check": "Check connection",
   "connect.helperUnavailable":
     "The connection helper is not available in this build, so the command cannot be prepared.",

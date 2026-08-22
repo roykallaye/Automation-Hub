@@ -2408,3 +2408,18 @@ button.ip-row:hover {
   margin: 0;
   max-width: 52ch;
 }
+
+/* The manual escape on the connect stage: present, findable, and visibly the
+   second choice rather than the way forward. */
+.ip-stage-foot--alt {
+  align-items: center;
+  border-top: 1px solid var(--ip-line);
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.ip-stage-foot__label {
+  color: var(--ip-muted);
+  font-size: 0.85rem;
+}

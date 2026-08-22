@@ -183,6 +183,8 @@ export const productIt = {
   "connect.create": "Crea collegamento",
   "connect.copy": "Copia comando",
   "connect.copied": "Copiato",
+  "connect.checkNow": "Controlla ora",
+  "connect.orManualLabel": "Non usi un assistente?",
   "connect.check": "Verifica collegamento",
   "connect.helperUnavailable":
     "Il componente di collegamento non è disponibile in questa versione, quindi il comando non può essere preparato.",

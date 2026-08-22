@@ -238,9 +238,20 @@ export function ConnectAssistantStage({
                 </div>
               ) : null}
 
+              {/*
+                Checking is the action that moves this stage forward, so once
+                access exists it is the primary control. Previously the only
+                emphasised button on the screen was the manual escape, which
+                read as "this is the way on" — the opposite of the intent.
+              */}
               <div className="ip-actions">
-                <Button busy={busy} icon={RefreshCw} onClick={onCheck} variant="secondary">
-                  {t("connect.check")}
+                <Button
+                  busy={busy}
+                  icon={RefreshCw}
+                  onClick={onCheck}
+                  variant={accessReady ? "primary" : "secondary"}
+                >
+                  {accessReady ? t("connect.checkNow") : t("connect.check")}
                 </Button>
               </div>
 
@@ -252,8 +263,13 @@ export function ConnectAssistantStage({
         </ol>
       </Card>
 
-      {/* Without this the screen is a dead end for anyone not using Codex. */}
-      <div className="ip-stage-foot">
+      {/*
+        The manual escape. Deliberately quiet and labelled as the fallback: it
+        is a real path for anyone not using an assistant, but it is the second
+        option, and letting the assistant do the work is the first.
+      */}
+      <div className="ip-stage-foot ip-stage-foot--alt">
+        <span className="ip-stage-foot__label">{t("connect.orManualLabel")}</span>
         <Button onClick={onManual} variant="ghost">
           {t("connectIntro.secondary")}
         </Button>
